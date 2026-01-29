@@ -1,6 +1,6 @@
 import { PortfolioSummary, Portfolio } from '@/types/portfolio';
 import { formatCurrency, formatProfitLoss, formatPercentage } from '@/lib/formatters';
-import { TrendingUp, TrendingDown, Wallet, PiggyBank, Target } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Landmark, Target } from 'lucide-react';
 
 interface StatsCardsProps {
   summary: PortfolioSummary;
@@ -8,17 +8,23 @@ interface StatsCardsProps {
 }
 
 export function StatsCards({ summary, portfolio }: StatsCardsProps) {
-  // Calcola P/L rispetto al patrimonio iniziale
-  const initialValue = portfolio?.initial_value;
-  const hasInitialValue = initialValue && initialValue > 0;
+  const initialValue = portfolio?.initial_value || 0;
+  const deposits = portfolio?.deposits || 0;
+  const averageBalance = portfolio?.average_balance || 0;
+  const initialPlusDeposits = initialValue + deposits;
   
-  const absolutePL = hasInitialValue 
-    ? summary.totalValue - initialValue 
-    : summary.totalProfitLoss;
+  const hasInitialData = initialValue > 0;
+  const hasAverageBalance = averageBalance > 0;
   
-  const percentPL = hasInitialValue 
-    ? ((summary.totalValue - initialValue) / initialValue) * 100 
-    : summary.totalProfitLossPct;
+  // Rendimento = Patrimonio Totale - (Patrimonio Iniziale + Versamenti)
+  const absolutePL = hasInitialData 
+    ? summary.totalValue - initialPlusDeposits 
+    : 0;
+  
+  // Rendimento % = [(Patrimonio Totale - (Patrimonio Iniziale + Versamenti)] / Giacenza Media
+  const percentPL = hasAverageBalance 
+    ? (absolutePL / averageBalance) * 100 
+    : 0;
 
   const stats = [
     {
@@ -28,25 +34,26 @@ export function StatsCards({ summary, portfolio }: StatsCardsProps) {
       change: null,
     },
     {
-      label: 'Patrimonio Iniziale',
-      value: hasInitialValue ? formatCurrency(initialValue) : '—',
+      label: 'Patrimonio Iniziale + Versamenti',
+      value: hasInitialData ? formatCurrency(initialPlusDeposits) : '—',
       icon: Target,
       change: null,
-      dimmed: !hasInitialValue,
+      dimmed: !hasInitialData,
     },
     {
-      label: 'Liquidità',
-      value: formatCurrency(summary.cashValue),
-      icon: PiggyBank,
+      label: 'Giacenza Media',
+      value: hasAverageBalance ? formatCurrency(averageBalance) : '—',
+      icon: Landmark,
       change: null,
+      dimmed: !hasAverageBalance,
     },
     {
       label: 'Profitto/Perdita',
-      value: hasInitialValue ? formatProfitLoss(absolutePL) : '—',
+      value: hasInitialData ? formatProfitLoss(absolutePL) : '—',
       icon: absolutePL >= 0 ? TrendingUp : TrendingDown,
-      change: hasInitialValue ? formatPercentage(percentPL) : null,
+      change: hasAverageBalance ? formatPercentage(percentPL) : null,
       isProfit: absolutePL >= 0,
-      dimmed: !hasInitialValue,
+      dimmed: !hasInitialData,
     },
   ];
 

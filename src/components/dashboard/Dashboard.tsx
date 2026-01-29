@@ -95,11 +95,13 @@ export function Dashboard() {
           {/* File Upload & Initial Value */}
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-2">Patrimonio Iniziale</h3>
+              <h3 className="text-sm font-medium text-muted-foreground mb-2">Dati Patrimonio</h3>
               <InitialValueForm
                 initialValue={portfolio?.initial_value ?? null}
                 initialDate={portfolio?.initial_date ?? null}
-                onSave={(value, date) => updateInitialValue({ initialValue: value, initialDate: date })}
+                deposits={portfolio?.deposits ?? null}
+                averageBalance={portfolio?.average_balance ?? null}
+                onSave={(data) => updateInitialValue(data)}
                 isLoading={isUpdatingInitialValue}
               />
             </div>

@@ -26,7 +26,17 @@ export function usePortfolio() {
   });
 
   const updateInitialValueMutation = useMutation({
-    mutationFn: async ({ initialValue, initialDate }: { initialValue: number; initialDate: string }) => {
+    mutationFn: async ({ 
+      initialValue, 
+      initialDate, 
+      deposits, 
+      averageBalance 
+    }: { 
+      initialValue: number; 
+      initialDate: string; 
+      deposits: number; 
+      averageBalance: number;
+    }) => {
       if (!portfolioQuery.data?.id) throw new Error('Portfolio non trovato');
       
       const { error } = await supabase
@@ -34,6 +44,8 @@ export function usePortfolio() {
         .update({ 
           initial_value: initialValue,
           initial_date: initialDate,
+          deposits: deposits,
+          average_balance: averageBalance,
         })
         .eq('id', portfolioQuery.data.id);
       
@@ -41,7 +53,7 @@ export function usePortfolio() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      toast.success('Patrimonio iniziale salvato!');
+      toast.success('Dati salvati!');
     },
     onError: (error) => {
       toast.error('Errore nel salvataggio', {
