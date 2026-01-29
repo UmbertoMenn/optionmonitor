@@ -106,7 +106,7 @@ export function Derivatives() {
           </CardContent>
         </Card>
 
-        {/* Section 2: De-Risking Covered Call (Collapsible) */}
+        {/* Section 2: Protezioni - LONG PUT (Collapsible) */}
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -114,7 +114,7 @@ export function Derivatives() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Shield className="w-5 h-5 text-primary" />
-                    <CardTitle className="text-xl">De-Risking Covered Call</CardTitle>
+                    <CardTitle className="text-xl">Protezioni - LONG PUT</CardTitle>
                     <Badge variant="secondary" className="text-xs">0</Badge>
                   </div>
                   {deRiskingOpen ? (
@@ -128,7 +128,7 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="text-center py-6 text-muted-foreground">
-                  <p className="text-sm">Nessuna strategia De-Risking presente</p>
+                  <p className="text-sm">Nessuna protezione LONG PUT presente</p>
                 </div>
               </CardContent>
             </CollapsibleContent>
