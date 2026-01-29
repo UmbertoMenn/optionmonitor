@@ -16,8 +16,10 @@ export type Database = {
     Tables: {
       portfolios: {
         Row: {
+          average_balance: number | null
           cash_value: number | null
           created_at: string
+          deposits: number | null
           id: string
           initial_date: string | null
           initial_value: number | null
@@ -27,8 +29,10 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          average_balance?: number | null
           cash_value?: number | null
           created_at?: string
+          deposits?: number | null
           id?: string
           initial_date?: string | null
           initial_value?: number | null
@@ -38,8 +42,10 @@ export type Database = {
           user_id: string
         }
         Update: {
+          average_balance?: number | null
           cash_value?: number | null
           created_at?: string
+          deposits?: number | null
           id?: string
           initial_date?: string | null
           initial_value?: number | null
