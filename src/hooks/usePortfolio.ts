@@ -147,8 +147,11 @@ function calculateSummary(positions: Position[], cashValue: number): PortfolioSu
     const value = position.market_value || 0;
     const pl = position.profit_loss || 0;
     
-    totalValue += value;
-    totalProfitLoss += pl;
+    // Exclude derivatives from total portfolio value calculation
+    if (position.asset_type !== 'derivative') {
+      totalValue += value;
+      totalProfitLoss += pl;
+    }
     
     const existing = byAssetType.get(position.asset_type) || { value: 0, profitLoss: 0 };
     byAssetType.set(position.asset_type, {
