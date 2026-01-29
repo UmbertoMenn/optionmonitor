@@ -161,15 +161,18 @@ function calculateSummary(positions: Position[], cashValue: number): PortfolioSu
   let totalProfitLoss = 0;
   
   positions.forEach(position => {
+    // IMPORTANT: derivatives must NEVER be included in dashboard allocation/legend/total.
+    // They are managed separately in the Derivatives page.
+    if (position.asset_type === 'derivative') {
+      return;
+    }
+
     const value = position.market_value || 0;
     const pl = position.profit_loss || 0;
-    
-    // Exclude derivatives from total portfolio value calculation
-    if (position.asset_type !== 'derivative') {
-      totalValue += value;
-      totalProfitLoss += pl;
-    }
-    
+
+    totalValue += value;
+    totalProfitLoss += pl;
+
     const existing = byAssetType.get(position.asset_type) || { value: 0, profitLoss: 0 };
     byAssetType.set(position.asset_type, {
       value: existing.value + value,
