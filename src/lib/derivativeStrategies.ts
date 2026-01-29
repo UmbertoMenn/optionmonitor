@@ -134,16 +134,15 @@ export function categorizeDerivatives(
  * Maps common names, tickers, and variations to canonical identifiers
  */
 const COMPANY_ALIASES: Record<string, string[]> = {
-  // Format: 'canonical_key': ['all', 'possible', 'variations']
   'ALPHABET': ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
-  'AMAZON': ['AMZN', 'AMAZON', 'AMAZON.COM', 'AMAZON COM', 'AMAZON INC'],
+  'AMAZON': ['AMZN', 'AMAZON', 'AMAZON.COM', 'AMAZON COM', 'AMAZON INC', 'AMAZON.COM.INC'],
   'APPLE': ['AAPL', 'APPLE', 'APPLE INC'],
   'NVIDIA': ['NVDA', 'NVIDIA', 'NVIDIA CORP', 'NVIDIA CORPORATION'],
   'TESLA': ['TSLA', 'TESLA', 'TESLA INC', 'TESLA MOTORS'],
   'MICROSOFT': ['MSFT', 'MICROSOFT', 'MICROSOFT CORP', 'MICROSOFT CORPORATION'],
   'AMD': ['AMD', 'ADVANCED MICRO', 'ADVANCED MICRO DEVICES'],
   'PALANTIR': ['PLTR', 'PALANTIR', 'PALANTIR TECHNOLOGIES'],
-  'COREWEAVE': ['CRWV', 'COREWEAVE', 'CORE WEAVE'],
+  'COREWEAVE': ['CRWV', 'COREWEAVE', 'CORE WEAVE', 'CORWEAVE INC'],
   'UNITEDHEALTH': ['UNH', 'UNITEDHEALTH', 'UNITED HEALTH', 'UNITEDHEALTH GROUP'],
   'META': ['META', 'FB', 'FACEBOOK', 'META PLATFORMS'],
   'NETFLIX': ['NFLX', 'NETFLIX', 'NETFLIX INC'],
@@ -166,17 +165,42 @@ const COMPANY_ALIASES: Record<string, string[]> = {
   'SNOWFLAKE': ['SNOW', 'SNOWFLAKE', 'SNOWFLAKE INC'],
   'CROWDSTRIKE': ['CRWD', 'CROWDSTRIKE', 'CROWDSTRIKE HOLDINGS'],
   'SHOPIFY': ['SHOP', 'SHOPIFY', 'SHOPIFY INC'],
+  'PROGRESSIVE': ['PGR', 'PROGRESSIVE', 'PROGRESSIVE CORP', 'PROGRESSIVE OHIO'],
+  'ALLSTATE': ['ALL', 'ALLSTATE', 'ALLSTATE CORP'],
+  'CONSTELLATION': ['CEG', 'CONSTELLATION', 'CONSTELLATION ENERGY'],
+  'ALIBABA': ['BABA', 'ALIBABA', 'ALIBABA GROUP'],
+  'FIRST_REPUBLIC': ['FRC', 'FIRST REPUBLIC', 'FIRST REPUBLIC BANK'],
+  'LVMH': ['MC', 'LVMH'],
 };
+
+/**
+ * Normalizes text for matching - removes common prefixes and suffixes
+ */
+function normalizeForMatching(text: string): string {
+  return text
+    .toUpperCase()
+    .replace(/^AZ\./i, '')  // Remove "AZ." prefix common in Italian brokers
+    .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
+    .replace(/\s+/g, ' ')          // Normalize spaces
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA)\b/gi, '') // Remove common suffixes
+    .trim();
+}
 
 /**
  * Gets the canonical company key for any variation
  */
 function getCanonicalKey(text: string): string | null {
-  const upperText = text.toUpperCase().trim();
+  const normalized = normalizeForMatching(text);
   
   for (const [canonical, aliases] of Object.entries(COMPANY_ALIASES)) {
-    if (aliases.some(alias => upperText.includes(alias) || alias.includes(upperText))) {
-      return canonical;
+    for (const alias of aliases) {
+      const normalizedAlias = normalizeForMatching(alias);
+      // Check for exact match or if normalized text contains the alias
+      if (normalized === normalizedAlias || 
+          normalized.includes(normalizedAlias) || 
+          normalizedAlias.includes(normalized)) {
+        return canonical;
+      }
     }
   }
   
@@ -184,59 +208,22 @@ function getCanonicalKey(text: string): string | null {
 }
 
 /**
- * Normalizes text for fuzzy matching
- */
-function normalizeForMatching(text: string): string {
-  return text
-    .toUpperCase()
-    .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
-    .replace(/\s+/g, ' ')          // Normalize spaces
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK)\b/g, '') // Remove common suffixes
-    .trim();
-}
-
-/**
- * Calculates similarity between two strings (0-1)
- */
-function calculateSimilarity(str1: string, str2: string): number {
-  const s1 = normalizeForMatching(str1);
-  const s2 = normalizeForMatching(str2);
-  
-  if (s1 === s2) return 1;
-  if (s1.includes(s2) || s2.includes(s1)) return 0.9;
-  
-  // Check for word overlap
-  const words1 = new Set(s1.split(' ').filter(w => w.length > 1));
-  const words2 = new Set(s2.split(' ').filter(w => w.length > 1));
-  
-  let matches = 0;
-  for (const word of words1) {
-    if (words2.has(word)) matches++;
-  }
-  
-  const totalWords = Math.max(words1.size, words2.size);
-  return totalWords > 0 ? matches / totalWords : 0;
-}
-
-/**
  * Finds the underlying stock for an option using intelligent matching
+ * IMPORTANT: Only matches stocks, never ETFs
  */
 function findUnderlyingStock(
   underlying: string,
   stocks: Position[]
 ): Position | undefined {
-  const underlyingUpper = underlying.toUpperCase().trim();
+  // CRITICAL: Filter to only stocks, never match with ETFs
+  const stocksOnly = stocks.filter(s => s.asset_type === 'stock');
   
-  // First, try exact ticker match
-  const exactMatch = stocks.find(stock => 
-    stock.ticker?.toUpperCase() === underlyingUpper
-  );
-  if (exactMatch) return exactMatch;
+  const underlyingNormalized = normalizeForMatching(underlying);
   
-  // Second, try canonical company matching
-  const optionCanonical = getCanonicalKey(underlyingUpper);
+  // First, try canonical company matching (most reliable)
+  const optionCanonical = getCanonicalKey(underlying);
   if (optionCanonical) {
-    const canonicalMatch = stocks.find(stock => {
+    const canonicalMatch = stocksOnly.find(stock => {
       const stockCanonical = getCanonicalKey(stock.description) || 
                               getCanonicalKey(stock.ticker || '');
       return stockCanonical === optionCanonical;
@@ -244,28 +231,35 @@ function findUnderlyingStock(
     if (canonicalMatch) return canonicalMatch;
   }
   
-  // Third, try fuzzy matching on description
-  let bestMatch: Position | undefined;
-  let bestScore = 0;
+  // Second, try exact ticker match
+  const exactMatch = stocksOnly.find(stock => 
+    stock.ticker?.toUpperCase() === underlyingNormalized
+  );
+  if (exactMatch) return exactMatch;
   
-  for (const stock of stocks) {
-    // Check description similarity
-    const descScore = calculateSimilarity(underlyingUpper, stock.description);
+  // Third, try normalized description matching
+  for (const stock of stocksOnly) {
+    const stockNormalized = normalizeForMatching(stock.description);
     
-    // Check ticker similarity if available
-    const tickerScore = stock.ticker 
-      ? calculateSimilarity(underlyingUpper, stock.ticker) 
-      : 0;
+    // Check if key words match
+    if (underlyingNormalized === stockNormalized) return stock;
     
-    const score = Math.max(descScore, tickerScore);
+    // Check for significant word overlap
+    const underlyingWords = underlyingNormalized.split(' ').filter(w => w.length > 2);
+    const stockWords = stockNormalized.split(' ').filter(w => w.length > 2);
     
-    if (score > bestScore && score >= 0.5) {
-      bestScore = score;
-      bestMatch = stock;
+    // If the first significant word matches and they share multiple words, it's a match
+    if (underlyingWords.length > 0 && stockWords.length > 0) {
+      const firstWordMatch = underlyingWords[0] === stockWords[0];
+      const sharedWords = underlyingWords.filter(w => stockWords.includes(w)).length;
+      
+      if (firstWordMatch && sharedWords >= 1) {
+        return stock;
+      }
     }
   }
   
-  return bestMatch;
+  return undefined;
 }
 
 /**
