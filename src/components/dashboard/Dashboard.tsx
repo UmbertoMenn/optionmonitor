@@ -43,6 +43,12 @@ export function Dashboard() {
             </div>
             
             <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/derivatives">
+                  <TrendingUp className="w-4 h-4 mr-2" />
+                  Strategie Derivati
+                </Link>
+              </Button>
               {isAdmin && (
                 <Button variant="outline" size="sm" asChild>
                   <Link to="/admin">
