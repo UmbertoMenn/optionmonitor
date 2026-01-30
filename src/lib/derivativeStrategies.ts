@@ -10,6 +10,7 @@ export interface CoveredCallPosition {
 
 export interface LongPutPosition {
   option: Position;
+  underlying: Position | null;
   contracts: number;
 }
 
@@ -100,8 +101,12 @@ export function categorizeDerivatives(
   );
   
   for (const put of boughtPuts) {
+    // Try to find underlying stock for price reference
+    const underlyingStock = findUnderlyingStock(put, stockPositions);
+    
     longPuts.push({
       option: put,
+      underlying: underlyingStock || null,
       contracts: put.quantity
     });
     usedDerivatives.add(put.id);
