@@ -666,9 +666,6 @@ function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-            <Badge variant="destructive" className="text-xs shrink-0">
-              Naked Put
-            </Badge>
           </div>
           <div className="flex items-center gap-4 shrink-0">
             <span className="text-sm text-muted-foreground">
