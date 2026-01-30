@@ -406,14 +406,26 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
 
 function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
   const [isOpen, setIsOpen] = useState(false);
-  const { underlying, expiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts, totalProfitLoss } = ironCondor;
+  const { underlying, expiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = ironCondor;
   
-  const isProfitable = totalProfitLoss >= 0;
-  const expiryFormatted = expiryDate ? new Date(expiryDate).toLocaleDateString('it-IT', { 
-    day: '2-digit', 
-    month: 'short', 
-    year: '2-digit' 
-  }).toUpperCase() : '-';
+  // Format expiry as MMM/YY (e.g., JAN/26)
+  const formatExpiryShort = (date: string) => {
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const d = new Date(date);
+    const month = months[d.getMonth()];
+    const year = d.getFullYear().toString().slice(-2);
+    return `${month}/${year}`;
+  };
+  
+  const expiryFormatted = expiryDate ? formatExpiryShort(expiryDate) : '-';
+  
+  // Calculate Gain Potenziale = premi incassati - premi pagati
+  // Sold options (negative qty) = premium received (avg_cost is positive, so we take it as income)
+  // Bought options (positive qty) = premium paid (avg_cost is the cost)
+  const premiumReceived = ((soldPut.avg_cost || 0) + (soldCall.avg_cost || 0)) * contracts * 100;
+  const premiumPaid = ((boughtPut.avg_cost || 0) + (boughtCall.avg_cost || 0)) * contracts * 100;
+  const gainPotenziale = premiumReceived - premiumPaid;
+  const isPositiveGP = gainPotenziale >= 0;
   
   // Strikes summary
   const putSpread = `${boughtPut.strike_price}/${soldPut.strike_price}`;
@@ -434,7 +446,7 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
               IC
             </Badge>
             <span className="text-xs text-muted-foreground">
-              {expiryFormatted}
+              Scadenza: {expiryFormatted}
             </span>
           </div>
           <div className="flex items-center gap-4 shrink-0">
@@ -461,10 +473,17 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
             <span className="text-sm text-muted-foreground">
               {contracts} × 100
             </span>
-            <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
-              {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              <span className="font-semibold text-sm">{formatCurrency(totalProfitLoss, 'USD')}</span>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={`flex items-center gap-1 cursor-help ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+                  <span className="text-xs text-muted-foreground">GP:</span>
+                  <span className="font-semibold text-sm">{formatCurrency(gainPotenziale, 'USD')}</span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Gain Potenziale: premi incassati - premi pagati</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </CollapsibleTrigger>
@@ -481,8 +500,8 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
-                  <span className={`text-xs ${(soldPut.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    P/L: {formatCurrency(soldPut.profit_loss || 0, 'USD')}
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(soldPut.avg_cost || 0, 'USD')}
                   </span>
                 </div>
               </div>
@@ -493,8 +512,8 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
-                  <span className={`text-xs ${(boughtPut.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    P/L: {formatCurrency(boughtPut.profit_loss || 0, 'USD')}
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(boughtPut.avg_cost || 0, 'USD')}
                   </span>
                 </div>
               </div>
@@ -512,8 +531,8 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
-                  <span className={`text-xs ${(soldCall.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    P/L: {formatCurrency(soldCall.profit_loss || 0, 'USD')}
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(soldCall.avg_cost || 0, 'USD')}
                   </span>
                 </div>
               </div>
@@ -524,8 +543,8 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
                 </div>
                 <div className="flex justify-between mt-1">
                   <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
-                  <span className={`text-xs ${(boughtCall.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    P/L: {formatCurrency(boughtCall.profit_loss || 0, 'USD')}
+                  <span className="text-xs text-muted-foreground">
+                    PMC: {formatCurrency(boughtCall.avg_cost || 0, 'USD')}
                   </span>
                 </div>
               </div>
@@ -534,9 +553,9 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
           
           {/* Summary */}
           <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
-            <span className="text-muted-foreground">P/L Totale:</span>
-            <span className={`font-semibold ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(totalProfitLoss, 'USD')}
+            <span className="text-muted-foreground">Gain Potenziale:</span>
+            <span className={`font-semibold ${isPositiveGP ? 'text-green-500' : 'text-red-500'}`}>
+              {formatCurrency(gainPotenziale, 'USD')}
             </span>
           </div>
         </div>
