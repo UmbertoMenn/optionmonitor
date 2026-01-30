@@ -34,6 +34,7 @@ export interface IronCondorPosition {
 
 export interface NakedPutPosition {
   option: Position;
+  underlying: Position | null;
   contracts: number;
 }
 
@@ -176,8 +177,11 @@ export function categorizeDerivatives(
   );
   
   for (const put of soldPuts) {
+    const underlyingStock = findUnderlyingStock(put, stockPositions);
+    
     nakedPuts.push({
       option: put,
+      underlying: underlyingStock || null,
       contracts: Math.abs(put.quantity)
     });
     usedDerivatives.add(put.id);
