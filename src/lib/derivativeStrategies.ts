@@ -20,9 +20,22 @@ export interface StrategyPosition {
   description: string;
 }
 
+export interface IronCondorPosition {
+  underlying: string;
+  expiryDate: string;
+  soldPut: Position;      // Higher strike PUT (sold)
+  boughtPut: Position;    // Lower strike PUT (bought) - protection
+  soldCall: Position;     // Lower strike CALL (sold)
+  boughtCall: Position;   // Higher strike CALL (bought) - protection
+  contracts: number;
+  totalPremium: number;
+  totalProfitLoss: number;
+}
+
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
   longPuts: LongPutPosition[];
+  ironCondors: IronCondorPosition[];
   strategies: StrategyPosition[];
 }
 
@@ -41,6 +54,7 @@ export function categorizeDerivatives(
 ): DerivativeCategories {
   const coveredCalls: CoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
+  const ironCondors: IronCondorPosition[] = [];
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions
@@ -48,9 +62,38 @@ export function categorizeDerivatives(
     p.asset_type === 'stock' || p.asset_type === 'etf'
   );
   
+  // ============ STEP 1: Detect Iron Condors first ============
+  // Group derivatives by underlying + expiry
+  const groupedByUnderlyingExpiry = new Map<string, Position[]>();
+  
+  for (const d of derivatives) {
+    const underlying = normalizeForMatching(d.underlying || d.description);
+    const expiry = d.expiry_date || '';
+    const key = `${underlying}|${expiry}`;
+    
+    if (!groupedByUnderlyingExpiry.has(key)) {
+      groupedByUnderlyingExpiry.set(key, []);
+    }
+    groupedByUnderlyingExpiry.get(key)!.push(d);
+  }
+  
+  // For each group, try to find Iron Condor patterns
+  for (const [key, group] of groupedByUnderlyingExpiry.entries()) {
+    const detectedCondors = findIronCondors(group);
+    
+    for (const condor of detectedCondors) {
+      ironCondors.push(condor);
+      usedDerivatives.add(condor.soldPut.id);
+      usedDerivatives.add(condor.boughtPut.id);
+      usedDerivatives.add(condor.soldCall.id);
+      usedDerivatives.add(condor.boughtCall.id);
+    }
+  }
+  
+  // ============ STEP 2: Find Covered Calls ============
   // Find sold CALL options (negative quantity)
   const soldCalls = derivatives.filter(d => 
-    d.option_type === 'call' && d.quantity < 0
+    d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id)
   );
   
   // Match sold calls with underlying stocks
@@ -62,7 +105,6 @@ export function categorizeDerivatives(
     
     if (underlyingStock && underlyingStock.quantity > 0) {
       const contractsSold = Math.abs(call.quantity);
-      const sharesNeeded = contractsSold * 100;
       const sharesOwned = underlyingStock.quantity;
       
       // Calculate how many contracts are actually covered
@@ -95,9 +137,10 @@ export function categorizeDerivatives(
     }
   }
   
+  // ============ STEP 3: Find Long PUTs (protections) ============
   // Find bought PUT options (positive quantity) - these go to Long PUT section
   const boughtPuts = derivatives.filter(d => 
-    d.option_type === 'put' && d.quantity > 0
+    d.option_type === 'put' && d.quantity > 0 && !usedDerivatives.has(d.id)
   );
   
   for (const put of boughtPuts) {
@@ -112,7 +155,7 @@ export function categorizeDerivatives(
     usedDerivatives.add(put.id);
   }
   
-  // All remaining derivatives go to strategies
+  // ============ STEP 4: All remaining go to strategies ============
   const strategies: StrategyPosition[] = [];
   
   for (const derivative of derivatives) {
@@ -151,7 +194,102 @@ export function categorizeDerivatives(
     });
   }
   
-  return { coveredCalls, longPuts, strategies };
+  return { coveredCalls, longPuts, ironCondors, strategies };
+}
+
+/**
+ * Find Iron Condor patterns within a group of options (same underlying, same expiry)
+ * 
+ * Iron Condor = 4 legs:
+ * - 1 sold PUT (higher strike in the put spread)
+ * - 1 bought PUT (lower strike - protection)
+ * - 1 sold CALL (lower strike in the call spread)
+ * - 1 bought CALL (higher strike - protection)
+ * 
+ * Pattern: Bought PUT < Sold PUT < Sold CALL < Bought CALL
+ */
+function findIronCondors(group: Position[]): IronCondorPosition[] {
+  const condors: IronCondorPosition[] = [];
+  
+  // Separate by type and direction
+  const soldPuts = group.filter(p => p.option_type === 'put' && p.quantity < 0)
+    .sort((a, b) => (b.strike_price || 0) - (a.strike_price || 0)); // Higher strike first
+  const boughtPuts = group.filter(p => p.option_type === 'put' && p.quantity > 0)
+    .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0)); // Lower strike first
+  const soldCalls = group.filter(p => p.option_type === 'call' && p.quantity < 0)
+    .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0)); // Lower strike first
+  const boughtCalls = group.filter(p => p.option_type === 'call' && p.quantity > 0)
+    .sort((a, b) => (b.strike_price || 0) - (a.strike_price || 0)); // Higher strike first
+  
+  // Track used positions
+  const usedIds = new Set<string>();
+  
+  // Try to match Iron Condors
+  for (const soldPut of soldPuts) {
+    if (usedIds.has(soldPut.id)) continue;
+    
+    const soldPutStrike = soldPut.strike_price || 0;
+    const contracts = Math.abs(soldPut.quantity);
+    
+    // Find matching bought PUT (lower strike, same quantity)
+    const matchingBoughtPut = boughtPuts.find(bp => 
+      !usedIds.has(bp.id) &&
+      (bp.strike_price || 0) < soldPutStrike &&
+      bp.quantity === contracts
+    );
+    if (!matchingBoughtPut) continue;
+    
+    // Find matching sold CALL (strike above sold PUT, same quantity)
+    const matchingSoldCall = soldCalls.find(sc =>
+      !usedIds.has(sc.id) &&
+      (sc.strike_price || 0) > soldPutStrike &&
+      Math.abs(sc.quantity) === contracts
+    );
+    if (!matchingSoldCall) continue;
+    
+    const soldCallStrike = matchingSoldCall.strike_price || 0;
+    
+    // Find matching bought CALL (higher strike than sold call, same quantity)
+    const matchingBoughtCall = boughtCalls.find(bc =>
+      !usedIds.has(bc.id) &&
+      (bc.strike_price || 0) > soldCallStrike &&
+      bc.quantity === contracts
+    );
+    if (!matchingBoughtCall) continue;
+    
+    // We have a complete Iron Condor!
+    usedIds.add(soldPut.id);
+    usedIds.add(matchingBoughtPut.id);
+    usedIds.add(matchingSoldCall.id);
+    usedIds.add(matchingBoughtCall.id);
+    
+    // Calculate totals
+    const totalPremium = 
+      (soldPut.market_value || 0) + 
+      (matchingBoughtPut.market_value || 0) +
+      (matchingSoldCall.market_value || 0) +
+      (matchingBoughtCall.market_value || 0);
+    
+    const totalProfitLoss =
+      (soldPut.profit_loss || 0) +
+      (matchingBoughtPut.profit_loss || 0) +
+      (matchingSoldCall.profit_loss || 0) +
+      (matchingBoughtCall.profit_loss || 0);
+    
+    condors.push({
+      underlying: soldPut.underlying || soldPut.description,
+      expiryDate: soldPut.expiry_date || '',
+      soldPut,
+      boughtPut: matchingBoughtPut,
+      soldCall: matchingSoldCall,
+      boughtCall: matchingBoughtCall,
+      contracts,
+      totalPremium,
+      totalProfitLoss
+    });
+  }
+  
+  return condors;
 }
 
 /**

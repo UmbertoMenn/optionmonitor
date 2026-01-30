@@ -15,6 +15,7 @@ import {
   formatOptionDescription,
   CoveredCallPosition,
   LongPutPosition,
+  IronCondorPosition,
   StrategyPosition 
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
@@ -23,6 +24,7 @@ export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
+  const [ironCondorOpen, setIronCondorOpen] = useState(true);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -144,7 +146,47 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
-        {/* Section 3: Strategie */}
+        {/* Section 3: Iron Condor */}
+        <Collapsible open={ironCondorOpen} onOpenChange={setIronCondorOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-5 h-5 text-amber-500" />
+                    <CardTitle className="text-xl">Iron Condor</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.ironCondors.length}</Badge>
+                  </div>
+                  {ironCondorOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  Strategie a 4 gambe con rischio limitato
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.ironCondors.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessun Iron Condor presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {categories.ironCondors.map((ic, index) => (
+                      <IronCondorRow key={index} ironCondor={ic} />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
+        {/* Section 4: Strategie */}
         <Card className="border-border bg-card">
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
@@ -356,6 +398,147 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
               P/L: {formatPercentage(option.profit_loss_pct)}
             </div>
           )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const { underlying, expiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts, totalProfitLoss } = ironCondor;
+  
+  const isProfitable = totalProfitLoss >= 0;
+  const expiryFormatted = expiryDate ? new Date(expiryDate).toLocaleDateString('it-IT', { 
+    day: '2-digit', 
+    month: 'short', 
+    year: '2-digit' 
+  }).toUpperCase() : '-';
+  
+  // Strikes summary
+  const putSpread = `${boughtPut.strike_price}/${soldPut.strike_price}`;
+  const callSpread = `${soldCall.strike_price}/${boughtCall.strike_price}`;
+  
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <CollapsibleTrigger asChild>
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium truncate">{underlying}</span>
+            <Badge variant="outline" className="text-xs shrink-0 text-amber-500 border-amber-500/50">
+              IC
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {expiryFormatted}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-xs text-muted-foreground cursor-help">
+                  PUT {putSpread}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Put Spread: Buy ${boughtPut.strike_price} / Sell ${soldPut.strike_price}</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-xs text-muted-foreground cursor-help">
+                  CALL {callSpread}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Call Spread: Sell ${soldCall.strike_price} / Buy ${boughtCall.strike_price}</p>
+              </TooltipContent>
+            </Tooltip>
+            <span className="text-sm text-muted-foreground">
+              {contracts} × 100
+            </span>
+            <div className={`flex items-center gap-1 ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
+              {isProfitable ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              <span className="font-semibold text-sm">{formatCurrency(totalProfitLoss, 'USD')}</span>
+            </div>
+          </div>
+        </div>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
+          {/* Put Spread */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2 font-medium">PUT SPREAD (Bull Put)</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Venduta (V)</span>
+                  <Badge variant="outline" className="text-xs">Strike ${soldPut.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(soldPut.current_price || 0, 'USD')}</span>
+                  <span className={`text-xs ${(soldPut.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    P/L: {formatCurrency(soldPut.profit_loss || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Comprata (C)</span>
+                  <Badge variant="outline" className="text-xs">Strike ${boughtPut.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(boughtPut.current_price || 0, 'USD')}</span>
+                  <span className={`text-xs ${(boughtPut.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    P/L: {formatCurrency(boughtPut.profit_loss || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Call Spread */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2 font-medium">CALL SPREAD (Bear Call)</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Venduta (V)</span>
+                  <Badge variant="outline" className="text-xs">Strike ${soldCall.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(soldCall.current_price || 0, 'USD')}</span>
+                  <span className={`text-xs ${(soldCall.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    P/L: {formatCurrency(soldCall.profit_loss || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+              <div className="p-2 rounded bg-background/50 border border-border/30">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground text-xs">Comprata (C)</span>
+                  <Badge variant="outline" className="text-xs">Strike ${boughtCall.strike_price}</Badge>
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-xs">Prezzo: {formatCurrency(boughtCall.current_price || 0, 'USD')}</span>
+                  <span className={`text-xs ${(boughtCall.profit_loss || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    P/L: {formatCurrency(boughtCall.profit_loss || 0, 'USD')}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Summary */}
+          <div className="pt-2 border-t border-border/30 flex justify-between text-sm">
+            <span className="text-muted-foreground">P/L Totale:</span>
+            <span className={`font-semibold ${isProfitable ? 'text-green-500' : 'text-red-500'}`}>
+              {formatCurrency(totalProfitLoss, 'USD')}
+            </span>
+          </div>
         </div>
       </CollapsibleContent>
     </Collapsible>
