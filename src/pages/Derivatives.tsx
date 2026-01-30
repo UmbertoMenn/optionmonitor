@@ -21,6 +21,16 @@ import {
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
+// Format expiry as MMM/YY (e.g., DEC/27, FEB/26)
+function formatExpiryMMY(date: string | null | undefined): string {
+  if (!date) return '-';
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const d = new Date(date);
+  const month = months[d.getMonth()];
+  const year = d.getFullYear().toString().slice(-2);
+  return `${month}/${year}`;
+}
+
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, isLoading } = usePortfolio();
@@ -359,9 +369,7 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
-              <p className="font-medium">
-                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
-              </p>
+              <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
@@ -454,9 +462,7 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
-              <p className="font-medium">
-                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
-              </p>
+              <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
@@ -478,16 +484,7 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
   const [isOpen, setIsOpen] = useState(false);
   const { underlying, expiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = ironCondor;
   
-  // Format expiry as MMM/YY (e.g., JAN/26)
-  const formatExpiryShort = (date: string) => {
-    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-    const d = new Date(date);
-    const month = months[d.getMonth()];
-    const year = d.getFullYear().toString().slice(-2);
-    return `${month}/${year}`;
-  };
-  
-  const expiryFormatted = expiryDate ? formatExpiryShort(expiryDate) : '-';
+  const expiryFormatted = formatExpiryMMY(expiryDate);
   
   // Calculate Gain Potenziale = premi incassati - premi pagati
   // Sold options (negative qty) = premium received (avg_cost is positive, so we take it as income)
@@ -726,9 +723,7 @@ function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
-              <p className="font-medium">
-                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
-              </p>
+              <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
@@ -819,9 +814,7 @@ function LeapCallRow({ leapCall }: { leapCall: LeapCallPosition }) {
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Scadenza</p>
-              <p className="font-medium">
-                {option.expiry_date ? new Date(option.expiry_date).toLocaleDateString('it-IT') : '-'}
-              </p>
+              <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
             </div>
             <div>
               <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
