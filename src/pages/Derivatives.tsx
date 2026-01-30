@@ -269,15 +269,15 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
 
 function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
   const [isOpen, setIsOpen] = useState(false);
-  const { option, contracts } = longPut;
+  const { option, underlying, contracts } = longPut;
   
   // Calculate ITM/OTM status for PUT options
-  // ITM: strike > underlying price, OTM: strike <= underlying price
+  // PUT is ITM when strike > underlying price (you can sell at higher than market)
+  // PUT is OTM when strike <= underlying price
   const strikePrice = option.strike_price || 0;
-  // For Long PUTs we don't have the underlying in portfolio, so we use current_price as proxy
-  // or we could leave it as OTM if no price info available
-  const underlyingPrice = option.current_price ? strikePrice * 0.95 : strikePrice; // Approximate, will show based on strike
-  const isITM = strikePrice > underlyingPrice;
+  const underlyingPrice = underlying?.current_price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
+  const isITM = hasUnderlyingPrice && strikePrice > underlyingPrice;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -291,13 +291,25 @@ function LongPutRow({ longPut }: { longPut: LongPutPosition }) {
             )}
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
-              variant={isITM ? "destructive" : "default"} 
+              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
               className="text-xs shrink-0"
             >
-              {isITM ? 'ITM' : 'OTM'}
+              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help">
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <span className="text-sm text-muted-foreground">
               {contracts} × 100
             </span>
