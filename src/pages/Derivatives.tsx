@@ -653,7 +653,15 @@ function IronCondorRow({ ironCondor }: { ironCondor: IronCondorPosition }) {
 
 function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
   const [isOpen, setIsOpen] = useState(false);
-  const { option, contracts } = nakedPut;
+  const { option, underlying, contracts } = nakedPut;
+  
+  // Calculate ITM/OTM status for PUT options
+  // PUT is ITM when underlying price < strike price (you can sell at higher than market)
+  // PUT is OTM when underlying price > strike price
+  const strikePrice = option.strike_price || 0;
+  const underlyingPrice = underlying?.current_price || 0;
+  const hasUnderlyingPrice = underlyingPrice > 0;
+  const isITM = hasUnderlyingPrice && underlyingPrice < strikePrice;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -666,8 +674,26 @@ function NakedPutRow({ nakedPut }: { nakedPut: NakedPutPosition }) {
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <Badge 
+              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
+              className="text-xs shrink-0"
+            >
+              {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+            </Badge>
           </div>
           <div className="flex items-center gap-4 shrink-0">
+            {hasUnderlyingPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help">
+                    PS: {formatCurrency(underlyingPrice, 'USD')}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <span className="text-sm text-muted-foreground">
               {contracts} × 100
             </span>
