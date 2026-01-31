@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target, ChevronDown, ChevronRight } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, TrendingDown, Shield, Target, ChevronDown, ChevronRight, ShieldAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState } from 'react';
@@ -66,11 +66,6 @@ export function Derivatives() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" asChild>
-                <Link to="/">
-                  <ArrowLeft className="w-5 h-5" />
-                </Link>
-              </Button>
               <div className="p-2 rounded-lg bg-primary/10">
                 <TrendingUp className="w-6 h-6 text-primary" />
               </div>
@@ -83,6 +78,18 @@ export function Derivatives() {
             </div>
             
             <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Dashboard
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/risk-analyzer">
+                  <ShieldAlert className="w-4 h-4 mr-2" />
+                  Risk Analyzer
+                </Link>
+              </Button>
               {isAdmin && (
                 <Button variant="outline" size="sm" asChild>
                   <Link to="/admin">
