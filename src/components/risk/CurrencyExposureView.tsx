@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   Accordion, 
@@ -83,6 +84,12 @@ function CategoryBreakdown({
 }) {
   const categoryInstruments = instruments.filter(i => i.category === category);
   if (categoryInstruments.length === 0) return null;
+
+  // PERF: avoid rendering huge lists (can freeze the UI / blank screen)
+  const DEFAULT_LIMIT = 25;
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? categoryInstruments : categoryInstruments.slice(0, DEFAULT_LIMIT);
+  const hiddenCount = Math.max(0, categoryInstruments.length - visible.length);
   
   const config = CATEGORY_CONFIG[category];
   const Icon = config.icon;
@@ -101,9 +108,19 @@ function CategoryBreakdown({
       </AccordionTrigger>
       <AccordionContent className="pt-1 pb-2 px-2">
         <div className="space-y-1">
-          {categoryInstruments.map((instrument, idx) => (
+          {visible.map((instrument, idx) => (
             <InstrumentRow key={`${instrument.name}-${idx}`} instrument={instrument} />
           ))}
+
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(v => !v)}
+              className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-2"
+            >
+              {showAll ? 'Mostra meno' : `Mostra altri ${hiddenCount}...`}
+            </button>
+          )}
         </div>
       </AccordionContent>
     </AccordionItem>
@@ -128,6 +145,12 @@ export function CurrencyExposureView({
 
   const hasData = safeCurrencyExposure.length > 0 && Number.isFinite(grandTotal) && grandTotal > 0;
 
+  const nonEurTotal = useMemo(() => {
+    return safeCurrencyExposure
+      .filter((c) => c.currency !== 'EUR')
+      .reduce((sum, c) => sum + c.totalRisk, 0);
+  }, [safeCurrencyExposure]);
+
   return (
     <div className="space-y-6">
       {/* Total Exposure Card with Large Donut Chart */}
@@ -142,6 +165,11 @@ export function CurrencyExposureView({
               <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+            {hasData && (
+              <div className="text-sm text-muted-foreground mt-1">
+                Non-EUR totale: <span className="font-medium text-foreground">{formatEUR(nonEurTotal)}</span>
+              </div>
+            )}
             <div className="text-xs text-muted-foreground mt-1">
               Rischio aggregato per valuta
               {isLoadingETFData && (
