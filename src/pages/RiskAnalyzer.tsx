@@ -15,6 +15,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { formatEUR, formatNumber } from '@/lib/formatters';
 import { 
   Accordion, 
@@ -154,19 +155,80 @@ export function RiskAnalyzer() {
           </Card>
         ) : (
           <>
-            {/* Total Exposure Card */}
-            <Card className="border-primary/50 bg-primary/5">
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-1.5 rounded bg-primary/20">
-                    <ShieldAlert className="w-4 h-4 text-primary" />
+            {/* Total Exposure Card with Donut Chart */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Total Card */}
+              <Card className="border-primary/50 bg-primary/5">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="p-1.5 rounded bg-primary/20">
+                      <ShieldAlert className="w-4 h-4 text-primary" />
+                    </div>
+                    <span className="text-sm font-medium text-primary">Esposizione Totale</span>
                   </div>
-                  <span className="text-sm font-medium text-primary">Esposizione Totale</span>
-                </div>
-                <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
-                <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
-              </CardContent>
-            </Card>
+                  <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+                  <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
+                </CardContent>
+              </Card>
+
+              {/* Donut Chart */}
+              <Card className="border-border bg-card">
+                <CardContent className="pt-4 pb-2">
+                  <div className="flex items-center gap-4">
+                    <div className="w-32 h-32 flex-shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={riskCategories.filter(c => c.value > 0)}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={35}
+                            outerRadius={50}
+                            paddingAngle={2}
+                            dataKey="value"
+                          >
+                            {riskCategories.filter(c => c.value > 0).map((entry, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={entry.color.replace('bg-', '').replace('-500', '')}
+                                className={entry.color}
+                                style={{ 
+                                  fill: entry.color === 'bg-blue-500' ? '#3b82f6' :
+                                        entry.color === 'bg-orange-500' ? '#f97316' :
+                                        entry.color === 'bg-red-500' ? '#ef4444' :
+                                        entry.color === 'bg-amber-500' ? '#f59e0b' :
+                                        '#a855f7'
+                                }}
+                              />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex-1 space-y-1.5">
+                      {riskCategories.filter(c => c.value > 0).map((cat, index) => (
+                        <div key={index} className="flex items-center justify-between text-sm">
+                          <div className="flex items-center gap-2">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ 
+                                backgroundColor: cat.color === 'bg-blue-500' ? '#3b82f6' :
+                                                 cat.color === 'bg-orange-500' ? '#f97316' :
+                                                 cat.color === 'bg-red-500' ? '#ef4444' :
+                                                 cat.color === 'bg-amber-500' ? '#f59e0b' :
+                                                 '#a855f7'
+                              }}
+                            />
+                            <span className="text-muted-foreground">{cat.label}</span>
+                          </div>
+                          <span className="font-medium">{cat.percentage.toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
             {/* Horizontal Bar Chart */}
             <Card className="border-border bg-card">
