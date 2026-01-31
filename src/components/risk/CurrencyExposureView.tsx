@@ -29,7 +29,7 @@ const CATEGORY_CONFIG = {
   strategies: { label: 'Strategie', icon: Layers, colorClass: 'text-purple-500' },
 };
 
-function InstrumentRow({ instrument, parentCurrency }: { instrument: InstrumentDetail; parentCurrency: string }) {
+function InstrumentRow({ instrument }: { instrument: InstrumentDetail }) {
   const config = CATEGORY_CONFIG[instrument.category];
   const Icon = config.icon;
   
@@ -38,12 +38,6 @@ function InstrumentRow({ instrument, parentCurrency }: { instrument: InstrumentD
     const searchTerm = instrument.name.replace(/\s+/g, '+');
     window.open(`https://www.justetf.com/en/find-etf.html?query=${searchTerm}`, '_blank');
   };
-
-  // Show original currency value only if it's meaningful and different from EUR display
-  const showOriginalValue = 
-    Number.isFinite(instrument.riskOriginal) && 
-    instrument.riskOriginal > 0 &&
-    parentCurrency !== 'EUR';
   
   return (
     <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
@@ -61,25 +55,18 @@ function InstrumentRow({ instrument, parentCurrency }: { instrument: InstrumentD
           <span className="text-xs text-muted-foreground truncate">{instrument.details}</span>
         </div>
       </div>
-      <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm">{formatEUR(instrument.riskEUR)}</span>
-          {instrument.isETF && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 text-muted-foreground hover:text-primary"
-              onClick={handleJustETFClick}
-              title="Cerca su justETF"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </Button>
-          )}
-        </div>
-        {showOriginalValue && (
-          <span className="text-xs text-muted-foreground">
-            {formatCurrency(instrument.riskOriginal, parentCurrency)}
-          </span>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <span className="font-medium text-sm">{formatEUR(instrument.riskEUR)}</span>
+        {instrument.isETF && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-primary"
+            onClick={handleJustETFClick}
+            title="Cerca su justETF"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </Button>
         )}
       </div>
     </div>
@@ -89,13 +76,11 @@ function InstrumentRow({ instrument, parentCurrency }: { instrument: InstrumentD
 function CategoryBreakdown({ 
   instruments, 
   category, 
-  total,
-  parentCurrency
+  total 
 }: { 
   instruments: InstrumentDetail[]; 
   category: keyof typeof CATEGORY_CONFIG;
   total: number;
-  parentCurrency: string;
 }) {
   const categoryInstruments = instruments.filter(i => i.category === category);
   if (categoryInstruments.length === 0) return null;
@@ -124,7 +109,7 @@ function CategoryBreakdown({
       <AccordionContent className="pt-1 pb-2 px-2">
         <div className="space-y-1">
           {visible.map((instrument, idx) => (
-            <InstrumentRow key={`${instrument.name}-${idx}`} instrument={instrument} parentCurrency={parentCurrency} />
+            <InstrumentRow key={`${instrument.name}-${idx}`} instrument={instrument} />
           ))}
 
           {hiddenCount > 0 && (
@@ -303,32 +288,27 @@ export function CurrencyExposureView({
                       <CategoryBreakdown 
                         instruments={curr.instruments} 
                         category="stocks" 
-                        total={curr.breakdown.stocks}
-                        parentCurrency={curr.currency}
+                        total={curr.breakdown.stocks} 
                       />
                       <CategoryBreakdown 
                         instruments={curr.instruments} 
                         category="commodities" 
-                        total={curr.breakdown.commodities}
-                        parentCurrency={curr.currency}
+                        total={curr.breakdown.commodities} 
                       />
                       <CategoryBreakdown 
                         instruments={curr.instruments} 
                         category="nakedPuts" 
-                        total={curr.breakdown.nakedPuts}
-                        parentCurrency={curr.currency}
+                        total={curr.breakdown.nakedPuts} 
                       />
                       <CategoryBreakdown 
                         instruments={curr.instruments} 
                         category="leapCalls" 
-                        total={curr.breakdown.leapCalls}
-                        parentCurrency={curr.currency}
+                        total={curr.breakdown.leapCalls} 
                       />
                       <CategoryBreakdown 
                         instruments={curr.instruments} 
                         category="strategies" 
-                        total={curr.breakdown.strategies}
-                        parentCurrency={curr.currency}
+                        total={curr.breakdown.strategies} 
                       />
                     </Accordion>
                   </AccordionContent>
