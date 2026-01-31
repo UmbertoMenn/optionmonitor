@@ -22,6 +22,7 @@ export function RiskAnalyzer() {
   const { signOut } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
   const [isRefreshingETFs, setIsRefreshingETFs] = useState(false);
+  const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
@@ -49,19 +50,16 @@ export function RiskAnalyzer() {
         }
       }
     }
-    console.log('[RiskAnalyzer] Detected ETF ISINs:', isins);
     return isins;
   }, [analysis.stockDetails]);
   
-  // Fetch ETF allocations when ISINs change
+  // Fetch ETF allocations ONCE when switching to currency view
   useEffect(() => {
-    if (etfIsins.length > 0 && viewMode === 'currency') {
-      const missingIsins = etfIsins.filter(isin => !allocations[isin]);
-      if (missingIsins.length > 0) {
-        fetchMultipleAllocations(missingIsins);
-      }
+    if (etfIsins.length > 0 && viewMode === 'currency' && !hasFetchedETFs) {
+      setHasFetchedETFs(true);
+      fetchMultipleAllocations(etfIsins);
     }
-  }, [etfIsins, viewMode, allocations, fetchMultipleAllocations]);
+  }, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
   
   // Apply ETF decomposition to currency exposure
   const currencyExposure = useMemo(() => {
