@@ -6,9 +6,19 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronDown, ChevronUp, ArrowUpRight, ArrowDownRight, ExternalLink } from 'lucide-react';
+import { LivePriceBadge } from './LivePriceBadge';
+import { LivePriceIndicator } from './LivePriceIndicator';
+import { LivePriceData } from '@/hooks/useLivePrices';
 
 interface PositionsTableProps {
   positions: Position[];
+  livePrices?: {
+    getPriceForPosition: (position: Position) => LivePriceData | null;
+    lastFetched: Date | null;
+    isLoading: boolean;
+    error: string | null;
+    refresh: () => void;
+  };
 }
 
 const assetTabs: { value: AssetType | 'all'; label: string }[] = [
@@ -20,7 +30,7 @@ const assetTabs: { value: AssetType | 'all'; label: string }[] = [
   { value: 'commodity', label: 'Commodities' },
 ];
 
-export function PositionsTable({ positions }: PositionsTableProps) {
+export function PositionsTable({ positions, livePrices }: PositionsTableProps) {
   const [selectedTab, setSelectedTab] = useState<AssetType | 'all'>('all');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Position; direction: 'asc' | 'desc' }>({ key: 'description', direction: 'asc' });
 
@@ -83,9 +93,9 @@ export function PositionsTable({ positions }: PositionsTableProps) {
         </TabsList>
       </Tabs>
 
-      {/* Link to Derivatives Strategies */}
-      {selectedTab === 'derivative' && (
-        <div className="flex flex-wrap gap-2 items-center">
+      {/* Live Price Indicator + Link to Derivatives */}
+      <div className="flex flex-wrap gap-2 items-center justify-between">
+        {selectedTab === 'derivative' && (
           <Button
             variant="default"
             size="sm"
@@ -96,8 +106,17 @@ export function PositionsTable({ positions }: PositionsTableProps) {
               Visualizza Strategie
             </Link>
           </Button>
-        </div>
-      )}
+        )}
+        
+        {livePrices && (
+          <LivePriceIndicator
+            lastFetched={livePrices.lastFetched}
+            isLoading={livePrices.isLoading}
+            error={livePrices.error}
+            onRefresh={livePrices.refresh}
+          />
+        )}
+      </div>
 
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="overflow-x-auto">
@@ -180,8 +199,20 @@ export function PositionsTable({ positions }: PositionsTableProps) {
                   <td className="text-right font-mono">
                     {position.quantity.toLocaleString('it-IT')}
                   </td>
-                  <td className="text-right font-mono text-muted-foreground">
-                    {position.current_price ? formatCurrency(position.current_price, position.currency) : '-'}
+                  <td className="text-right">
+                    {livePrices ? (
+                      <LivePriceBadge
+                        livePrice={livePrices.getPriceForPosition(position)}
+                        currentPrice={position.current_price}
+                        currency={position.currency}
+                        showChange={true}
+                        compact={true}
+                      />
+                    ) : (
+                      <span className="font-mono text-muted-foreground">
+                        {position.current_price ? formatCurrency(position.current_price, position.currency) : '-'}
+                      </span>
+                    )}
                   </td>
                   <td className="text-right font-mono text-muted-foreground">
                     {position.avg_cost ? formatCurrency(position.avg_cost, position.currency) : '-'}
