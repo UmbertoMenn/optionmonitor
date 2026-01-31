@@ -9,6 +9,7 @@ export interface Position {
   description: string;
   asset_type: AssetType;
   currency: string | null;
+  exchange_rate: number | null;
   quantity: number;
   current_price: number | null;
   avg_cost: number | null;

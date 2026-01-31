@@ -112,6 +112,8 @@ export function PositionsTable({ positions }: PositionsTableProps) {
                   </div>
                 </th>
                 <th>Tipo</th>
+                <th className="text-center">Valuta</th>
+                <th className="text-right">Cambio</th>
                 <th className="text-right cursor-pointer hover:bg-background-secondary" onClick={() => handleSort('quantity')}>
                   <div className="flex items-center justify-end gap-1">
                     Quantità <SortIcon columnKey="quantity" />
@@ -170,6 +172,12 @@ export function PositionsTable({ positions }: PositionsTableProps) {
                     <Badge variant="secondary" className="text-xs">
                       {ASSET_TYPE_LABELS[position.asset_type]}
                     </Badge>
+                  </td>
+                  <td className="text-center font-mono text-muted-foreground">
+                    {position.currency || '-'}
+                  </td>
+                  <td className="text-right font-mono text-muted-foreground">
+                    {position.exchange_rate ? position.exchange_rate.toFixed(4) : '-'}
                   </td>
                   <td className="text-right font-mono">
                     {position.quantity.toLocaleString('it-IT')}
