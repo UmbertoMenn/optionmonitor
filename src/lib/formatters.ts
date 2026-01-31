@@ -10,7 +10,23 @@ export function formatEUR(value: number): string {
   }).format(value);
 }
 
+// Valid ISO 4217 currency codes we support
+const VALID_CURRENCIES = new Set([
+  'EUR', 'USD', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'CNY', 'HKD', 'KRW', 
+  'TWD', 'INR', 'BRL', 'MXN', 'SGD', 'SEK', 'NOK', 'DKK', 'NZD', 'ZAR',
+  'RUB', 'ILS', 'PLN', 'CZK', 'HUF', 'TRY', 'THB', 'MYR', 'IDR', 'PHP', 'VND'
+]);
+
 export function formatCurrency(value: number, currency: string = 'EUR'): string {
+  // Handle non-standard currency codes (like "OTHER")
+  if (!currency || !VALID_CURRENCIES.has(currency)) {
+    const formatted = new Intl.NumberFormat('it-IT', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+    return `${formatted} ${currency || '?'}`;
+  }
+
   if (currency === 'USD') {
     // Format with Italian number style but $ symbol after
     const formatted = new Intl.NumberFormat('it-IT', {
