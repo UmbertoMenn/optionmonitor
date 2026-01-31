@@ -219,8 +219,9 @@ function parseDerivativeRow(
   
   const descUpper = description.toUpperCase();
   
-  // Get currency
+  // Get currency and exchange rate
   const currency = findColumnValue(row, headers, ['DIVISA CODICE', 'DIVISA']) || 'USD';
+  const exchangeRate = parseExcelNumber(findColumnValue(row, headers, ['CAMBIO ULTIMO', 'CAMBIO', 'TASSO CAMBIO']));
   
   // Get price values
   const currentPrice = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VALORE', 'PREZZO']));
@@ -284,6 +285,7 @@ function parseDerivativeRow(
     strike_price: strikePrice,
     expiry_date: expiryDate,
     underlying,
+    exchange_rate: exchangeRate || undefined,
   };
 }
 
@@ -295,6 +297,7 @@ function parsePositionRow(
   const isin = findColumnValue(row, headers, ['ISIN']);
   const description = findColumnValue(row, headers, ['DESCRIZIONE ESTESA', 'DESCRIZIONE']);
   const currency = findColumnValue(row, headers, ['DIVISA CODICE', 'DIVISA']) || 'EUR';
+  const exchangeRate = parseExcelNumber(findColumnValue(row, headers, ['CAMBIO ULTIMO', 'CAMBIO', 'TASSO CAMBIO']));
   const quantity = parseExcelNumber(findColumnValue(row, headers, ['QUANTITA', 'QUANTITÀ']));
   const currentPrice = parseExcelNumber(findColumnValue(row, headers, ['PREZZO VALORE', 'PREZZO']));
   const avgCost = parseExcelNumber(findColumnValue(row, headers, ['PREZZO MEDIO CARICO', 'PREZZO CARICO']));
@@ -373,6 +376,7 @@ function parsePositionRow(
     strike_price: strikePrice,
     expiry_date: expiryDate,
     underlying,
+    exchange_rate: exchangeRate || undefined,
   };
 }
 

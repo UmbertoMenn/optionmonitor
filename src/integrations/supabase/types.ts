@@ -155,6 +155,7 @@ export type Database = {
           currency: string | null
           current_price: number | null
           description: string
+          exchange_rate: number | null
           expiry_date: string | null
           id: string
           isin: string | null
@@ -177,6 +178,7 @@ export type Database = {
           currency?: string | null
           current_price?: number | null
           description: string
+          exchange_rate?: number | null
           expiry_date?: string | null
           id?: string
           isin?: string | null
@@ -199,6 +201,7 @@ export type Database = {
           currency?: string | null
           current_price?: number | null
           description?: string
+          exchange_rate?: number | null
           expiry_date?: string | null
           id?: string
           isin?: string | null
