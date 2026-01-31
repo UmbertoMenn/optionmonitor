@@ -1,29 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { Portfolio, Position, PortfolioSummary, AssetType } from '@/types/portfolio';
 import { toast } from 'sonner';
 
 export function usePortfolio() {
-  const { user } = useAuth();
+  const { selectedPortfolio } = usePortfolioContext();
   const queryClient = useQueryClient();
 
-  const portfolioQuery = useQuery({
-    queryKey: ['portfolio', user?.id],
-    queryFn: async () => {
-      if (!user) return null;
-      
-      const { data, error } = await supabase
-        .from('portfolios')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      
-      if (error) throw error;
-      return data as unknown as Portfolio | null;
-    },
-    enabled: !!user,
-  });
+  // Use the portfolio from context instead of fetching directly
+  const portfolio = selectedPortfolio;
 
   const updateInitialValueMutation = useMutation({
     mutationFn: async ({ 
@@ -39,7 +25,7 @@ export function usePortfolio() {
       averageBalance: number;
       averageBalanceDate: string;
     }) => {
-      if (!portfolioQuery.data?.id) throw new Error('Portfolio non trovato');
+      if (!portfolio?.id) throw new Error('Portfolio non trovato');
       
       const { error } = await supabase
         .from('portfolios')
@@ -50,12 +36,12 @@ export function usePortfolio() {
           average_balance: averageBalance,
           average_balance_date: averageBalanceDate,
         })
-        .eq('id', portfolioQuery.data.id);
+        .eq('id', portfolio.id);
       
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
       toast.success('Dati salvati!');
     },
     onError: (error) => {
@@ -66,40 +52,40 @@ export function usePortfolio() {
   });
 
   const positionsQuery = useQuery({
-    queryKey: ['positions', portfolioQuery.data?.id],
+    queryKey: ['positions', portfolio?.id],
     queryFn: async () => {
-      if (!portfolioQuery.data?.id) return [];
+      if (!portfolio?.id) return [];
       
       const { data, error } = await supabase
         .from('positions')
         .select('*')
-        .eq('portfolio_id', portfolioQuery.data.id)
+        .eq('portfolio_id', portfolio.id)
         .order('asset_type', { ascending: true });
       
       if (error) throw error;
       return data as unknown as Position[];
     },
-    enabled: !!portfolioQuery.data?.id,
+    enabled: !!portfolio?.id,
   });
 
-  const summary: PortfolioSummary | null = positionsQuery.data ? calculateSummary(positionsQuery.data, portfolioQuery.data?.cash_value || 0) : null;
+  const summary: PortfolioSummary | null = positionsQuery.data ? calculateSummary(positionsQuery.data, portfolio?.cash_value || 0) : null;
 
   const updatePositionsMutation = useMutation({
     mutationFn: async (positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]) => {
-      if (!portfolioQuery.data?.id) throw new Error('Portfolio non trovato');
+      if (!portfolio?.id) throw new Error('Portfolio non trovato');
       
       // First delete all existing positions
       await supabase
         .from('positions')
         .delete()
-        .eq('portfolio_id', portfolioQuery.data.id);
+        .eq('portfolio_id', portfolio.id);
       
       // Then insert new positions
       const { data, error } = await supabase
         .from('positions')
         .insert(positions.map(p => ({
           ...p,
-          portfolio_id: portfolioQuery.data.id,
+          portfolio_id: portfolio.id,
         })));
       
       if (error) throw error;
@@ -113,7 +99,7 @@ export function usePortfolio() {
       const { data: portfolioCash, error: cashError } = await supabase
         .from('portfolios')
         .select('cash_value')
-        .eq('id', portfolioQuery.data.id)
+        .eq('id', portfolio.id)
         .single();
 
       if (cashError) throw cashError;
@@ -126,13 +112,13 @@ export function usePortfolio() {
           total_value: totalValue,
           last_updated: new Date().toISOString()
         })
-        .eq('id', portfolioQuery.data.id);
+        .eq('id', portfolio.id);
       
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['positions'] });
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
       toast.success('Portfolio aggiornato!');
     },
     onError: (error) => {
@@ -143,10 +129,10 @@ export function usePortfolio() {
   });
 
   return {
-    portfolio: portfolioQuery.data,
+    portfolio,
     positions: positionsQuery.data || [],
     summary,
-    isLoading: portfolioQuery.isLoading || positionsQuery.isLoading,
+    isLoading: positionsQuery.isLoading,
     updatePositions: updatePositionsMutation.mutate,
     isUpdating: updatePositionsMutation.isPending,
     updateInitialValue: updateInitialValueMutation.mutate,

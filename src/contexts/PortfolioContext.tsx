@@ -1,0 +1,181 @@
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { Portfolio } from '@/types/portfolio';
+import { toast } from 'sonner';
+
+const SELECTED_PORTFOLIO_KEY = 'selectedPortfolioId';
+
+interface PortfolioContextType {
+  portfolios: Portfolio[];
+  selectedPortfolio: Portfolio | null;
+  selectPortfolio: (id: string) => void;
+  createPortfolio: (name: string) => Promise<void>;
+  deletePortfolio: (id: string) => Promise<void>;
+  renamePortfolio: (id: string, name: string) => Promise<void>;
+  isLoading: boolean;
+}
+
+const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
+
+export function PortfolioProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    return localStorage.getItem(SELECTED_PORTFOLIO_KEY);
+  });
+
+  // Fetch all portfolios for the user
+  const portfoliosQuery = useQuery({
+    queryKey: ['portfolios', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      
+      const { data, error } = await supabase
+        .from('portfolios')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
+      
+      if (error) throw error;
+      return data as unknown as Portfolio[];
+    },
+    enabled: !!user,
+  });
+
+  const portfolios = portfoliosQuery.data || [];
+
+  // Auto-select first portfolio if none selected or selected doesn't exist
+  useEffect(() => {
+    if (portfolios.length > 0) {
+      const currentExists = portfolios.some(p => p.id === selectedId);
+      if (!selectedId || !currentExists) {
+        const firstId = portfolios[0].id;
+        setSelectedId(firstId);
+        localStorage.setItem(SELECTED_PORTFOLIO_KEY, firstId);
+      }
+    }
+  }, [portfolios, selectedId]);
+
+  const selectedPortfolio = portfolios.find(p => p.id === selectedId) || null;
+
+  const selectPortfolio = useCallback((id: string) => {
+    setSelectedId(id);
+    localStorage.setItem(SELECTED_PORTFOLIO_KEY, id);
+    // Invalidate position-related queries when switching portfolio
+    queryClient.invalidateQueries({ queryKey: ['positions'] });
+    queryClient.invalidateQueries({ queryKey: ['deposits'] });
+    queryClient.invalidateQueries({ queryKey: ['historicalData'] });
+    queryClient.invalidateQueries({ queryKey: ['derivativeOverrides'] });
+  }, [queryClient]);
+
+  // Create portfolio mutation
+  const createMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!user) throw new Error('Utente non autenticato');
+      
+      const { data, error } = await supabase
+        .from('portfolios')
+        .insert({ user_id: user.id, name })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data as unknown as Portfolio;
+    },
+    onSuccess: (newPortfolio) => {
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      selectPortfolio(newPortfolio.id);
+      toast.success(`Portfolio "${newPortfolio.name}" creato!`);
+    },
+    onError: (error) => {
+      toast.error('Errore nella creazione', { description: error.message });
+    },
+  });
+
+  // Delete portfolio mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('portfolios')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: (deletedId) => {
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      // If deleted was selected, switch to another
+      if (selectedId === deletedId) {
+        const remaining = portfolios.filter(p => p.id !== deletedId);
+        if (remaining.length > 0) {
+          selectPortfolio(remaining[0].id);
+        } else {
+          setSelectedId(null);
+          localStorage.removeItem(SELECTED_PORTFOLIO_KEY);
+        }
+      }
+      toast.success('Portfolio eliminato');
+    },
+    onError: (error) => {
+      toast.error('Errore nell\'eliminazione', { description: error.message });
+    },
+  });
+
+  // Rename portfolio mutation
+  const renameMutation = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      const { error } = await supabase
+        .from('portfolios')
+        .update({ name })
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      toast.success('Portfolio rinominato');
+    },
+    onError: (error) => {
+      toast.error('Errore nel rinominare', { description: error.message });
+    },
+  });
+
+  const createPortfolio = async (name: string) => {
+    await createMutation.mutateAsync(name);
+  };
+
+  const deletePortfolio = async (id: string) => {
+    await deleteMutation.mutateAsync(id);
+  };
+
+  const renamePortfolio = async (id: string, name: string) => {
+    await renameMutation.mutateAsync({ id, name });
+  };
+
+  return (
+    <PortfolioContext.Provider
+      value={{
+        portfolios,
+        selectedPortfolio,
+        selectPortfolio,
+        createPortfolio,
+        deletePortfolio,
+        renamePortfolio,
+        isLoading: portfoliosQuery.isLoading,
+      }}
+    >
+      {children}
+    </PortfolioContext.Provider>
+  );
+}
+
+export function usePortfolioContext() {
+  const context = useContext(PortfolioContext);
+  if (context === undefined) {
+    throw new Error('usePortfolioContext must be used within a PortfolioProvider');
+  }
+  return context;
+}

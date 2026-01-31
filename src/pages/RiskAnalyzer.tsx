@@ -15,6 +15,7 @@ import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewMo
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
 import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { calculateCurrencyExposure } from '@/lib/currencyExposure';
 import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
 
@@ -86,6 +87,9 @@ export function RiskAnalyzer() {
                 <p className="text-xs text-muted-foreground">
                   Esposizione reale in equity (EUR)
                 </p>
+              </div>
+              <div className="ml-4">
+                <PortfolioSelector />
               </div>
             </div>
             

@@ -25,6 +25,7 @@ import {
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
+import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -80,8 +81,11 @@ export function Derivatives() {
               <div>
                 <h1 className="text-lg font-bold">Strategie Derivati</h1>
                 <p className="text-xs text-muted-foreground">
-                  {portfolio?.name} • {derivatives.length} posizioni
+                  {derivatives.length} posizioni
                 </p>
+              </div>
+              <div className="ml-4">
+                <PortfolioSelector />
               </div>
             </div>
             

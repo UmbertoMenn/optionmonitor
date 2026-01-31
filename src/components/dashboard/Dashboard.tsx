@@ -17,6 +17,7 @@ import { HistoricalDataForm } from '@/components/dashboard/HistoricalDataForm';
 import { DepositsSection } from '@/components/dashboard/DepositsSection';
 import { ViewModeSelector, ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { DynamicPortfolioChart } from '@/components/dashboard/DynamicPortfolioChart';
+import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { formatRelativeTime } from '@/lib/formatters';
 import { Link } from 'react-router-dom';
 
@@ -81,11 +82,13 @@ export function Dashboard() {
               <div>
                 <h1 className="text-lg font-bold">Portfolio Monitor</h1>
                 <p className="text-xs text-muted-foreground">
-                  {portfolio?.name}
                   {portfolio?.last_updated && (
-                    <span> • Aggiornato {formatRelativeTime(portfolio.last_updated)}</span>
+                    <span>Aggiornato {formatRelativeTime(portfolio.last_updated)}</span>
                   )}
                 </p>
+              </div>
+              <div className="ml-4">
+                <PortfolioSelector />
               </div>
             </div>
             
