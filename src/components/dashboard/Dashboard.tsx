@@ -7,7 +7,8 @@ import { useDeposits } from '@/hooks/useDeposits';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, Save } from 'lucide-react';
+import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
 import { FileUploader } from '@/components/dashboard/FileUploader';
@@ -87,6 +88,30 @@ export function Dashboard() {
             </div>
             
             <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => {
+                  if (!portfolio?.snapshot_date) {
+                    toast.error('Nessuna data disponibile. Carica prima un file Excel.');
+                    return;
+                  }
+                  upsertHistoricalData({
+                    snapshot_date: portfolio.snapshot_date,
+                    total_value: summary?.totalValue ?? 0,
+                    netting_total: netting.nettingTotal,
+                    netting_ex_cc: netting.nettingExCoveredCall,
+                    deposits: 0,
+                    average_balance: 0,
+                  });
+                  toast.success('Snapshot salvato nei dati storici');
+                }}
+                disabled={isUpserting || !summary}
+                title="Salva snapshot corrente nei dati storici"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                Salva Snapshot
+              </Button>
               <Button variant="outline" size="sm" asChild>
                 <Link to="/derivatives">
                   <TrendingUp className="w-4 h-4 mr-2" />
