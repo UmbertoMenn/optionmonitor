@@ -110,8 +110,22 @@ export function categorizeDerivatives(
   // ============ STEP 1: Find Covered Calls ============
   const soldCalls = derivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
   
+  console.log('[CoveredCall] Sold CALLs found:', soldCalls.map(c => ({ 
+    desc: c.description, 
+    underlying: c.underlying, 
+    qty: c.quantity 
+  })));
+  console.log('[CoveredCall] Stock positions:', stockPositions.map(s => ({ 
+    desc: s.description, 
+    ticker: s.ticker, 
+    qty: s.quantity 
+  })));
+  
   for (const call of soldCalls) {
     const underlyingStock = findUnderlyingStock(call, stockPositions);
+    
+    console.log(`[CoveredCall] Matching "${call.underlying || call.description}":`, 
+      underlyingStock ? `FOUND -> ${underlyingStock.description} (qty: ${underlyingStock.quantity})` : 'NOT FOUND');
     
     if (underlyingStock && underlyingStock.quantity > 0) {
       const contractsSold = Math.abs(call.quantity);
