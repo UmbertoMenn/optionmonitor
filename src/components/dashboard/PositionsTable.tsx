@@ -22,15 +22,13 @@ const assetTabs: { value: AssetType | 'all'; label: string }[] = [
 
 export function PositionsTable({ positions }: PositionsTableProps) {
   const [selectedTab, setSelectedTab] = useState<AssetType | 'all'>('all');
-  const [sortConfig, setSortConfig] = useState<{ key: keyof Position; direction: 'asc' | 'desc' } | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Position; direction: 'asc' | 'desc' }>({ key: 'description', direction: 'asc' });
 
   const filteredPositions = selectedTab === 'all' 
     ? positions 
     : positions.filter(p => p.asset_type === selectedTab);
 
   const sortedPositions = [...filteredPositions].sort((a, b) => {
-    if (!sortConfig) return 0;
-    
     const aVal = a[sortConfig.key];
     const bVal = b[sortConfig.key];
     

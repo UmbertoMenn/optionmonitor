@@ -14,7 +14,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   base: 'Base',
 };
 
-const VIEWS: ViewMode[] = ['netting_ex_cc', 'netting_total', 'base'];
+const VIEWS: ViewMode[] = ['base', 'netting_ex_cc', 'netting_total'];
 
 export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelectorProps) {
   const currentIndex = VIEWS.indexOf(viewMode);

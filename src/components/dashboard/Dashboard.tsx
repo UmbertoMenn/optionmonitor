@@ -41,7 +41,7 @@ export function Dashboard() {
   } = useDeposits(portfolio?.id);
 
   // Centralized state for unified carousel
-  const [viewMode, setViewMode] = useState<ViewMode>('netting_ex_cc');
+  const [viewMode, setViewMode] = useState<ViewMode>('base');
   const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(
     earliestEntry?.snapshot_date || null
   );
