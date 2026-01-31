@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
+import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,20 +11,23 @@ import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
 import { FileUploader } from '@/components/dashboard/FileUploader';
 import { InitialValueForm } from '@/components/dashboard/InitialValueForm';
+import { formatCurrency } from '@/lib/formatters';
 import { formatRelativeTime } from '@/lib/formatters';
 import { Link } from 'react-router-dom';
 import useEmblaCarousel from 'embla-carousel-react';
 import { useCallback, useEffect, useState } from 'react';
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
 import { cn } from '@/lib/utils';
+import { NettingResult } from '@/hooks/useDerivativeNetting';
 
 interface PortfolioCarouselProps {
   summary: PortfolioSummary | null;
   portfolio: Portfolio | null;
   positions: Position[];
+  netting: NettingResult;
 }
 
-function PortfolioCarousel({ summary, portfolio, positions }: PortfolioCarouselProps) {
+function PortfolioCarousel({ summary, portfolio, positions, netting }: PortfolioCarouselProps) {
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: false });
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -47,8 +51,8 @@ function PortfolioCarousel({ summary, portfolio, positions }: PortfolioCarouselP
 
   const slides = [
     { title: 'Composizione Portafoglio (Derivati esclusi)', id: 'composition' },
-    { title: 'Valore Portafoglio (Netting Totale Derivati)', id: 'netting-total' },
     { title: 'Valore Portafoglio (Netting ex. Covered Call)', id: 'netting-ex-cc' },
+    { title: 'Valore Portafoglio (Netting Totale Derivati)', id: 'netting-total' },
   ];
 
   return (
@@ -91,19 +95,41 @@ function PortfolioCarousel({ summary, portfolio, positions }: PortfolioCarouselP
               )}
             </div>
 
-            {/* Slide 2: Netting Totale Derivati */}
+            {/* Slide 2: Netting ex. Covered Call */}
             <div className="flex-[0_0_100%] min-w-0">
-              <div className="text-center py-12 text-muted-foreground">
-                <p className="text-lg font-medium">Valore Portafoglio (Netting Totale Derivati)</p>
-                <p className="text-sm mt-2">Contenuto in arrivo...</p>
+              <div className="flex flex-col items-center justify-center py-12">
+                <p className="text-sm text-muted-foreground mb-2">Valore netto (escl. Covered Call e Protezioni)</p>
+                <p className="text-4xl font-bold text-foreground">
+                  {formatCurrency(netting.nettingExCoveredCall)}
+                </p>
+                {summary && (
+                  <p className={cn(
+                    "text-sm mt-2",
+                    netting.nettingExCoveredCall >= summary.totalValue ? "text-green-500" : "text-red-500"
+                  )}>
+                    {netting.nettingExCoveredCall >= summary.totalValue ? '+' : ''}
+                    {formatCurrency(netting.nettingExCoveredCall - summary.totalValue)} rispetto al valore base
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Slide 3: Netting ex. Covered Call */}
+            {/* Slide 3: Netting Totale Derivati */}
             <div className="flex-[0_0_100%] min-w-0">
-              <div className="text-center py-12 text-muted-foreground">
-                <p className="text-lg font-medium">Valore Portafoglio (Netting ex. Covered Call)</p>
-                <p className="text-sm mt-2">Contenuto in arrivo...</p>
+              <div className="flex flex-col items-center justify-center py-12">
+                <p className="text-sm text-muted-foreground mb-2">Valore netto chiudendo tutti i derivati</p>
+                <p className="text-4xl font-bold text-foreground">
+                  {formatCurrency(netting.nettingTotal)}
+                </p>
+                {summary && (
+                  <p className={cn(
+                    "text-sm mt-2",
+                    netting.nettingTotal >= summary.totalValue ? "text-green-500" : "text-red-500"
+                  )}>
+                    {netting.nettingTotal >= summary.totalValue ? '+' : ''}
+                    {formatCurrency(netting.nettingTotal - summary.totalValue)} rispetto al valore base
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -116,6 +142,7 @@ function PortfolioCarousel({ summary, portfolio, positions }: PortfolioCarouselP
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, summary, isLoading, updateInitialValue, isUpdatingInitialValue } = usePortfolio();
+  const netting = useDerivativeNetting(positions, summary);
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -173,7 +200,7 @@ export function Dashboard() {
         {/* Main content grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Portfolio Chart Carousel */}
-          <PortfolioCarousel summary={summary} portfolio={portfolio} positions={positions} />
+          <PortfolioCarousel summary={summary} portfolio={portfolio} positions={positions} netting={netting} />
 
           {/* File Upload & Initial Value */}
           <div className="space-y-4">
