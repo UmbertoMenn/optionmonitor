@@ -1,97 +1,88 @@
 
 
-# Piano: Priorità classificazione singole gambe prima del raggruppamento
+# Piano: Regola di separazione per scadenze distanti (>12 mesi)
 
-## Problema Identificato
-La logica attuale (step 5 nel file `derivativeStrategies.ts`) raggruppa tutte le opzioni dello stesso sottostante in "Altre Strategie" quando ce n'è più di una, anche se queste opzioni:
-- Hanno scadenze diverse
-- Non formano una strategia riconosciuta
-- Potrebbero essere classificate singolarmente come Protezioni o Naked Put
+## Problema
+Nello Step 5, tutte le opzioni con lo stesso sottostante vengono raggruppate in "Altre Strategie" se sono più di una, senza considerare che opzioni con scadenze molto distanti non formano una strategia vera.
 
-## Soluzione Proposta
-Modificare l'ordine di priorità della classificazione: **verificare prima se ogni singola opzione soddisfa i criteri per una categoria specifica** (Protezione, Naked Put), e solo dopo raggruppare le rimanenti in "Altre Strategie".
+## Soluzione
+Aggiungere un controllo sulla differenza di scadenze: se le opzioni di un gruppo hanno scadenze che differiscono di **più di 12 mesi**, vanno trattate come **gambe singole** e non come strategia.
 
 ---
 
-## Nuova Logica di Classificazione
+## Logica Proposta
 
-### Ordine di priorità aggiornato:
+### Modifica Step 5 (righe 278-290)
 
-1. **Covered Call** (invariato) - CALL vendute coperte da azioni
-2. **Protezioni - Long Put** (invariato per protezione totale)
-3. **Iron Condor** (invariato) - 4 gambe stessa scadenza
-4. **Double Diagonal** (invariato) - 4 gambe con scadenze diverse
-5. **PUT vendute singole → Naked Put** (NUOVO: prima del raggruppamento)
-6. **PUT comprate con sottostante → Protezione parziale** (NUOVO: prima del raggruppamento)
-7. **CALL comprate → Leap Call** (NUOVO: prima del raggruppamento)
-8. **Altre Strategie** - Solo opzioni rimanenti che formano effettivamente una strategia multi-gamba
+```text
+Per ogni gruppo di opzioni con stesso sottostante:
+  1. Se tutte le scadenze sono entro 12 mesi l'una dall'altra:
+     → Raggruppa in "Altre Strategie" (comportamento attuale)
+  
+  2. Se almeno due scadenze differiscono di più di 12 mesi:
+     → NON raggruppare, lascia passare allo Step 6 (singole gambe)
+```
+
+### Calcolo Differenza Scadenze
+
+```text
+function hasCloseExpiries(options: Position[]): boolean {
+  const dates = options
+    .map(o => new Date(o.expiry_date))
+    .filter(d => !isNaN(d.getTime()));
+  
+  if (dates.length < 2) return true; // una sola scadenza = ok
+  
+  const maxDate = Math.max(...dates.map(d => d.getTime()));
+  const minDate = Math.min(...dates.map(d => d.getTime()));
+  const diffMonths = (maxDate - minDate) / (1000 * 60 * 60 * 24 * 30);
+  
+  return diffMonths <= 12; // true se entro 12 mesi
+}
+```
 
 ---
 
-## Modifiche al Codice
+## Modifica al Codice
 
 ### File: `src/lib/derivativeStrategies.ts`
 
-**Modifica Step 5-6 (righe 265-339):**
+**Aggiungere funzione helper** (prima dello Step 5):
 
-Sostituire la logica attuale con:
-
-```text
-// STEP 5: Classificazione singole gambe PRIMA del raggruppamento
-const afterFourLegRemaining = derivatives.filter(d => !usedDerivatives.has(d.id));
-
-for (const option of afterFourLegRemaining) {
-  const underlyingStock = findUnderlyingStock(option, stockPositions);
-  const underlyingKey = normalizeForMatching(option.underlying || option.description);
+```typescript
+// Verifica se tutte le scadenze sono entro 12 mesi l'una dall'altra
+const hasCloseExpiries = (options: Position[]): boolean => {
+  const dates = options
+    .map(o => o.expiry_date ? new Date(o.expiry_date) : null)
+    .filter((d): d is Date => d !== null && !isNaN(d.getTime()));
   
-  // 5a. PUT comprata con sottostante → Protezione parziale
-  if (option.option_type === 'put' && option.quantity > 0) {
-    const candidate = partialProtectionCandidates.get(underlyingKey);
-    if (candidate && candidate.puts.some(p => p.id === option.id)) {
-      longPuts.push({
+  if (dates.length < 2) return true;
+  
+  const timestamps = dates.map(d => d.getTime());
+  const maxDate = Math.max(...timestamps);
+  const minDate = Math.min(...timestamps);
+  const diffMonths = (maxDate - minDate) / (1000 * 60 * 60 * 24 * 30);
+  
+  return diffMonths <= 12;
+};
+```
+
+**Modificare Step 5** (righe 278-290):
+
+```typescript
+// For groups with more than 1 option AND close expiries, put in "Altre Strategie"
+for (const [, group] of regrouped.entries()) {
+  if (group.length > 1 && hasCloseExpiries(group)) {
+    for (const option of group) {
+      const underlyingStock = findUnderlyingStock(option, stockPositions);
+      otherStrategies.push({
         option,
-        underlying: candidate.stock,
-        contracts: option.quantity,
-        isPartial: true
+        underlying: underlyingStock || null
       });
       usedDerivatives.add(option.id);
-      continue;
     }
   }
-  
-  // 5b. PUT venduta → Naked Put
-  if (option.option_type === 'put' && option.quantity < 0) {
-    nakedPuts.push({
-      option,
-      underlying: underlyingStock || null,
-      contracts: Math.abs(option.quantity)
-    });
-    usedDerivatives.add(option.id);
-    continue;
-  }
-  
-  // 5c. CALL comprata → Leap Call
-  if (option.option_type === 'call' && option.quantity > 0) {
-    leapCalls.push({
-      option,
-      underlying: underlyingStock || null,
-      contracts: option.quantity
-    });
-    usedDerivatives.add(option.id);
-    continue;
-  }
-}
-
-// STEP 6: Altre Strategie - solo opzioni rimanenti non classificate
-const finalRemaining = derivatives.filter(d => !usedDerivatives.has(d.id));
-
-for (const option of finalRemaining) {
-  const underlyingStock = findUnderlyingStock(option, stockPositions);
-  otherStrategies.push({
-    option,
-    underlying: underlyingStock || null
-  });
-  usedDerivatives.add(option.id);
+  // Se scadenze distanti (>12 mesi), le opzioni passano allo Step 6
 }
 ```
 
@@ -99,30 +90,33 @@ for (const option of finalRemaining) {
 
 ## Risultato Atteso
 
-Con la nuova logica, le opzioni Google verranno classificate così:
+### Caso Google
 
-| Opzione | Classificazione Attuale | Classificazione Nuova |
-|---------|------------------------|----------------------|
-| CALL venduta 290 | Covered Call | Covered Call |
-| CALL venduta 350 | Covered Call | Covered Call |
-| PUT comprata 220 dic/27 | Altre Strategie | **Protezione parziale** (P!) |
-| PUT venduta 295 feb/26 | Altre Strategie | **Naked Put** |
+| Opzione | Scadenza | Differenza | Classificazione |
+|---------|----------|------------|-----------------|
+| PUT 295 venduta | Feb 2026 | - | **Naked Put** |
+| PUT 220 comprata | Dic 2027 | ~22 mesi | **Protezione (P!)** |
+
+Le due PUT hanno scadenze distanti >12 mesi → non vengono raggruppate → passano allo Step 6 → classificate individualmente.
+
+### Strategia vera (esempio)
+
+| Opzione | Scadenza | Differenza | Classificazione |
+|---------|----------|------------|-----------------|
+| PUT 290 venduta | Mar 2026 | - | **Altre Strategie** |
+| PUT 280 comprata | Mar 2026 | 0 mesi | **Altre Strategie** |
+
+Stessa scadenza → raggruppate in "Altre Strategie" come spread.
 
 ---
 
-## Dettagli Tecnici
+## Riepilogo Tecnico
 
-### Logica Protezione Parziale
-
-La PUT comprata 220 verrà classificata come protezione parziale perché:
-1. Possiedi il sottostante (Google)
-2. L'esposizione netta è > 0 (hai 2 covered call, quindi almeno 200 azioni, ma la PUT 220 copre solo 100)
-
-### Rimozione Step Raggruppamento Multi-Gamba
-
-Il vecchio codice (righe 278-290) che forzava il raggruppamento quando `group.length > 1` verrà rimosso. Le opzioni verranno raggruppate in "Altre Strategie" solo se:
-- Non sono PUT vendute (→ Naked Put)
-- Non sono PUT comprate con sottostante (→ Protezione)
-- Non sono CALL comprate (→ Leap Call)
-- Non sono già state usate in strategie a 4 gambe
+| Elemento | Dettaglio |
+|----------|-----------|
+| File da modificare | `src/lib/derivativeStrategies.ts` |
+| Nuova funzione | `hasCloseExpiries(options)` |
+| Punto di modifica | Step 5, riga 280 |
+| Soglia temporale | 12 mesi |
+| Impatto | Solo opzioni con scadenze distanti passano a Step 6 |
 
