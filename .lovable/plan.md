@@ -1,240 +1,92 @@
 
-# Piano: Risk Analyzer - Esposizione Equity Reale
 
-## Obiettivo
-Creare una pagina Risk Analyzer che mostri l'esposizione reale in equity convertita in EUR, suddividendo il rischio in 4 categorie principali.
+# Piano: Fix Classificazione NETEASE in Covered Call e Protezioni
 
----
+## Problema Identificato
 
-## Categorie di Rischio
+NETEASE non viene classificato correttamente nonostante abbia:
+- 200 azioni (2 record da 100)
+- 1 CALL venduta (dovrebbe essere Covered Call)
+- 1 PUT comprata (dovrebbe essere Protezione)
 
-### 1. Rischio Stocks (al netto di protezioni)
-**Formula:**
-```
-Per ogni titolo azionario:
-- Se NON ha PUT comprate → Rischio = Quantità × Prezzo × 100 / Cambio
-- Se HA PUT comprate → Rischio = (Valore Azioni) - (Strike PUT × Contratti × 100) / Cambio
-```
+### Analisi Root Cause
 
-**Esempio concreto:**
-- 100 azioni valore $1000 ciascuna = $100.000
-- PUT comprata strike $800, 1 contratto (protegge 100 azioni)
-- Rischio = $100.000 - ($800 × 1 × 100) = $100.000 - $80.000 = $20.000
-- Rischio EUR = $20.000 / 1.1975 = €16.701
+Ho tracciato il flusso e identificato che il problema è nella funzione `findUnderlyingStock` che non sta trovando corrispondenza tra:
 
-### 2. Rischio Naked PUT
-**Formula:**
-```
-Rischio Naked PUT = Σ (Strike × Contratti × 100) / Cambio
-```
+| Tipo | Campo | Valore |
+|------|-------|--------|
+| Opzione | `underlying` | `"NETEASE INC"` |
+| Stock | `description` | `"AZ.NETEASE INC-ADR"` |
 
-**Esempio:**
-- PUT venduta strike $1000, 2 contratti
-- Rischio = $1000 × 2 × 100 = $200.000 / Cambio
+La normalizzazione **dovrebbe** funzionare:
+- Stock normalizzato: `"NETEASE"` (dopo rimozione di AZ., -, INC, ADR)
+- Opzione normalizzata: `"NETEASE"` (dopo rimozione di INC)
 
-### 3. Rischio Leap Call
-**Formula:**
-```
-Rischio Leap Call = Σ (Contratti × PMC × 100) / Cambio
-```
+Tuttavia, ci sono due possibili cause del fallimento:
 
-Il rischio delle LEAP CALL e il premio pagato (costo di acquisto), non il valore attuale.
+1. **Ordine delle operazioni regex**: La rimozione dei suffissi (INC, ADR) crea spazi multipli che non vengono normalizzati
+2. **Bug nel confronto token**: Il filtro `w.length > 2` potrebbe escludere token validi in casi edge
 
-**Esempio:**
-- LEAP CALL, 3 contratti, PMC $15
-- Rischio = 3 × $15 × 100 = $4.500 / Cambio
+## Soluzione Proposta
 
-### 4. Rischio Strategie
-**Formula:**
-```
-Rischio = Σ Max Loss di ogni strategia / Cambio
-```
+### Step 1: Fix nella funzione `normalizeForMatching`
 
-**Logica per strategia:**
-- **Iron Condor**: Max Loss = max(PUT spread width, CALL spread width) × 100 × contratti - GP
-- **Double Diagonal**: Max Loss = max spread × 100 × contratti - GP
-- **Broken Wing Butterfly**: Max Loss calcolato in base alla struttura
-- **Short Strangle**: Rischio = Strike PUT venduta × 100 × contratti (rischio infinito → usa strike PUT)
-- **Vertical Spread**: Max Loss = ampiezza spread × 100 × contratti - premio
-- **Altri spread definiti**: Max Loss specifico per tipo
-
----
-
-## Struttura UI della Pagina
-
-### Sezione 1: Card Riepilogo Totale
-Layout a 4 colonne con:
-1. **Rischio Stocks** (EUR) - con indicatore protezioni
-2. **Rischio Naked PUT** (EUR)
-3. **Rischio Leap Call** (EUR)
-4. **Rischio Strategie** (EUR)
-5. **Totale Esposizione** (EUR) - somma delle 4 categorie
-
-Include un grafico a barre orizzontali comparativo delle 4 categorie.
-
-### Sezione 2: Dettaglio Stocks per Sottostante (Collapsibile)
-Per ogni titolo azionario:
-- Nome titolo
-- Valore azioni possedute (valuta originale + EUR)
-- Protezioni attive: strike e contratti PUT comprate
-- Rischio residuo calcolato
-- Cambio applicato
-- Barra visuale: verde (protetto) vs rosso (rischio)
-
-### Sezione 3: Dettaglio Naked PUT (Collapsibile)
-Per ogni naked put:
-- Sottostante
-- Strike e scadenza
-- Numero contratti
-- Esposizione totale (valuta originale + EUR)
-
-### Sezione 4: Dettaglio Leap Call (Collapsibile)
-Per ogni leap call:
-- Sottostante
-- Strike e scadenza
-- Contratti e PMC
-- Premio pagato totale (rischio)
-
-### Sezione 5: Dettaglio Strategie (Collapsibile)
-Per ogni strategia:
-- Nome strategia (Iron Condor, Short Strangle, etc.)
-- Sottostante
-- Max Loss calcolato
-- Dettaglio calcolo in tooltip
-
----
-
-## File da Creare/Modificare
-
-### Nuovo: `src/lib/riskCalculator.ts`
+Aggiungere una normalizzazione spazi **dopo** la rimozione dei suffissi per evitare spazi multipli residui:
 
 ```typescript
-// Interfacce
-interface StockRiskDetail {
-  underlying: string;
-  stockValue: number;           // Valore azioni in valuta originale
-  protectionStrike: number | null;
-  protectionContracts: number;
-  riskOriginal: number;         // Rischio in valuta originale
-  riskEUR: number;              // Rischio convertito
-  currency: string;
-  exchangeRate: number;
-  hasProtection: boolean;
+function normalizeForMatching(text: string): string {
+  return text
+    .toUpperCase()
+    .replace(/^AZ\./i, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR)\b/gi, '')
+    .replace(/\s+/g, ' ')  // <-- SPOSTATO QUI: normalizza spazi DOPO rimozione suffissi
+    .trim();
 }
-
-interface NakedPutRiskDetail {
-  underlying: string;
-  strike: number;
-  contracts: number;
-  expiry: string;
-  riskOriginal: number;
-  riskEUR: number;
-  currency: string;
-  exchangeRate: number;
-}
-
-interface LeapCallRiskDetail {
-  underlying: string;
-  strike: number;
-  contracts: number;
-  avgCost: number;
-  expiry: string;
-  premiumPaid: number;          // Rischio = premio pagato
-  riskEUR: number;
-  currency: string;
-  exchangeRate: number;
-}
-
-interface StrategyRiskDetail {
-  strategyName: string;
-  underlying: string;
-  maxLoss: number;              // In valuta originale
-  maxLossEUR: number;
-  currency: string;
-  exchangeRate: number;
-  calculation: string;          // Descrizione calcolo per tooltip
-}
-
-interface RiskAnalysis {
-  // Totali EUR
-  totalStockRisk: number;
-  totalNakedPutRisk: number;
-  totalLeapCallRisk: number;
-  totalStrategyRisk: number;
-  grandTotal: number;
-  
-  // Dettagli
-  stockDetails: StockRiskDetail[];
-  nakedPutDetails: NakedPutRiskDetail[];
-  leapCallDetails: LeapCallRiskDetail[];
-  strategyDetails: StrategyRiskDetail[];
-}
-
-// Funzioni
-function calculateStockRisk(stocks: Position[], longPuts: LongPutPosition[]): StockRiskDetail[];
-function calculateNakedPutRisk(nakedPuts: NakedPutPosition[]): NakedPutRiskDetail[];
-function calculateLeapCallRisk(leapCalls: LeapCallPosition[]): LeapCallRiskDetail[];
-function calculateStrategyRisk(categories: DerivativeCategories): StrategyRiskDetail[];
-function analyzePortfolioRisk(positions: Position[], categories: DerivativeCategories): RiskAnalysis;
 ```
 
-Logica chiave per **Max Loss strategie**:
-- Iron Condor/Double Diagonal: usa la formula esistente nel codice
-- Short Strangle: `Strike PUT venduta × 100 × contratti`
-- Vertical Spread: `|Strike1 - Strike2| × 100 × contratti - premio netto`
-- Broken Wing Butterfly: calcolo specifico basato su strike
+### Step 2: Aggiungere NETEASE agli alias speciali (backup)
 
-### Nuovo: `src/hooks/useRiskAnalysis.ts`
+Per garantire il matching anche in casi edge, aggiungere NETEASE alla lista degli alias:
 
 ```typescript
-function useRiskAnalysis() {
-  const { positions } = usePortfolio();
-  
-  // Usa categorizeDerivatives esistente
-  const categories = categorizeDerivatives(derivatives, positions);
-  
-  // Calcola rischio usando riskCalculator
-  const riskAnalysis = analyzePortfolioRisk(positions, categories);
-  
-  return riskAnalysis;
+const SPECIAL_ALIASES: Record<string, string[]> = {
+  ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
+  PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
+  NETEASE: ['NETEASE', 'NTES', 'NETEASE INC', 'NETEASE INC ADR'],  // <-- NUOVO
+};
+```
+
+### Step 3: Migliorare il matching per token
+
+Ridurre la soglia `required` da `Math.min(2, stockTokens.length)` a sempre `1` quando il nome stock è composto da una sola parola significativa:
+
+```typescript
+if (stockTokens.length > 0) {
+  const shared = stockTokens.filter(t => optionTokens.includes(t)).length;
+  // Se lo stock ha un nome mono-parola (es. NETEASE), basta 1 match
+  const required = stockTokens.length === 1 ? 1 : Math.min(2, stockTokens.length);
+  if (shared >= required) return stock;
 }
 ```
 
-### Modifica: `src/pages/RiskAnalyzer.tsx`
+## File da Modificare
 
-Struttura componente:
-1. Header (esistente, aggiornato)
-2. Summary Cards (4 card colorate + totale)
-3. Grafico a barre comparativo
-4. Sezioni collassabili per ogni categoria
-5. Righe di dettaglio con tooltip esplicativi
+| File | Modifica |
+|------|----------|
+| `src/lib/derivativeStrategies.ts` | Fix `normalizeForMatching`, aggiunta alias NETEASE, miglioramento token matching |
 
----
+## Risultato Atteso
 
-## Visualizzazione Grafica
+Dopo le modifiche:
+- La CALL venduta NETEASE 145 FEB/26 apparirà in "Covered Call"
+- La PUT comprata NETEASE 80 JAN/27 apparirà in "Protezioni - Long Put"
+- Le altre opzioni NETEASE rimarranno raggruppate in "Altre Strategie"
 
-### Barra Comparativa Rischio
+## Testing
 
-```text
-  Stocks      ████████████████░░░░░░░░░░░░░░  €50.000 (40%)
-  Naked PUT   █████████████░░░░░░░░░░░░░░░░░  €40.000 (32%)
-  Leap Call   ████░░░░░░░░░░░░░░░░░░░░░░░░░░  €15.000 (12%)
-  Strategie   █████░░░░░░░░░░░░░░░░░░░░░░░░░  €20.000 (16%)
-```
+1. Verificare nella pagina Derivati che NETEASE appaia in Covered Call
+2. Verificare nella pagina Derivati che NETEASE appaia in Protezioni
+3. Verificare nel Risk Analyzer che il rischio stocks per NETEASE consideri la protezione
 
-### Barra Protezione per Singolo Stock
-
-```text
-  APPLE       ████████░░░░  Protetto: €80k | Rischio: €20k
-              [Verde]  [Rosso]
-```
-
----
-
-## Considerazioni Tecniche
-
-- Riutilizza `categorizeDerivatives` esistente per classificazione
-- Riutilizza `getEffectiveExchangeRate` da `useDerivativeNetting.ts`
-- Il campo `exchange_rate` nelle Position fornisce il cambio
-- Il campo `avg_cost` fornisce il PMC per le Leap Call
-- Gestisci i casi edge: cambio null (default 1), strike null, etc.
