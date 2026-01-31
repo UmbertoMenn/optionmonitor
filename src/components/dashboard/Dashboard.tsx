@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { usePortfolio } from '@/hooks/usePortfolio';
+import { usePositionsWithLivePrices } from '@/hooks/usePositionsWithLivePrices';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useDeposits } from '@/hooks/useDeposits';
-import { useLivePrices } from '@/hooks/useLivePrices';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -25,7 +24,17 @@ import { Link } from 'react-router-dom';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
-  const { portfolio, positions, summary, isLoading } = usePortfolio();
+  const { 
+    portfolio, 
+    positions, 
+    summary, 
+    isLoading,
+    isLoadingPrices,
+    lastFetched,
+    error: livePriceError,
+    refresh: refreshPrices,
+    getPriceForPosition,
+  } = usePositionsWithLivePrices();
   const { overrides } = useDerivativeOverrides();
   const netting = useDerivativeNetting(positions, summary, overrides);
   const { 
@@ -42,9 +51,6 @@ export function Dashboard() {
     deleteDeposit,
     isUpserting: isUpsertingDeposit,
   } = useDeposits(portfolio?.id);
-  
-  // Live prices hook - fetches every 5 minutes
-  const livePrices = useLivePrices(positions, { enabled: positions.length > 0 });
 
   const [viewMode, setViewMode] = useState<ViewMode>('base');
   const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(
@@ -98,10 +104,10 @@ export function Dashboard() {
               {/* Live Price Status */}
               <div className="ml-4 border-l border-border pl-4">
                 <LivePriceIndicator
-                  lastFetched={livePrices.lastFetched}
-                  isLoading={livePrices.isLoading}
-                  error={livePrices.error}
-                  onRefresh={livePrices.refresh}
+                  lastFetched={lastFetched}
+                  isLoading={isLoadingPrices}
+                  error={livePriceError}
+                  onRefresh={refreshPrices}
                 />
               </div>
             </div>
@@ -236,11 +242,11 @@ export function Dashboard() {
               <PositionsTable 
                 positions={positions} 
                 livePrices={{
-                  getPriceForPosition: livePrices.getPriceForPosition,
-                  lastFetched: livePrices.lastFetched,
-                  isLoading: livePrices.isLoading,
-                  error: livePrices.error,
-                  refresh: livePrices.refresh,
+                  getPriceForPosition,
+                  lastFetched,
+                  isLoading: isLoadingPrices,
+                  error: livePriceError,
+                  refresh: refreshPrices,
                 }}
               />
             </CardContent>

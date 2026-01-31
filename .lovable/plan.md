@@ -1,6 +1,12 @@
 
 # Piano: Estensione Prezzi Live a Strategie Derivati e Risk Analyzer
 
+## ✅ COMPLETATO
+
+**Implementazione completata.** Il sistema di prezzi live è ora centralizzato e utilizzato in tutte le pagine.
+
+---
+
 ## Obiettivo
 Estendere il sistema di prezzi live già implementato nella Dashboard alle pagine **Strategie Derivati** e **Risk Analyzer**, permettendo l'aggiornamento automatico ogni 5 minuti dei prezzi di mercato e il ricalcolo in tempo reale di tutti i valori derivati (P/L, Market Value, rischio, netting).
 

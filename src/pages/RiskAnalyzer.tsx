@@ -9,6 +9,7 @@ import {
   TrendingUp, 
   LogOut
 } from 'lucide-react';
+import { usePositionsWithLivePrices } from '@/hooks/usePositionsWithLivePrices';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useETFAllocations } from '@/hooks/useETFAllocations';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
@@ -16,6 +17,7 @@ import { EquityExposureView } from '@/components/risk/EquityExposureView';
 import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
+import { LivePriceIndicator } from '@/components/dashboard/LivePriceIndicator';
 import { calculateCurrencyExposure } from '@/lib/currencyExposure';
 import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
 
@@ -24,8 +26,19 @@ export function RiskAnalyzer() {
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
   const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
   
-  const riskAnalysis = useRiskAnalysis();
-  const { isLoading, ...analysis } = riskAnalysis;
+  // Get live positions from context
+  const {
+    positions,
+    isLoading: isLoadingPositions,
+    isLoadingPrices,
+    lastFetched,
+    error: livePriceError,
+    refresh: refreshPrices,
+  } = usePositionsWithLivePrices();
+  
+  // Pass live positions to risk analysis
+  const riskAnalysis = useRiskAnalysis({ externalPositions: positions });
+  const { isLoading: isLoadingRisk, ...analysis } = riskAnalysis;
   
   const { allocations, fetchMultipleAllocations, loading: etfLoading } = useETFAllocations();
   
@@ -91,6 +104,16 @@ export function RiskAnalyzer() {
               <div className="ml-4">
                 <PortfolioSelector />
               </div>
+              
+              {/* Live Price Status */}
+              <div className="ml-4 border-l border-border pl-4">
+                <LivePriceIndicator
+                  lastFetched={lastFetched}
+                  isLoading={isLoadingPrices}
+                  error={livePriceError}
+                  onRefresh={refreshPrices}
+                />
+              </div>
             </div>
             
             <div className="flex items-center gap-2">
@@ -116,7 +139,7 @@ export function RiskAnalyzer() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        {isLoading ? (
+        {(isLoadingPositions || isLoadingRisk) ? (
           <Card className="border-border bg-card">
             <CardContent className="py-12">
               <div className="text-center text-muted-foreground">
