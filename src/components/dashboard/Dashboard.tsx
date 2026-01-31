@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
+import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useDeposits } from '@/hooks/useDeposits';
 import { Button } from '@/components/ui/button';
@@ -22,7 +23,8 @@ import { Link } from 'react-router-dom';
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
   const { portfolio, positions, summary, isLoading } = usePortfolio();
-  const netting = useDerivativeNetting(positions, summary);
+  const { overrides } = useDerivativeOverrides();
+  const netting = useDerivativeNetting(positions, summary, overrides);
   const { 
     historicalData, 
     earliestEntry, 

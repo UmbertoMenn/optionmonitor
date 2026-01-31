@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Position, PortfolioSummary } from '@/types/portfolio';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
+import { DerivativeOverride } from '@/types/derivativeOverrides';
 
 export interface NettingResult {
   // Netting excluding OTM covered calls, with ITM covered calls valued at intrinsic value
@@ -37,11 +38,13 @@ function getEffectiveExchangeRate(position: Position): number {
  * 
  * @param positions All portfolio positions
  * @param summary Portfolio summary with total value
+ * @param overrides Manual derivative overrides
  * @returns Netting values for both calculations
  */
 export function useDerivativeNetting(
   positions: Position[],
-  summary: PortfolioSummary | null
+  summary: PortfolioSummary | null,
+  overrides: DerivativeOverride[] = []
 ): NettingResult {
   return useMemo(() => {
     if (!summary || positions.length === 0) {
@@ -60,8 +63,8 @@ export function useDerivativeNetting(
       };
     }
 
-    // Categorize derivatives to identify covered calls
-    const categories = categorizeDerivatives(derivatives, positions);
+    // Categorize derivatives to identify covered calls (with overrides)
+    const categories = categorizeDerivatives(derivatives, positions, overrides);
     
     // Create map of covered call IDs to their data for ITM/OTM check
     const coveredCallMap = new Map(
@@ -110,5 +113,5 @@ export function useDerivativeNetting(
       nettingExCoveredCall: summary.totalValue + nettingExCoveredCall,
       nettingTotal: summary.totalValue + totalNetting,
     };
-  }, [positions, summary]);
+  }, [positions, summary, overrides]);
 }
