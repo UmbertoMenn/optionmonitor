@@ -392,6 +392,14 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
   const underlyingPrice = underlying.current_price || 0;
   const isITM = strikePrice < underlyingPrice;
   
+  // For sold options (quantity < 0), P/L is inverted:
+  // If option price drops, seller profits (can buy back cheaper)
+  // If option price rises, seller loses (must buy back at higher price)
+  const isSold = option.quantity < 0;
+  const adjustedProfitLossPct = option.profit_loss_pct !== null && option.profit_loss_pct !== undefined
+    ? (isSold ? -option.profit_loss_pct : option.profit_loss_pct)
+    : null;
+  
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
@@ -462,9 +470,9 @@ function CoveredCallRow({ coveredCall }: { coveredCall: CoveredCallPosition }) {
               <p className="font-medium">{formatCurrency(option.current_price || 0, 'USD')}</p>
             </div>
           </div>
-          {option.profit_loss_pct !== null && (
+          {adjustedProfitLossPct !== null && (
             <div className="text-xs text-muted-foreground">
-              P/L: {formatPercentage(option.profit_loss_pct)}
+              P/L: {formatPercentage(adjustedProfitLossPct)}
             </div>
           )}
         </div>
