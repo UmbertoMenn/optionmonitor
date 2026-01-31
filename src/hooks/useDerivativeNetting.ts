@@ -10,17 +10,30 @@ export interface NettingResult {
 }
 
 /**
+ * Gets the effective exchange rate for a position.
+ * Returns the exchange_rate if available, otherwise defaults to 1 (EUR or fallback).
+ */
+function getEffectiveExchangeRate(position: Position): number {
+  if (position.exchange_rate && position.exchange_rate > 0) {
+    return position.exchange_rate;
+  }
+  // EUR currency or missing rate = no conversion needed
+  return 1;
+}
+
+/**
  * Calculates the portfolio value with derivatives netting.
+ * All derivative values are converted to EUR using their exchange_rate.
  * 
  * Netting logic:
- * - Sold options (quantity < 0): SUBTRACT (current_price * |quantity| * 100) from portfolio
+ * - Sold options (quantity < 0): SUBTRACT (current_price * |quantity| * 100 / exchange_rate)
  *   → Closing a sold option means buying it back, reducing portfolio value
- * - Bought options (quantity > 0): ADD (current_price * quantity * 100) to portfolio
+ * - Bought options (quantity > 0): ADD (current_price * quantity * 100 / exchange_rate)
  *   → Closing a bought option means selling it, increasing portfolio value
  * 
  * Netting ex CC logic:
- * - OTM covered calls (strike > stock price): excluded completely (no impact)
- * - ITM covered calls (strike <= stock price): subtract contracts * 100 * (stock_price - strike)
+ * - OTM covered calls (strike >= stock price): excluded completely (no impact)
+ * - ITM covered calls (strike < stock price): subtract (contracts * 100 * (stock_price - strike)) / exchange_rate
  * 
  * @param positions All portfolio positions
  * @param summary Portfolio summary with total value
@@ -63,10 +76,11 @@ export function useDerivativeNetting(
       const price = derivative.current_price ?? 0;
       const quantity = derivative.quantity;
       const multiplier = 100; // Standard option multiplier
+      const exchangeRate = getEffectiveExchangeRate(derivative);
       
       // Netting value: positive for bought options, negative for sold options
-      // This is what we'd get/pay if we closed the position
-      const nettingValue = price * quantity * multiplier;
+      // Convert to EUR by dividing by exchange rate
+      const nettingValue = (price * quantity * multiplier) / exchangeRate;
       
       totalNetting += nettingValue;
       
@@ -79,15 +93,15 @@ export function useDerivativeNetting(
         const underlyingPrice = coveredCall.underlying.current_price ?? 0;
         
         if (strikePrice < underlyingPrice) {
-          // ITM covered call: subtract intrinsic value
-          // contracts * 100 * (stock_price - strike)
+          // ITM covered call: subtract intrinsic value converted to EUR
+          // (contracts * 100 * (stock_price - strike)) / exchange_rate
           const contracts = Math.abs(quantity);
-          const intrinsicValue = contracts * multiplier * (underlyingPrice - strikePrice);
+          const intrinsicValue = (contracts * multiplier * (underlyingPrice - strikePrice)) / exchangeRate;
           nettingExCoveredCall -= intrinsicValue;
         }
         // OTM covered call (strike >= underlyingPrice): don't subtract anything
       } else {
-        // Not a covered call - include full netting value
+        // Not a covered call - include full netting value (already in EUR)
         nettingExCoveredCall += nettingValue;
       }
     }
