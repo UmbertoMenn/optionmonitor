@@ -871,6 +871,7 @@ const SPECIAL_ALIASES: Record<string, string[]> = {
   ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
   PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
   NETEASE: ['NETEASE', 'NTES', 'NETEASE INC', 'NETEASE INC ADR'],
+  ENI: ['ENI', 'ENI SPA', 'ENI STOCK', 'ENI - STOCK'],
 };
 
 /**
@@ -882,7 +883,7 @@ function normalizeForMatching(text: string): string {
     .replace(/^AZ\./i, '')  // Remove "AZ." prefix common in Italian brokers
     .replace(/\([^)]*\)/g, '')  // Remove content in parentheses like (OHIO)
     .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR)\b/gi, '') // Remove common suffixes including ADR
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '') // Remove common suffixes including ADR, SPA
     .replace(/\s+/g, ' ')  // Normalize spaces AFTER suffix removal to avoid multiple spaces
     .trim();
 }
