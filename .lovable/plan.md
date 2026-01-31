@@ -1,97 +1,133 @@
 
-# Piano: Riconoscimento ADR e Alias per Matching Opzioni
+# Piano: Carousel Unificato e Selettore Data Storica
 
-## Problema Identificato
-
-Dopo aver analizzato il database, ho trovato due casi distinti:
-
-### Caso 1: NETEASE
-| Tipo | Descrizione |
-|------|-------------|
-| Azione | `AZ.NETEASE INC-ADR` |
-| Opzione underlying | `NETEASE INC` |
-
-Il suffisso `-ADR` non viene rimosso durante la normalizzazione, quindi il matching fallisce.
-
-### Caso 2: PINDUODUO
-| Tipo | Descrizione |
-|------|-------------|
-| Azione | `AZ.PDD HOLDINGS INC` |
-| Opzione underlying | `PINDUODUO INC` |
-
-Sono la stessa società (Pinduoduo ha fatto rebranding in PDD Holdings nel 2023), ma hanno nomi completamente diversi.
+## Obiettivo
+Creare un'esperienza utente coerente dove un singolo controllo carousel governa la visualizzazione di tutte le metriche (Base / Netting Totale / Netting ex CC), e un selettore data permette di scegliere lo snapshot storico per il calcolo dei rendimenti.
 
 ---
 
-## Soluzione Proposta
+## Struttura Proposta
 
-### Modifica 1: Rimuovere suffisso `-ADR` nella normalizzazione
+```text
+┌──────────────────────────────────────────────────────────────────────────┐
+│  [●] [○] [○]  Vista: Base / Netting Totale / Netting ex CC               │
+├────────────────┬────────────────┬────────────────┬───────────────────────┤
+│  Patrimonio    │  Pat. Iniziale │  Giacenza      │  Profitto/Perdita     │
+│  (dinamico)    │  + Versamenti  │  Media         │  (dinamico)           │
+│                │                │                │  [📅 Selettore Data]  │
+├────────────────┴────────────────┴────────────────┴───────────────────────┤
+│                                                                          │
+│  ┌─────────────────────────────────────────┐  ┌─────────────────────┐   │
+│  │     Grafico Barre (dinamico)            │  │   Dati Storici      │   │
+│  │     Valore Asset vs Valore Nettato      │  │   Upload File       │   │
+│  └─────────────────────────────────────────┘  └─────────────────────┘   │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
 
-**File**: `src/lib/derivativeStrategies.ts`
-**Funzione**: `normalizeForMatching` (riga 594-603)
+---
 
-Aggiungere la rimozione del suffisso `-ADR` nella regex dei suffissi comuni:
+## Modifiche da Implementare
+
+### 1. Nuovo Componente Controllo Vista Unificato
+
+Creare una barra di navigazione sopra le 4 stat cards che:
+- Mostra 3 indicatori dot (Base, Netting Totale, Netting ex CC)
+- Mostra l'etichetta della vista corrente
+- Permette di navigare con frecce sx/dx o click sui dot
+- Lo stato viene passato a tutti i componenti figli
+
+### 2. Rimozione Carousel Individuali da StatsCards
+
+Attualmente `StatsCards` ha due carousel separati:
+- Uno per `patrimonioView`
+- Uno per `plView`
+
+Da sostituire con:
+- Un singolo prop `viewMode: 'base' | 'netting_total' | 'netting_ex_cc'` ricevuto dal parent
+- Tutte le 4 card mostrano valori coerenti con la vista selezionata
+- Rimuovere frecce e dot dai singoli card
+
+### 3. Selettore Data Storica nella Card P/L
+
+Aggiungere un dropdown o date picker nella card Profitto/Perdita che:
+- Lista tutte le date storiche disponibili (da `historicalData`)
+- Permette di selezionare quale snapshot usare come baseline
+- Mostra la data selezionata come subtext
+
+### 4. Unificazione Grafico Portfolio
+
+Il `PortfolioCarousel` attuale con 3 slide diventa:
+- Un singolo grafico che cambia dinamicamente in base a `viewMode`
+- Slide 1 (Base): Grafico a ciambella composizione portafoglio
+- Slide 2/3 (Netting): Grafico a barre comparativo
+
+### 5. Gestione Stato Centralizzata
+
+In `Dashboard.tsx`:
+- Nuovo state: `viewMode` e `selectedHistoricalDate`
+- Passare questi valori come props a `StatsCards` e `PortfolioCarousel`
+
+---
+
+## Dettagli Tecnici
+
+### File da Modificare
+
+| File | Modifiche |
+|------|-----------|
+| `src/components/dashboard/Dashboard.tsx` | Aggiungere stati `viewMode` e `selectedHistoricalDate`, creare barra controllo vista, rimuovere carousel dal PortfolioCarousel, passare props |
+| `src/components/dashboard/StatsCards.tsx` | Ricevere `viewMode`, `selectedHistoricalEntry`, `historicalData` come props, rimuovere stati locali e carousel, aggiungere dropdown date nella card P/L |
+| `src/hooks/useHistoricalData.ts` | Aggiungere funzione per trovare entry per data specifica |
+
+### Nuovo Props per StatsCards
 
 ```typescript
-function normalizeForMatching(text: string): string {
-  return text
-    .toUpperCase()
-    .replace(/^AZ\./i, '')
-    .replace(/\([^)]*\)/g, '')
-    .replace(/[^A-Z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    // Aggiunto: ADR ai suffissi da rimuovere
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR)\b/gi, '')
-    .trim();
+interface StatsCardsProps {
+  summary: PortfolioSummary;
+  portfolio: Portfolio | null;
+  nettingTotal: number;
+  nettingExCC: number;
+  viewMode: 'base' | 'netting_total' | 'netting_ex_cc';
+  historicalData: HistoricalDataEntry[];
+  selectedHistoricalDate: string | null;
+  onHistoricalDateChange: (date: string | null) => void;
 }
 ```
 
-Questo risolverà automaticamente:
-- `NETEASE INC-ADR` → `NETEASE`
-- `NETEASE INC` → `NETEASE`
-- Qualsiasi altro ADR con lo stesso pattern
+### Barra Controllo Vista
 
-### Modifica 2: Aggiungere alias PINDUODUO ↔ PDD HOLDINGS
-
-**File**: `src/lib/derivativeStrategies.ts`
-**Costante**: `SPECIAL_ALIASES` (riga 587-589)
-
-Aggiungere l'equivalenza esplicita:
+Componente posizionato sopra le stat cards:
 
 ```typescript
-const SPECIAL_ALIASES: Record<string, string[]> = {
-  ALPHABET: ['GOOGL', 'GOOG', 'GOOGLE', 'ALPHABET', 'ALPHABET INC', 'ALPHABET CLASS'],
-  PDD: ['PDD', 'PINDUODUO', 'PDD HOLDINGS', 'PINDUODUO INC', 'PDD HOLDINGS INC'],
-};
+<div className="flex items-center justify-center gap-4 mb-4">
+  <button onClick={prev}><ChevronLeft /></button>
+  <div className="flex gap-2">
+    {views.map((v, i) => (
+      <button 
+        key={v}
+        onClick={() => setViewMode(v)}
+        className={cn("w-2 h-2 rounded-full", viewMode === v ? "bg-primary" : "bg-muted")}
+      />
+    ))}
+  </div>
+  <span>{viewLabels[viewMode]}</span>
+  <button onClick={next}><ChevronRight /></button>
+</div>
 ```
 
----
+### Logica Grafico Dinamico
 
-## Risultato Atteso
-
-| Opzione | Azione | Match Attuale | Match Nuovo |
-|---------|--------|---------------|-------------|
-| NETEASE INC OPTION CALL 145 | AZ.NETEASE INC-ADR | ❌ No | ✅ Sì |
-| PINDUODUO INC OPTION CALL 110 | AZ.PDD HOLDINGS INC | ❌ No | ✅ Sì |
-
-Le opzioni verranno ora correttamente associate alle rispettive azioni, permettendo:
-- Classificazione come Covered Call (se vendute)
-- Classificazione come Protezione (se PUT comprate)
-- Visualizzazione corretta del prezzo sottostante (PS:...)
+Il grafico cambia in base a `viewMode`:
+- **Base**: Mostra DonutChart composizione portafoglio
+- **Netting Totale**: Mostra BarChart con confronto Base vs Netting Totale
+- **Netting ex CC**: Mostra BarChart con confronto Base vs Netting ex CC
 
 ---
 
-## Riepilogo Tecnico
+## Vantaggi
 
-| Elemento | Dettaglio |
-|----------|-----------|
-| File da modificare | `src/lib/derivativeStrategies.ts` |
-| Righe interessate | 587-589 (SPECIAL_ALIASES), 594-603 (normalizeForMatching) |
-| Tipo di modifica | Aggiunta suffisso ADR + nuovo alias PDD/PINDUODUO |
-| Impatto | Matching automatico per tutti gli ADR e per Pinduoduo/PDD |
-
----
-
-## Note Aggiuntive
-
-Questa soluzione è estensibile: se in futuro ci fossero altri casi di rebranding (es. Facebook → Meta), basterà aggiungere una riga a `SPECIAL_ALIASES`.
+1. **Coerenza**: Tutti i valori mostrati appartengono alla stessa "prospettiva"
+2. **Semplicità UX**: Un solo controllo invece di due carousel separati
+3. **Flessibilità calcolo P/L**: L'utente può scegliere qualsiasi data storica come riferimento
+4. **Meno confusione**: Non è più possibile avere Patrimonio in vista "base" e P/L in vista "netting"
