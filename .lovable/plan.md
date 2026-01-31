@@ -1,133 +1,176 @@
 
-# Piano: Carousel Unificato e Selettore Data Storica
+# Piano: Semplificazione Dati Storici e Nuovo Calcolo Rendimenti
 
 ## Obiettivo
-Creare un'esperienza utente coerente dove un singolo controllo carousel governa la visualizzazione di tutte le metriche (Base / Netting Totale / Netting ex CC), e un selettore data permette di scegliere lo snapshot storico per il calcolo dei rendimenti.
-
----
-
-## Struttura Proposta
-
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│  [●] [○] [○]  Vista: Base / Netting Totale / Netting ex CC               │
-├────────────────┬────────────────┬────────────────┬───────────────────────┤
-│  Patrimonio    │  Pat. Iniziale │  Giacenza      │  Profitto/Perdita     │
-│  (dinamico)    │  + Versamenti  │  Media         │  (dinamico)           │
-│                │                │                │  [📅 Selettore Data]  │
-├────────────────┴────────────────┴────────────────┴───────────────────────┤
-│                                                                          │
-│  ┌─────────────────────────────────────────┐  ┌─────────────────────┐   │
-│  │     Grafico Barre (dinamico)            │  │   Dati Storici      │   │
-│  │     Valore Asset vs Valore Nettato      │  │   Upload File       │   │
-│  └─────────────────────────────────────────┘  └─────────────────────┘   │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+Semplificare il form dei dati storici rimuovendo versamenti e giacenza media, e spostare questi input nel selettore P/L con calcolo automatico intelligente della giacenza media.
 
 ---
 
 ## Modifiche da Implementare
 
-### 1. Nuovo Componente Controllo Vista Unificato
+### 1. Semplificare HistoricalDataForm
 
-Creare una barra di navigazione sopra le 4 stat cards che:
-- Mostra 3 indicatori dot (Base, Netting Totale, Netting ex CC)
-- Mostra l'etichetta della vista corrente
-- Permette di navigare con frecce sx/dx o click sui dot
-- Lo stato viene passato a tutti i componenti figli
+Rimuovere dal form i campi:
+- Versamenti (`deposits`)
+- Giacenza Media (`average_balance`)
 
-### 2. Rimozione Carousel Individuali da StatsCards
+Il form salverà solo:
+- Data
+- Patrimonio Totale
+- Netting Totale
+- Netting ex CC
 
-Attualmente `StatsCards` ha due carousel separati:
-- Uno per `patrimonioView`
-- Uno per `plView`
+I campi `deposits` e `average_balance` nel database rimarranno con default 0.
 
-Da sostituire con:
-- Un singolo prop `viewMode: 'base' | 'netting_total' | 'netting_ex_cc'` ricevuto dal parent
-- Tutte le 4 card mostrano valori coerenti con la vista selezionata
-- Rimuovere frecce e dot dai singoli card
+### 2. Aggiornare Visualizzazione Dati Salvati
 
-### 3. Selettore Data Storica nella Card P/L
+Nella lista dei dati storici salvati, mostrare solo:
+- Data
+- Patrimonio
+- Netting Totale
+- Netting ex CC
 
-Aggiungere un dropdown o date picker nella card Profitto/Perdita che:
-- Lista tutte le date storiche disponibili (da `historicalData`)
-- Permette di selezionare quale snapshot usare come baseline
-- Mostra la data selezionata come subtext
+### 3. Aggiungere Input Versamenti e Giacenza Media in StatsCards
 
-### 4. Unificazione Grafico Portfolio
+Nella card Profitto/Perdita, sotto il selettore data, aggiungere:
+1. **Campo Versamenti**: input numerico per inserire i versamenti dal periodo storico ad oggi
+2. **Campo Giacenza Media**: 
+   - Calcolato automaticamente secondo la logica:
+     - Se versamenti = 0: Giacenza Media = Valore storico (base/netting_total/netting_ex_cc a seconda del viewMode)
+     - Se versamenti > 0: Giacenza Media = Valore storico + (versamenti / 2)
+   - Possibilità di override manuale
 
-Il `PortfolioCarousel` attuale con 3 slide diventa:
-- Un singolo grafico che cambia dinamicamente in base a `viewMode`
-- Slide 1 (Base): Grafico a ciambella composizione portafoglio
-- Slide 2/3 (Netting): Grafico a barre comparativo
+### 4. Nuovo Calcolo P/L
 
-### 5. Gestione Stato Centralizzata
+```
+P/L Assoluto = Valore Attuale - Valore Storico - Versamenti
+Rendimento % = (Valore Attuale - Valore Storico - Versamenti) / Giacenza Media × 100
+```
 
-In `Dashboard.tsx`:
-- Nuovo state: `viewMode` e `selectedHistoricalDate`
-- Passare questi valori come props a `StatsCards` e `PortfolioCarousel`
+### 5. Gestione Stato in Dashboard
+
+Aggiungere nuovi stati in Dashboard.tsx:
+- `deposits`: number (versamenti inseriti dall'utente)
+- `averageBalance`: number (giacenza media, calcolata o manuale)
+- `isManualAverageBalance`: boolean (flag per indicare se l'utente ha modificato manualmente)
 
 ---
 
 ## Dettagli Tecnici
 
-### File da Modificare
+### Modifiche ai File
 
 | File | Modifiche |
 |------|-----------|
-| `src/components/dashboard/Dashboard.tsx` | Aggiungere stati `viewMode` e `selectedHistoricalDate`, creare barra controllo vista, rimuovere carousel dal PortfolioCarousel, passare props |
-| `src/components/dashboard/StatsCards.tsx` | Ricevere `viewMode`, `selectedHistoricalEntry`, `historicalData` come props, rimuovere stati locali e carousel, aggiungere dropdown date nella card P/L |
-| `src/hooks/useHistoricalData.ts` | Aggiungere funzione per trovare entry per data specifica |
+| `src/components/dashboard/HistoricalDataForm.tsx` | Rimuovere campi versamenti e giacenza media dal form e dalla visualizzazione |
+| `src/components/dashboard/StatsCards.tsx` | Aggiungere input versamenti e giacenza media nella card P/L, implementare nuova logica calcolo |
+| `src/components/dashboard/Dashboard.tsx` | Aggiungere stati `deposits`, `averageBalance`, `isManualAverageBalance` e passarli a StatsCards |
 
-### Nuovo Props per StatsCards
+### Nuova Interfaccia StatsCards
 
 ```typescript
 interface StatsCardsProps {
-  summary: PortfolioSummary;
-  portfolio: Portfolio | null;
-  nettingTotal: number;
-  nettingExCC: number;
-  viewMode: 'base' | 'netting_total' | 'netting_ex_cc';
-  historicalData: HistoricalDataEntry[];
-  selectedHistoricalDate: string | null;
-  onHistoricalDateChange: (date: string | null) => void;
+  // ... props esistenti
+  deposits: number;
+  averageBalance: number;
+  isManualAverageBalance: boolean;
+  onDepositsChange: (value: number) => void;
+  onAverageBalanceChange: (value: number) => void;
+  onManualAverageBalanceToggle: (isManual: boolean) => void;
 }
 ```
 
-### Barra Controllo Vista
-
-Componente posizionato sopra le stat cards:
+### Logica Calcolo Giacenza Media (in StatsCards)
 
 ```typescript
-<div className="flex items-center justify-center gap-4 mb-4">
-  <button onClick={prev}><ChevronLeft /></button>
-  <div className="flex gap-2">
-    {views.map((v, i) => (
-      <button 
-        key={v}
-        onClick={() => setViewMode(v)}
-        className={cn("w-2 h-2 rounded-full", viewMode === v ? "bg-primary" : "bg-muted")}
-      />
-    ))}
-  </div>
-  <span>{viewLabels[viewMode]}</span>
-  <button onClick={next}><ChevronRight /></button>
-</div>
+// Calcolo automatico giacenza media quando cambia data storica o versamenti
+useEffect(() => {
+  if (isManualAverageBalance) return; // Non ricalcolare se manuale
+  
+  if (!selectedHistoricalEntry) {
+    onAverageBalanceChange(0);
+    return;
+  }
+  
+  // Prendi il valore storico in base al viewMode
+  let historicalValue: number;
+  switch (viewMode) {
+    case 'netting_total': historicalValue = selectedHistoricalEntry.netting_total; break;
+    case 'netting_ex_cc': historicalValue = selectedHistoricalEntry.netting_ex_cc; break;
+    default: historicalValue = selectedHistoricalEntry.total_value;
+  }
+  
+  // Calcola giacenza media
+  const calculatedAverage = deposits > 0 
+    ? historicalValue + (deposits / 2) 
+    : historicalValue;
+  
+  onAverageBalanceChange(calculatedAverage);
+}, [selectedHistoricalEntry, deposits, viewMode, isManualAverageBalance]);
 ```
 
-### Logica Grafico Dinamico
+### Nuovo Calcolo P/L
 
-Il grafico cambia in base a `viewMode`:
-- **Base**: Mostra DonutChart composizione portafoglio
-- **Netting Totale**: Mostra BarChart con confronto Base vs Netting Totale
-- **Netting ex CC**: Mostra BarChart con confronto Base vs Netting ex CC
+```typescript
+const calculatePL = () => {
+  if (!selectedHistoricalEntry) return { absolute: 0, percent: 0 };
+  
+  const historical = selectedHistoricalEntry;
+  let currentValue: number;
+  let historicalValue: number;
+
+  switch (viewMode) {
+    case 'netting_total':
+      currentValue = nettingTotal;
+      historicalValue = historical.netting_total;
+      break;
+    case 'netting_ex_cc':
+      currentValue = nettingExCC;
+      historicalValue = historical.netting_ex_cc;
+      break;
+    default:
+      currentValue = summary.totalValue;
+      historicalValue = historical.total_value;
+  }
+
+  // P/L = Valore Attuale - Valore Storico - Versamenti
+  const absolutePL = currentValue - historicalValue - deposits;
+  
+  // Rendimento % = P/L / Giacenza Media
+  const percentPL = averageBalance > 0 ? (absolutePL / averageBalance) * 100 : 0;
+  
+  return { absolute: absolutePL, percent: percentPL };
+};
+```
+
+### UI nella Card P/L
+
+```text
+┌─────────────────────────────────────┐
+│ Profitto/Perdita                    │
+│ +$12,500 (+8.5%)                    │
+│                                     │
+│ [📅 Data storica ▼]                │
+│                                     │
+│ Versamenti: [________] $            │
+│                                     │
+│ Giacenza Media: [________] $        │
+│ □ Calcola automaticamente           │
+└─────────────────────────────────────┘
+```
 
 ---
 
-## Vantaggi
+## Flusso Utente
 
-1. **Coerenza**: Tutti i valori mostrati appartengono alla stessa "prospettiva"
-2. **Semplicità UX**: Un solo controllo invece di due carousel separati
-3. **Flessibilità calcolo P/L**: L'utente può scegliere qualsiasi data storica come riferimento
-4. **Meno confusione**: Non è più possibile avere Patrimonio in vista "base" e P/L in vista "netting"
+1. L'utente seleziona una data storica dal dropdown
+2. Il sistema mostra gli input per Versamenti e Giacenza Media
+3. Se l'utente inserisce dei versamenti, la giacenza media si aggiorna automaticamente
+4. L'utente può modificare manualmente la giacenza media spuntando/deselezionando il checkbox
+5. Il P/L viene calcolato con la formula corretta
+
+---
+
+## Note Database
+
+I campi `deposits` e `average_balance` nella tabella `historical_data` rimarranno con default 0 ma non verranno più utilizzati attivamente. Non è necessaria una migrazione poiché i valori esistenti non impattano la nuova logica.
