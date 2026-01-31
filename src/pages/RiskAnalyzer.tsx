@@ -236,48 +236,37 @@ export function RiskAnalyzer() {
                 <CardTitle className="text-lg">Distribuzione del Rischio</CardTitle>
               </CardHeader>
               <CardContent className="space-y-5">
-              {riskCategories.map((cat, index) => {
-                  // Approximate EUR to USD conversion (typical rate ~1.08)
-                  const eurToUsd = 1.08;
-                  const valueUSD = cat.value * eurToUsd;
-                  
-                  return (
-                    <div key={index} className="space-y-1.5">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <div className={`p-1 rounded ${cat.color} bg-opacity-20`}>
-                              <cat.icon className={`w-3.5 h-3.5 ${cat.color.replace('bg-', 'text-')}`} />
-                            </div>
-                            <span className="font-medium text-sm">{cat.label}</span>
+                {riskCategories.map((cat, index) => (
+                  <div key={index} className="space-y-1.5">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className={`p-1 rounded ${cat.color} bg-opacity-20`}>
+                            <cat.icon className={`w-3.5 h-3.5 ${cat.color.replace('bg-', 'text-')}`} />
                           </div>
-                          <span className="text-xs text-muted-foreground ml-6">{cat.description}</span>
+                          <span className="font-medium text-sm">{cat.label}</span>
                         </div>
-                        <div className="text-right">
-                          <div>
-                            <span className="font-semibold">{formatEUR(cat.value)}</span>
-                            <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {formatNumber(valueUSD, 0)} $
-                          </div>
-                        </div>
+                        <span className="text-xs text-muted-foreground ml-6">{cat.description}</span>
                       </div>
-                      <div className="h-5 bg-muted rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full ${cat.color} transition-all duration-500 flex items-center justify-end pr-2`}
-                          style={{ width: `${Math.max(cat.percentage, 2)}%` }}
-                        >
-                          {cat.percentage > 10 && (
-                            <span className="text-xs font-medium text-white">
-                              {cat.percentage.toFixed(0)}%
-                            </span>
-                          )}
-                        </div>
+                      <div className="text-right">
+                        <span className="font-semibold">{formatEUR(cat.value)}</span>
+                        <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
                       </div>
                     </div>
-                  );
-                })}
+                    <div className="h-5 bg-muted rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full ${cat.color} transition-all duration-500 flex items-center justify-end pr-2`}
+                        style={{ width: `${Math.max(cat.percentage, 2)}%` }}
+                      >
+                        {cat.percentage > 10 && (
+                          <span className="text-xs font-medium text-white">
+                            {cat.percentage.toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
 
