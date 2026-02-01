@@ -1,182 +1,157 @@
 
-# Piano: Short Strangle - Max Loss solo lato PUT + Warning Illimitato
+
+# Piano: Compattare Schede Stocks/ETF Mantenendo Barra Protezione
 
 ## Obiettivo
 
-Per le strategie **Short Strangle**, calcolare il Max Loss considerando **solo la PUT venduta** (rischio definito) e aggiungere un **triangolino giallo** con tooltip che spiega la convenzione adottata.
+Rendere le schede del dettaglio Stocks ed ETF nel Risk Analyzer più compatte, **mantenendo la barra con le percentuali di protezione** ma riducendo lo spazio verticale generale.
 
 ---
 
-## Motivazione
+## Modifiche di Compattamento
 
-Lo Short Strangle ha:
-- **Lato PUT**: Rischio definito = Strike PUT × Contratti × 100 - Premio netto
-- **Lato CALL**: Rischio teoricamente **illimitato** (il sottostante può salire all'infinito)
+### Riduzioni Proposte
 
-Visualizzare il rischio CALL illimitato non ha senso pratico. La convenzione corretta è mostrare il rischio PUT (definito) con un indicatore che avverte della natura illimitata del rischio CALL.
+| Elemento | Attuale | Nuovo |
+|----------|---------|-------|
+| Padding scheda | `p-4` | `p-3` |
+| Spaziatura interna | `space-y-3` | `space-y-2` |
+| Griglia dettagli | `grid-cols-3 gap-4` | `grid-cols-3 gap-2` |
+| Altezza barra protezione | `h-4` | `h-3` |
+| Spaziatura tra schede | `space-y-4` | `space-y-2` |
 
----
+### Layout Visivo Atteso
 
-## Modifiche Previste
-
-### 1. `src/lib/universalMaxLoss.ts`
-
-Aggiungere funzione per riconoscere Short Strangle e calcolare solo il rischio PUT:
-
-```typescript
-/**
- * Detect if the strategy is a Short Strangle (1+ sold PUT + 1+ sold CALL, no protection)
- */
-function isShortStrangle(legs: OptionLeg[]): boolean {
-  const soldPuts = legs.filter(l => l.type === 'put' && l.quantity < 0);
-  const soldCalls = legs.filter(l => l.type === 'call' && l.quantity < 0);
-  const boughtPuts = legs.filter(l => l.type === 'put' && l.quantity > 0);
-  const boughtCalls = legs.filter(l => l.type === 'call' && l.quantity > 0);
-  
-  // Short Strangle: solo opzioni vendute, nessuna protezione
-  return soldPuts.length > 0 && soldCalls.length > 0 && 
-         boughtPuts.length === 0 && boughtCalls.length === 0;
-}
-
-/**
- * Calculate Short Strangle max loss using only the PUT side.
- * Returns maxLoss @ price = 0 for the PUT leg minus net premium.
- */
-function calculateShortStrangleMaxLoss(legs: OptionLeg[]): MaxLossResult {
-  const soldPuts = legs.filter(l => l.type === 'put' && l.quantity < 0);
-  
-  // Max loss PUT side = Strike × |qty| × 100 per ogni PUT venduta
-  const putMaxLoss = soldPuts.reduce((sum, put) => {
-    return sum + put.strike * Math.abs(put.quantity) * 100;
-  }, 0);
-  
-  // Net premium received (credito netto)
-  const netPremium = legs.reduce((sum, l) => sum + (-l.quantity * l.avgCost * 100), 0);
-  
-  // Max Loss = Rischio PUT - Premio netto incassato
-  const maxLoss = Math.max(0, putMaxLoss - netPremium);
-  
-  return {
-    maxLoss,
-    worstPrice: 0,
-    calculation: `Short Strangle: PUT side risk @ $0 = ${putMaxLoss.toFixed(0)} - GP ${netPremium.toFixed(0)} = ${maxLoss.toFixed(0)}`,
-    isUnlimited: true  // Flag per UI
-  };
-}
 ```
+Attuale (~120px per scheda):
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  APPLE  [Protetto]                             Rischio: €45,230     │
+│  1,200 azioni @ USD 180.50                  USD 52,100 / 1.1500     │
+│                                                                     │
+│  Valore Azioni: USD 216,600   PUT Strike: USD 170   Contratti: 12   │
+│                                                                     │
+│  ╔══════════════════════════╗╔══════════════════════════════════╗   │
+│  ║   Protetto 75%           ║║   Rischio 25%                    ║   │
+│  ╚══════════════════════════╝╚══════════════════════════════════╝   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 
-Modificare `calculateUniversalMaxLoss` per intercettare gli Short Strangle:
-
-```typescript
-export function calculateUniversalMaxLoss(legs: OptionLeg[]): MaxLossResult {
-  // ... existing code ...
-  
-  // CASO SPECIALE: Short Strangle → usa solo rischio PUT
-  if (isShortStrangle(legs)) {
-    return calculateShortStrangleMaxLoss(legs);
-  }
-  
-  // ... rest of existing universal calculation ...
-}
+Nuovo (~80px per scheda):
+┌─────────────────────────────────────────────────────────────────────┐
+│  APPLE  [Protetto]                             Rischio: €45,230     │
+│  1,200 azioni @ USD 180.50                  USD 52,100 / 1.1500     │
+│  Valore: USD 216,600   PUT: USD 170   Ctr: 12                       │
+│  ╔═══════════════════════╗╔═══════════════════════════════════════╗ │
+│  ║  Protetto 75%         ║║  Rischio 25%                          ║ │
+│  ╚═══════════════════════╝╚═══════════════════════════════════════╝ │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 2. `src/lib/riskCalculator.ts`
+## Modifiche Tecniche
 
-Aggiungere campo `hasUnlimitedRisk` all'interfaccia `StrategyRiskDetail`:
+### File: `src/components/risk/EquityExposureView.tsx`
+
+#### 1. Ridurre Spaziatura Lista Schede
 
 ```typescript
-export interface StrategyRiskDetail {
-  strategyName: string;
-  underlying: string;
-  maxLoss: number;
-  maxLossEUR: number;
-  currency: string;
-  exchangeRate: number;
-  calculation: string;
-  hasUnlimitedRisk: boolean;  // NUOVO: indica rischio teoricamente illimitato
-}
+// Linea 255 (ETF) e 360 (Stocks)
+// Prima
+<div className="space-y-4">
+
+// Dopo
+<div className="space-y-2">
 ```
 
-Passare il flag `isUnlimited` dal risultato del calcolo:
+#### 2. Ridurre Padding Scheda
 
 ```typescript
-function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { 
-  maxLoss: number; 
-  calculation: string;
-  isUnlimited: boolean;  // NUOVO
-} {
-  const legs = positionsToLegs(group.options.map(o => o.option));
-  const result = calculateUniversalMaxLoss(legs);
-  
-  return {
-    maxLoss: result.maxLoss,
-    calculation: `${group.strategyName}: ${result.calculation}`,
-    isUnlimited: result.isUnlimited
-  };
-}
+// Linea 263 (ETF) e 368 (Stocks)
+// Prima
+<div key={index} className="p-4 rounded-lg bg-muted/50 space-y-3">
+
+// Dopo
+<div key={index} className="p-3 rounded-lg bg-muted/50 space-y-2">
+```
+
+#### 3. Compattare Griglia Dettagli
+
+```typescript
+// Linea 289 (ETF) e 394 (Stocks)
+// Prima
+<div className="grid grid-cols-3 gap-4 text-sm">
+
+// Dopo
+<div className="grid grid-cols-3 gap-2 text-xs">
+```
+
+#### 4. Abbreviare Label Dettagli
+
+```typescript
+// Prima
+<span className="text-muted-foreground">Valore Azioni:</span>
+<span className="text-muted-foreground">PUT Strike:</span>
+<span className="text-muted-foreground">Contratti:</span>
+
+// Dopo
+<span className="text-muted-foreground">Valore:</span>
+<span className="text-muted-foreground">PUT:</span>
+<span className="text-muted-foreground">Ctr:</span>
+```
+
+#### 5. Ridurre Altezza Barra Protezione
+
+```typescript
+// Linea 310 (ETF) e 415 (Stocks)
+// Prima
+<div className="h-4 rounded-full overflow-hidden flex">
+
+// Dopo
+<div className="h-3 rounded-full overflow-hidden flex">
+```
+
+#### 6. Rimuovere Spaziatura Extra Barra
+
+```typescript
+// Linea 309 (ETF) e 414 (Stocks)
+// Prima
+<div className="space-y-1">
+  <div className="h-4 ...">
+
+// Dopo (rimuove wrapper space-y-1)
+<div className="h-3 rounded-full overflow-hidden flex">
 ```
 
 ---
 
-### 3. `src/components/risk/EquityExposureView.tsx`
+## Risparmio Spazio Stimato
 
-Aggiungere triangolino giallo con tooltip per strategie con rischio illimitato:
-
-```typescript
-{strat.hasUnlimitedRisk && (
-  <TooltipProvider>
-    <Tooltip>
-      <TooltipTrigger>
-        <AlertTriangle className="w-4 h-4 text-amber-500" />
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">
-        <p className="font-medium text-amber-500">Rischio Illimitato</p>
-        <p className="text-sm">
-          Il Max Loss mostrato considera solo il lato PUT (rischio definito). 
-          Il lato CALL ha rischio teoricamente illimitato.
-        </p>
-      </TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
-)}
-```
-
----
-
-## UI Preview
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│  Short Strangle  ⓘ  ⚠️                      €25,850        │
-│  ADOBE                                    ML: USD 25,850    │
-└─────────────────────────────────────────────────────────────┘
-                      ↑
-           Triangolo giallo: "Rischio Illimitato - 
-           Il Max Loss mostrato considera solo il lato PUT..."
-```
+| Modifica | Risparmio |
+|----------|-----------|
+| Padding p-4 → p-3 | ~8px |
+| space-y-3 → space-y-2 | ~8px |
+| gap-4 → gap-2 | ~8px |
+| h-4 → h-3 | ~4px |
+| space-y-4 → space-y-2 (tra schede) | ~8px per scheda |
+| **Totale per scheda** | **~35-40px** (~30% più compatto) |
 
 ---
 
 ## File da Modificare
 
-| File | Modifica |
-|------|----------|
-| `src/lib/universalMaxLoss.ts` | Aggiungere `isShortStrangle()` e `calculateShortStrangleMaxLoss()` |
-| `src/lib/riskCalculator.ts` | Aggiungere `hasUnlimitedRisk` a `StrategyRiskDetail` e passare flag |
-| `src/components/risk/EquityExposureView.tsx` | Aggiungere triangolino giallo con tooltip |
+| File | Modifiche |
+|------|-----------|
+| `src/components/risk/EquityExposureView.tsx` | Righe 255, 263, 289, 309-310 (ETF) e 360, 368, 394, 414-415 (Stocks) |
 
 ---
 
-## Esempio Adobe
+## Elementi NON Modificati
 
-Prima (calcolo errato con rischio CALL illimitato):
-- Max Loss: ~$299,850 (prezzo teorico @10x strike)
+- **Barra protezione**: Mantenuta con percentuali visibili
+- **Badge "Protetto"**: Invariato
+- **Nome strumento**: Stessa prominenza
+- **Valori EUR/Originale**: Stessa posizione a destra
+- **Struttura generale**: Layout a due colonne mantenuto
 
-Dopo (solo rischio PUT):
-- Strike PUT: $275
-- Contratti: 1
-- GP: $735 + $915 = $1,650
-- **Max Loss PUT side: $275 × 100 - $1,650 = $25,850** ✓
-- **Indicatore**: ⚠️ Rischio Illimitato (lato CALL)
