@@ -63,6 +63,7 @@ export interface StrategyRiskDetail {
   currency: string;
   exchangeRate: number;
   calculation: string;          // Descrizione calcolo per tooltip
+  hasUnlimitedRisk: boolean;    // Flag per strategie con rischio illimitato (es. Short Strangle)
 }
 
 export interface CommodityRiskDetail {
@@ -307,11 +308,15 @@ function calculateDoubleDiagonalMaxLoss(dd: DoubleDiagonalPosition): { maxLoss: 
 /**
  * Calculate strategy risk for grouped other strategies using universal formula.
  */
-function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss: number; calculation: string } {
+function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { 
+  maxLoss: number; 
+  calculation: string; 
+  isUnlimited: boolean;
+} {
   const legs = positionsToLegs(group.options.map(o => o.option));
   
   if (legs.length === 0) {
-    return { maxLoss: 0, calculation: 'Nessuna gamba' };
+    return { maxLoss: 0, calculation: 'Nessuna gamba', isUnlimited: false };
   }
   
   const result = calculateUniversalMaxLoss(legs);
@@ -321,7 +326,8 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): { maxLoss
   
   return {
     maxLoss: result.maxLoss,
-    calculation: `${strategyPrefix}${result.calculation}`
+    calculation: `${strategyPrefix}${result.calculation}`,
+    isUnlimited: result.isUnlimited
   };
 }
 
@@ -344,7 +350,8 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       maxLossEUR: maxLoss / exchangeRate,
       currency,
       exchangeRate,
-      calculation
+      calculation,
+      hasUnlimitedRisk: false
     });
   }
   
@@ -361,7 +368,8 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       maxLossEUR: maxLoss / exchangeRate,
       currency,
       exchangeRate,
-      calculation
+      calculation,
+      hasUnlimitedRisk: false
     });
   }
   
@@ -372,7 +380,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     const firstOption = group.options[0].option;
     const exchangeRate = getEffectiveExchangeRate(firstOption);
     const currency = firstOption.currency || 'USD';
-    const { maxLoss, calculation } = calculateGroupedStrategyMaxLoss(group);
+    const { maxLoss, calculation, isUnlimited } = calculateGroupedStrategyMaxLoss(group);
     
     result.push({
       strategyName: group.strategyName || 'Strategia Complessa',
@@ -381,7 +389,8 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       maxLossEUR: maxLoss / exchangeRate,
       currency,
       exchangeRate,
-      calculation
+      calculation,
+      hasUnlimitedRisk: isUnlimited
     });
   }
   

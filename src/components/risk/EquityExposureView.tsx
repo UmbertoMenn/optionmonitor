@@ -602,6 +602,22 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
+                        {strat.hasUnlimitedRisk && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs">
+                                <p className="font-medium text-amber-500">Rischio Illimitato</p>
+                                <p className="text-sm">
+                                  Il Max Loss mostrato considera solo il lato PUT (rischio definito). 
+                                  Il lato CALL ha rischio teoricamente illimitato.
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {strat.underlying}

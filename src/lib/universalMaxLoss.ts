@@ -74,6 +74,51 @@ function hasUnlimitedRisk(legs: OptionLeg[]): boolean {
 }
 
 /**
+ * Detect if the strategy is a Short Strangle (1+ sold PUT + 1+ sold CALL, no protection).
+ */
+function isShortStrangle(legs: OptionLeg[]): boolean {
+  const soldPuts = legs.filter(l => l.type === 'put' && l.quantity < 0);
+  const soldCalls = legs.filter(l => l.type === 'call' && l.quantity < 0);
+  const boughtPuts = legs.filter(l => l.type === 'put' && l.quantity > 0);
+  const boughtCalls = legs.filter(l => l.type === 'call' && l.quantity > 0);
+  
+  // Short Strangle: only sold options, no protection
+  return soldPuts.length > 0 && soldCalls.length > 0 && 
+         boughtPuts.length === 0 && boughtCalls.length === 0;
+}
+
+/**
+ * Calculate Short Strangle max loss using only the PUT side.
+ * The CALL side has unlimited risk, so we use a convention to show only PUT risk.
+ */
+function calculateShortStrangleMaxLoss(legs: OptionLeg[]): MaxLossResult {
+  const soldPuts = legs.filter(l => l.type === 'put' && l.quantity < 0);
+  
+  // Max loss PUT side = Strike × |qty| × 100 for each sold PUT
+  const putMaxLoss = soldPuts.reduce((sum, put) => {
+    return sum + put.strike * Math.abs(put.quantity) * 100;
+  }, 0);
+  
+  // Net premium received (credit received)
+  const netPremium = legs.reduce((sum, l) => sum + (-l.quantity * l.avgCost * 100), 0);
+  
+  // Max Loss = PUT risk - Net premium received
+  const maxLoss = Math.max(0, putMaxLoss - netPremium);
+  
+  // Build calculation description
+  const soldCalls = legs.filter(l => l.type === 'call' && l.quantity < 0);
+  const putStrike = soldPuts.length > 0 ? soldPuts[0].strike : 0;
+  const callStrike = soldCalls.length > 0 ? soldCalls[0].strike : 0;
+  
+  return {
+    maxLoss,
+    worstPrice: 0,
+    calculation: `Short Strangle P${putStrike}/C${callStrike} | GP: ${netPremium.toFixed(0)} | ML PUT side @ $0 = ${maxLoss.toFixed(0)}`,
+    isUnlimited: true
+  };
+}
+
+/**
  * Apply sanity checks and adjust max loss if needed.
  */
 function validateMaxLoss(legs: OptionLeg[], calculatedMaxLoss: number): number {
@@ -135,6 +180,11 @@ export function calculateUniversalMaxLoss(legs: OptionLeg[]): MaxLossResult {
       calculation: 'Nessuna gamba',
       isUnlimited: false
     };
+  }
+  
+  // SPECIAL CASE: Short Strangle → use only PUT side risk
+  if (isShortStrangle(legs)) {
+    return calculateShortStrangleMaxLoss(legs);
   }
   
   // Check for unlimited risk (naked short calls)
