@@ -162,7 +162,7 @@ export function CurrencyExposureView({
       .reduce((sum, c) => sum + c.totalRisk, 0);
   }, [safeCurrencyExposure]);
   
-  // Group currencies beyond top 5 into "ALTRI" for chart display
+  // Group currencies beyond top 5 into "OTHER" for chart display
   const MAX_CURRENCIES_IN_CHART = 5;
   const chartData = useMemo(() => {
     // First, check if we even need to group
@@ -170,26 +170,39 @@ export function CurrencyExposureView({
       return safeCurrencyExposure.map((c, idx) => ({ ...c, chartKey: `${c.currency}-${idx}` }));
     }
     
-    const topCurrencies = safeCurrencyExposure.slice(0, MAX_CURRENCIES_IN_CHART);
-    const otherCurrencies = safeCurrencyExposure.slice(MAX_CURRENCIES_IN_CHART);
-    const otherTotal = otherCurrencies.reduce((sum, c) => sum + c.totalRisk, 0);
-    const otherPercentage = otherCurrencies.reduce((sum, c) => sum + c.percentage, 0);
+    // Check if "OTHER" already exists in top currencies
+    const otherIndex = safeCurrencyExposure.findIndex(c => c.currency === 'OTHER');
     
-    // Only add "ALTRI" if there are actually other currencies to group
-    if (otherTotal <= 0) {
+    // Get top currencies (excluding OTHER if it exists, we'll handle it separately)
+    const currenciesWithoutOther = safeCurrencyExposure.filter(c => c.currency !== 'OTHER');
+    const existingOther = otherIndex >= 0 ? safeCurrencyExposure[otherIndex] : null;
+    
+    const topCurrencies = currenciesWithoutOther.slice(0, MAX_CURRENCIES_IN_CHART - (existingOther ? 1 : 0));
+    const currenciesToGroup = currenciesWithoutOther.slice(MAX_CURRENCIES_IN_CHART - (existingOther ? 1 : 0));
+    
+    // Calculate totals for grouped currencies
+    const groupedTotal = currenciesToGroup.reduce((sum, c) => sum + c.totalRisk, 0);
+    const groupedPercentage = currenciesToGroup.reduce((sum, c) => sum + c.percentage, 0);
+    
+    // Merge with existing OTHER or create new OTHER
+    const otherTotalRisk = (existingOther?.totalRisk || 0) + groupedTotal;
+    const otherPercentage = (existingOther?.percentage || 0) + groupedPercentage;
+    
+    // Only add OTHER if there's something to show
+    if (otherTotalRisk <= 0) {
       return topCurrencies.map((c, idx) => ({ ...c, chartKey: `${c.currency}-${idx}` }));
     }
     
     return [
       ...topCurrencies.map((c, idx) => ({ ...c, chartKey: `${c.currency}-${idx}` })),
       {
-        currency: 'ALTRI',
-        totalRisk: otherTotal,
-        totalRiskOriginal: otherTotal,
+        currency: 'OTHER',
+        totalRisk: otherTotalRisk,
+        totalRiskOriginal: otherTotalRisk,
         percentage: otherPercentage,
-        breakdown: { stocks: 0, bonds: 0, commodities: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
-        instruments: [],
-        chartKey: 'ALTRI-grouped'
+        breakdown: existingOther?.breakdown || { stocks: 0, bonds: 0, commodities: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
+        instruments: existingOther?.instruments || [],
+        chartKey: 'OTHER-grouped'
       }
     ];
   }, [safeCurrencyExposure]);
