@@ -10,7 +10,7 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
+import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info } from 'lucide-react';
 import { 
   SectorExposure, 
   TopHolding, 
@@ -134,6 +134,12 @@ export function SectorAllocationView({
                 </span>
               </div>
             )}
+            <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
+              <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
+              <span className="text-xs text-blue-600 dark:text-blue-400">
+                Commodities escluse dall'analisi settoriale
+              </span>
+            </div>
           </CardContent>
         </Card>
 

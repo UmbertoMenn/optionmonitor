@@ -7,7 +7,7 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink, AlertTriangle, Landmark, Info } from 'lucide-react';
 import { CurrencyExposure, getCurrencyColor, InstrumentDetail } from '@/lib/currencyExposure';
 import { formatEUR, formatCurrency } from '@/lib/formatters';
 import { Badge } from '@/components/ui/badge';
@@ -23,10 +23,13 @@ interface CurrencyExposureViewProps {
   loadedETFCount?: number;
   includeDerivatives: boolean;
   onIncludeDerivativesChange: (value: boolean) => void;
+  includeBonds: boolean;
+  onIncludeBondsChange: (value: boolean) => void;
 }
 
 const CATEGORY_CONFIG = {
   stocks: { label: 'Stocks & ETF', icon: TrendingUp, colorClass: 'text-blue-500' },
+  bonds: { label: 'Obbligazioni', icon: Landmark, colorClass: 'text-cyan-500' },
   commodities: { label: 'Commodities', icon: BarChart3, colorClass: 'text-orange-500' },
   nakedPuts: { label: 'Naked PUT', icon: TrendingDown, colorClass: 'text-red-500' },
   leapCalls: { label: 'Leap Call', icon: DollarSign, colorClass: 'text-amber-500' },
@@ -138,7 +141,9 @@ export function CurrencyExposureView({
   etfCount = 0,
   loadedETFCount = 0,
   includeDerivatives,
-  onIncludeDerivativesChange
+  onIncludeDerivativesChange,
+  includeBonds,
+  onIncludeBondsChange
 }: CurrencyExposureViewProps) {
   const safeCurrencyExposure = currencyExposure.filter((c) => {
     return (
@@ -171,15 +176,27 @@ export function CurrencyExposureView({
                 </div>
                 <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch 
-                  id="include-derivatives"
-                  checked={includeDerivatives}
-                  onCheckedChange={onIncludeDerivativesChange}
-                />
-                <Label htmlFor="include-derivatives" className="text-sm text-muted-foreground cursor-pointer">
-                  Includi Derivati
-                </Label>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="include-derivatives"
+                    checked={includeDerivatives}
+                    onCheckedChange={onIncludeDerivativesChange}
+                  />
+                  <Label htmlFor="include-derivatives" className="text-sm text-muted-foreground cursor-pointer">
+                    Derivati
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="include-bonds"
+                    checked={includeBonds}
+                    onCheckedChange={onIncludeBondsChange}
+                  />
+                  <Label htmlFor="include-bonds" className="text-sm text-muted-foreground cursor-pointer">
+                    Bond
+                  </Label>
+                </div>
               </div>
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
@@ -206,6 +223,14 @@ export function CurrencyExposureView({
                 <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
                 <span className="text-xs text-amber-600 dark:text-amber-400">
                   Derivati esclusi dall'analisi (Naked PUT, Leap Call, Strategie)
+                </span>
+              </div>
+            )}
+            {!includeBonds && (
+              <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
+                <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                <span className="text-xs text-blue-600 dark:text-blue-400">
+                  Obbligazioni escluse dall'analisi
                 </span>
               </div>
             )}
@@ -310,6 +335,11 @@ export function CurrencyExposureView({
                         instruments={curr.instruments} 
                         category="stocks" 
                         total={curr.breakdown.stocks} 
+                      />
+                      <CategoryBreakdown 
+                        instruments={curr.instruments} 
+                        category="bonds" 
+                        total={curr.breakdown.bonds} 
                       />
                       <CategoryBreakdown 
                         instruments={curr.instruments} 
