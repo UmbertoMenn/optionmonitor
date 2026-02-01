@@ -1,147 +1,202 @@
 
+# Piano: Toggle Attivo di Default + Avvisi Commodities/Bond
 
-# Piano: Feedback Visivo per Risoluzione Settori AI
+## Modifiche Richieste
 
-## Problema
+L'utente ha richiesto 3 modifiche:
 
-Quando l'utente apre la vista "Sector Allocation", la risoluzione AI dei settori impiega circa 10 secondi. Attualmente:
-- Lo stato `sectorMappingsLoading` esiste nel hook ma **non viene mostrato all'utente**
-- L'unico feedback è per il caricamento ETF, non per la risoluzione settori
-- L'utente vede dati incompleti senza sapere che sta ancora elaborando
+| # | Modifica | Vista | File |
+|---|----------|-------|------|
+| 1 | Toggle "Includi Derivati" attivo di default | Risk Analyzer | `RiskAnalyzer.tsx` |
+| 2 | Avviso che le commodities sono escluse | Sector Allocation | `SectorAllocationView.tsx` |
+| 3 | Toggle "Includi Bond" + avviso se disattivato | Currency Exposure | `CurrencyExposureView.tsx`, `currencyExposure.ts` |
 
-## Soluzione Proposta
+---
 
-Implementare un feedback a due livelli:
+## Dettaglio Implementazione
 
-### 1. Toast Informativo con Progress (Sonner)
+### 1. Toggle Derivati Attivo di Default
 
-Mostrare un toast persistente durante la risoluzione che indica:
-- Quanti ISIN/nomi devono essere risolti
-- Messaggio chiaro che l'AI sta lavorando
-
-```
-┌─────────────────────────────────────────────┐
-│  🔄 Aggiornamento settori in corso...       │
-│  Risoluzione AI per 15 strumenti            │
-│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━          │
-└─────────────────────────────────────────────┘
-```
-
-### 2. Badge Inline nella Card Settoriale
-
-Accanto al conteggio ETF, aggiungere un indicatore per la risoluzione settori:
-
-```
-19 settori identificati
-✓ 6 ETF analizzati
-🔄 Risoluzione AI in corso...  ← NUOVO
-```
-
-## Modifiche Tecniche
-
-### File 1: `src/hooks/useSectorMappings.ts`
-
-Aggiungere:
-- Contatore `resolving` con numero di elementi da risolvere
-- Callback opzionale `onResolutionStart` / `onResolutionEnd` per toast
+**File**: `src/pages/RiskAnalyzer.tsx` (linea 30)
 
 ```typescript
-const [resolvingCount, setResolvingCount] = useState(0);
+// Da:
+const [includeDerivatives, setIncludeDerivatives] = useState(false);
 
-// Prima della chiamata edge function
-setResolvingCount(isinsToResolve.length + derivativeNamesToResolve.length);
-
-// Dopo completamento
-setResolvingCount(0);
-
-return { 
-  mappings, 
-  fetchMappings, 
-  isLoading, 
-  resolvingCount,  // NUOVO
-  reset 
-};
+// A:
+const [includeDerivatives, setIncludeDerivatives] = useState(true);
 ```
 
-### File 2: `src/pages/RiskAnalyzer.tsx`
+### 2. Avviso Commodities Escluse (Sector Allocation)
 
-Importare `toast` da sonner e mostrare feedback:
+**File**: `src/components/risk/SectorAllocationView.tsx`
+
+Aggiungere un avviso sotto l'avviso derivati (sempre visibile, non controllato da toggle):
 
 ```typescript
-import { toast } from 'sonner';
+// Dopo l'avviso derivati esistente (linea ~136)
+<div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
+  <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
+  <span className="text-xs text-blue-600 dark:text-blue-400">
+    Commodities escluse dall'analisi settoriale
+  </span>
+</div>
+```
 
-const { 
-  mappings: sectorMappings, 
-  fetchMappings: fetchSectorMappings, 
-  isLoading: sectorMappingsLoading,
-  resolvingCount  // NUOVO
-} = useSectorMappings();
+Importare `Info` da lucide-react.
 
-// Mostrare toast quando inizia risoluzione
-useEffect(() => {
-  if (resolvingCount > 0) {
-    toast.loading(`Risoluzione AI settori per ${resolvingCount} strumenti...`, {
-      id: 'sector-resolution',
-      duration: Infinity
-    });
-  } else if (sectorMappingsLoading === false) {
-    toast.dismiss('sector-resolution');
-  }
-}, [resolvingCount, sectorMappingsLoading]);
+### 3. Toggle Bond + Avviso (Currency Exposure)
 
-// Passare lo stato a SectorAllocationView
-<SectorAllocationView 
+**File**: `src/components/risk/CurrencyExposureView.tsx`
+
+**3.1 Aggiungere props per bonds:**
+
+```typescript
+interface CurrencyExposureViewProps {
   // ... props esistenti
-  isResolvingSectors={sectorMappingsLoading}
-  resolvingCount={resolvingCount}
+  includeBonds: boolean;
+  onIncludeBondsChange: (value: boolean) => void;
+}
+```
+
+**3.2 Aggiungere toggle UI:**
+
+Accanto al toggle derivati, aggiungere:
+
+```typescript
+<div className="flex items-center gap-2">
+  <Switch 
+    id="include-bonds"
+    checked={includeBonds}
+    onCheckedChange={onIncludeBondsChange}
+  />
+  <Label htmlFor="include-bonds" className="text-sm text-muted-foreground cursor-pointer">
+    Includi Bond
+  </Label>
+</div>
+```
+
+**3.3 Aggiungere avviso se bond esclusi:**
+
+```typescript
+{!includeBonds && (
+  <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
+    <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
+    <span className="text-xs text-blue-600 dark:text-blue-400">
+      Obbligazioni escluse dall'analisi
+    </span>
+  </div>
+)}
+```
+
+---
+
+**File**: `src/pages/RiskAnalyzer.tsx`
+
+**3.4 Gestire stato bonds:**
+
+```typescript
+const [includeBonds, setIncludeBonds] = useState(true);
+
+// Nel calcolo currencyExposure:
+const baseCurrencyExposure = useMemo(() => 
+  calculateCurrencyExposure(analysis, { includeDerivatives, includeBonds }), 
+  [analysis, includeDerivatives, includeBonds]
+);
+
+// Passare a CurrencyExposureView:
+<CurrencyExposureView 
+  // ... props esistenti
+  includeBonds={includeBonds}
+  onIncludeBondsChange={setIncludeBonds}
 />
 ```
 
-### File 3: `src/components/risk/SectorAllocationView.tsx`
+---
 
-Aggiungere props e indicatore inline:
+**File**: `src/lib/currencyExposure.ts`
+
+**3.5 Modificare calcolo per supportare bonds:**
 
 ```typescript
-interface SectorAllocationViewProps {
-  // ... props esistenti
-  isResolvingSectors?: boolean;
-  resolvingCount?: number;
+export interface CurrencyBreakdown {
+  stocks: number;
+  bonds: number;        // NUOVO
+  commodities: number;
+  nakedPuts: number;
+  leapCalls: number;
+  strategies: number;
 }
 
-// Nel template, dopo l'indicatore ETF:
-{isResolvingSectors && resolvingCount > 0 && (
-  <span className="ml-2 text-blue-500 animate-pulse">
-    🔄 Risoluzione AI ({resolvingCount} strumenti)...
-  </span>
-)}
+export interface InstrumentDetail {
+  name: string;
+  riskEUR: number;
+  riskOriginal: number;
+  category: 'stocks' | 'bonds' | 'commodities' | 'nakedPuts' | 'leapCalls' | 'strategies';
+  // ...
+}
 
-{!isResolvingSectors && !isLoadingETFData && (
-  <span className="ml-2 text-green-500">
-    ✓ Settori aggiornati
-  </span>
-)}
+export interface CurrencyExposureOptions {
+  includeDerivatives?: boolean;
+  includeBonds?: boolean;  // NUOVO
+}
 ```
 
-## Flusso Utente Risultante
+**3.6 Modificare RiskAnalysis per includere bondDetails:**
 
-1. Utente clicca su "Sector Allocation"
-2. **Toast appare**: "Risoluzione AI settori per 15 strumenti..."
-3. I dati mostrano progressivamente i settori risolti
-4. **Badge inline**: "🔄 Risoluzione AI (15 strumenti)..."
-5. Dopo ~10s: Toast scompare, badge diventa "✓ Settori aggiornati"
-6. Grafico si aggiorna con settori corretti
+Prima devo verificare se `RiskAnalysis` ha già i dettagli dei bond. Dalla lettura del codice, noto che `riskCalculator.ts` non calcola i bond separatamente. I bond potrebbero essere inclusi negli stockDetails o potrebbero essere gestiti in modo diverso.
+
+Guardando il file `riskCalculator.ts` linee 150-154:
+```typescript
+// Include only stocks and ETFs (commodities are calculated separately)
+const stockAssetTypes = ['stock', 'etf'];
+```
+
+I **bond sono esclusi** dal calcolo del rischio attuale! Questo significa che per includere i bond nell'analisi valutaria, bisogna:
+
+1. Aggiungere `BondRiskDetail` interface
+2. Aggiungere `calculateBondRisk()` function
+3. Estendere `RiskAnalysis` con `bondDetails`
+4. Modificare `currencyExposure.ts` per usare i bondDetails
+
+---
 
 ## File da Modificare
 
 | File | Modifiche |
 |------|-----------|
-| `src/hooks/useSectorMappings.ts` | Aggiungere `resolvingCount` allo stato |
-| `src/pages/RiskAnalyzer.tsx` | Mostrare toast + passare stato a view |
-| `src/components/risk/SectorAllocationView.tsx` | Mostrare badge inline per risoluzione |
+| `src/pages/RiskAnalyzer.tsx` | Toggle derivati default `true`, nuovo stato `includeBonds`, passare props |
+| `src/components/risk/SectorAllocationView.tsx` | Aggiungere avviso commodities escluse |
+| `src/components/risk/CurrencyExposureView.tsx` | Aggiungere toggle bond + avviso |
+| `src/lib/currencyExposure.ts` | Estendere interfacce con `bonds`, filtrare se disabilitato |
+| `src/lib/riskCalculator.ts` | Aggiungere `BondRiskDetail` e `calculateBondRisk()` |
+| `src/hooks/useRiskAnalysis.ts` | Passare bonds a RiskAnalysis |
 
-## Risultato Atteso
+---
 
-- L'utente **sa sempre** che sta avvenendo un'elaborazione
-- Feedback visivo chiaro e non invasivo
-- Al completamento, conferma visiva che i dati sono aggiornati
+## Risultato Visivo Atteso
 
+### Sector Allocation
+```text
+┌─────────────────────────────────────────────┐
+│  📊 Esposizione Settoriale Totale           │
+│  € 123.456                                  │
+│                                             │
+│  ⚠️ Derivati esclusi dall'analisi           │  ← se toggle OFF
+│  ℹ️ Commodities escluse dall'analisi        │  ← SEMPRE VISIBILE
+└─────────────────────────────────────────────┘
+```
+
+### Currency Exposure
+```text
+┌─────────────────────────────────────────────┐
+│  💰 Esposizione Valutaria Totale            │
+│                                             │
+│  ◯ Includi Derivati   ◯ Includi Bond       │  ← DUE TOGGLE
+│                                             │
+│  € 234.567                                  │
+│                                             │
+│  ⚠️ Derivati esclusi dall'analisi           │  ← se toggle OFF
+│  ℹ️ Obbligazioni escluse dall'analisi       │  ← se toggle OFF
+└─────────────────────────────────────────────┘
+```
