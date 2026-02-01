@@ -7,11 +7,13 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink } from 'lucide-react';
+import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink, AlertTriangle } from 'lucide-react';
 import { CurrencyExposure, getCurrencyColor, InstrumentDetail } from '@/lib/currencyExposure';
 import { formatEUR, formatCurrency } from '@/lib/formatters';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 interface CurrencyExposureViewProps {
   currencyExposure: CurrencyExposure[];
@@ -19,6 +21,8 @@ interface CurrencyExposureViewProps {
   isLoadingETFData?: boolean;
   etfCount?: number;
   loadedETFCount?: number;
+  includeDerivatives: boolean;
+  onIncludeDerivativesChange: (value: boolean) => void;
 }
 
 const CATEGORY_CONFIG = {
@@ -132,7 +136,9 @@ export function CurrencyExposureView({
   grandTotal,
   isLoadingETFData = false,
   etfCount = 0,
-  loadedETFCount = 0
+  loadedETFCount = 0,
+  includeDerivatives,
+  onIncludeDerivativesChange
 }: CurrencyExposureViewProps) {
   const safeCurrencyExposure = currencyExposure.filter((c) => {
     return (
@@ -158,11 +164,23 @@ export function CurrencyExposureView({
         {/* Total Card */}
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="pt-6">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="p-1.5 rounded bg-primary/20">
-                <Coins className="w-4 h-4 text-primary" />
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded bg-primary/20">
+                  <Coins className="w-4 h-4 text-primary" />
+                </div>
+                <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
               </div>
-              <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="include-derivatives"
+                  checked={includeDerivatives}
+                  onCheckedChange={onIncludeDerivativesChange}
+                />
+                <Label htmlFor="include-derivatives" className="text-sm text-muted-foreground cursor-pointer">
+                  Includi Derivati
+                </Label>
+              </div>
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
             {hasData && (
@@ -183,6 +201,14 @@ export function CurrencyExposureView({
                 </span>
               )}
             </div>
+            {!includeDerivatives && (
+              <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+                <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  Derivati esclusi dall'analisi (Naked PUT, Leap Call, Strategie)
+                </span>
+              </div>
+            )}
           </CardContent>
         </Card>
 

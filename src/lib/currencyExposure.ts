@@ -90,10 +90,18 @@ function isETFByDescription(description: string): boolean {
   return ETF_ISSUER_PATTERNS.some(kw => upperDesc.includes(kw));
 }
 
-export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExposure[] {
+export interface CurrencyExposureOptions {
+  includeDerivatives?: boolean; // default: true
+}
+
+export function calculateCurrencyExposure(
+  analysis: RiskAnalysis,
+  options: CurrencyExposureOptions = {}
+): CurrencyExposure[] {
+  const { includeDerivatives = true } = options;
   const byCurrency = new Map<string, CurrencyExposure>();
   
-  // Aggregate stockDetails by currency
+  // Aggregate stockDetails by currency (always included)
   for (const stock of analysis.stockDetails) {
     const curr = stock.currency || 'OTHER';
     const exposure = getOrCreateCurrency(byCurrency, curr);
@@ -132,55 +140,58 @@ export function calculateCurrencyExposure(analysis: RiskAnalysis): CurrencyExpos
     });
   }
   
-  // Aggregate nakedPutDetails by currency
-  for (const np of analysis.nakedPutDetails) {
-    const curr = np.currency || 'OTHER';
-    const exposure = getOrCreateCurrency(byCurrency, curr);
-    exposure.breakdown.nakedPuts += np.riskEUR;
-    exposure.totalRisk += np.riskEUR;
-    exposure.totalRiskOriginal += np.riskOriginal;
+  // Aggregate derivative details by currency (only if includeDerivatives is true)
+  if (includeDerivatives) {
+    // Aggregate nakedPutDetails by currency
+    for (const np of analysis.nakedPutDetails) {
+      const curr = np.currency || 'OTHER';
+      const exposure = getOrCreateCurrency(byCurrency, curr);
+      exposure.breakdown.nakedPuts += np.riskEUR;
+      exposure.totalRisk += np.riskEUR;
+      exposure.totalRiskOriginal += np.riskOriginal;
+      
+      exposure.instruments.push({
+        name: np.underlying,
+        riskEUR: np.riskEUR,
+        riskOriginal: np.riskOriginal,
+        category: 'nakedPuts',
+        details: `PUT ${np.strike} × ${np.contracts} (${np.expiry})`
+      });
+    }
     
-    exposure.instruments.push({
-      name: np.underlying,
-      riskEUR: np.riskEUR,
-      riskOriginal: np.riskOriginal,
-      category: 'nakedPuts',
-      details: `PUT ${np.strike} × ${np.contracts} (${np.expiry})`
-    });
-  }
-  
-  // Aggregate leapCallDetails by currency
-  for (const lc of analysis.leapCallDetails) {
-    const curr = lc.currency || 'OTHER';
-    const exposure = getOrCreateCurrency(byCurrency, curr);
-    exposure.breakdown.leapCalls += lc.riskEUR;
-    exposure.totalRisk += lc.riskEUR;
-    exposure.totalRiskOriginal += lc.premiumPaid;
+    // Aggregate leapCallDetails by currency
+    for (const lc of analysis.leapCallDetails) {
+      const curr = lc.currency || 'OTHER';
+      const exposure = getOrCreateCurrency(byCurrency, curr);
+      exposure.breakdown.leapCalls += lc.riskEUR;
+      exposure.totalRisk += lc.riskEUR;
+      exposure.totalRiskOriginal += lc.premiumPaid;
+      
+      exposure.instruments.push({
+        name: lc.underlying,
+        riskEUR: lc.riskEUR,
+        riskOriginal: lc.premiumPaid,
+        category: 'leapCalls',
+        details: `CALL ${lc.strike} × ${lc.contracts} (${lc.expiry})`
+      });
+    }
     
-    exposure.instruments.push({
-      name: lc.underlying,
-      riskEUR: lc.riskEUR,
-      riskOriginal: lc.premiumPaid,
-      category: 'leapCalls',
-      details: `CALL ${lc.strike} × ${lc.contracts} (${lc.expiry})`
-    });
-  }
-  
-  // Aggregate strategyDetails by currency
-  for (const strat of analysis.strategyDetails) {
-    const curr = strat.currency || 'OTHER';
-    const exposure = getOrCreateCurrency(byCurrency, curr);
-    exposure.breakdown.strategies += strat.maxLossEUR;
-    exposure.totalRisk += strat.maxLossEUR;
-    exposure.totalRiskOriginal += strat.maxLoss;
-    
-    exposure.instruments.push({
-      name: `${strat.underlying} - ${strat.strategyName}`,
-      riskEUR: strat.maxLossEUR,
-      riskOriginal: strat.maxLoss,
-      category: 'strategies',
-      details: strat.calculation
-    });
+    // Aggregate strategyDetails by currency
+    for (const strat of analysis.strategyDetails) {
+      const curr = strat.currency || 'OTHER';
+      const exposure = getOrCreateCurrency(byCurrency, curr);
+      exposure.breakdown.strategies += strat.maxLossEUR;
+      exposure.totalRisk += strat.maxLossEUR;
+      exposure.totalRiskOriginal += strat.maxLoss;
+      
+      exposure.instruments.push({
+        name: `${strat.underlying} - ${strat.strategyName}`,
+        riskEUR: strat.maxLossEUR,
+        riskOriginal: strat.maxLoss,
+        category: 'strategies',
+        details: strat.calculation
+      });
+    }
   }
   
   // Sort instruments by riskEUR desc within each currency
