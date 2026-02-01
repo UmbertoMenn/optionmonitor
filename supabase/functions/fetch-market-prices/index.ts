@@ -15,7 +15,7 @@ interface PriceData {
   ask: number | null;
   volume: number | null;
   lastUpdated: string;
-  source: 'tradier' | 'yahoo' | 'justetf' | 'error';
+  source: 'yahoo' | 'yahoo-options' | 'justetf' | 'error';
   error?: string;
 }
 
@@ -51,7 +51,7 @@ const UNDERLYING_TO_TICKER: Record<string, string> = {
   'INTEL CORP': 'INTC', 'INTEL CORPORATION': 'INTC',
   'AMD': 'AMD', 'ADVANCED MICRO DEVICES': 'AMD', 'ADVANCED MICRO DEVICES INC': 'AMD',
   'CISCO SYSTEMS INC': 'CSCO', 'CISCO SYSTEMS': 'CSCO',
-  'ORACLE CORP': 'ORCL', 'ORACLE CORPORATION': 'ORCL',
+  'ORACLE CORP': 'ORCL', 'ORACLE CORPORATION': 'ORCL', 'ORACLE SYSTEMS INC.': 'ORCL', 'ORACLE SYSTEMS INC': 'ORCL',
   'IBM': 'IBM', 'INTERNATIONAL BUSINESS MACHINES': 'IBM',
   'QUALCOMM INC': 'QCOM', 'QUALCOMM INCORPORATED': 'QCOM',
   'BROADCOM INC': 'AVGO', 'BROADCOM LTD': 'AVGO',
@@ -125,6 +125,31 @@ const UNDERLYING_TO_TICKER: Record<string, string> = {
   'NETEASE INC': 'NTES', 'NETEASE': 'NTES',
   'LULULEMON ATHLETICA INC': 'LULU', 'LULULEMON': 'LULU', 'LULULEMON ATHLETICA': 'LULU',
   'PROGRESSIVE CORP': 'PGR', 'PROGRESSIVE': 'PGR',
+  // Additional mappings from logs
+  'SOUNDHOUND AI INC': 'SOUN', 'SOUNDHOUND AI': 'SOUN', 'SOUNDHOUND': 'SOUN',
+  'RIGETTI COMPUTING INC.': 'RGTI', 'RIGETTI COMPUTING INC': 'RGTI', 'RIGETTI COMPUTING': 'RGTI', 'RIGETTI': 'RGTI',
+  'JD.COM INC': 'JD', 'JD(JD.COM INC)': 'JD', 'JD.COM': 'JD',
+  'NUSCALE POWER CORP': 'SMR', 'NUSCALE POWER': 'SMR', 'NUSCALE': 'SMR',
+  'WESTERN DIGITAL CORP': 'WDC', 'WESTERN DIGITAL': 'WDC',
+  'KLA CORP': 'KLAC', 'KLA': 'KLAC',
+  'IREN LTD': 'IREN', 'IREN': 'IREN',
+  'PINDUODUO INC': 'PDD', 'PINDUODUO': 'PDD',
+  'REDDIT INC': 'RDDT', 'REDDITI INC': 'RDDT', 'REDDIT': 'RDDT',
+  'ROCKET LAB CORP': 'RKLB', 'ROCKET LAB': 'RKLB',
+  'APPLOVIN CORP': 'APP', 'APPLOVIN': 'APP',
+  'ASTERA LABS INC': 'ALAB', 'ASTERA LABS': 'ALAB',
+  'MICRON TECHNOLOGY INC': 'MU', 'MICRON TECHNOLOGY': 'MU', 'MICRON': 'MU',
+  'NEBIUS GROUP NV': 'NBIS', 'NEBIUS GROUP': 'NBIS', 'NEBIUS': 'NBIS',
+  'CELESTICA INC': 'CLS', 'CELESTICA': 'CLS',
+  'CLEANSPARK INC': 'CLSK', 'CLEANSPARK': 'CLSK',
+  'HIMS & HERS HEALTH INC': 'HIMS', 'HIMS & HERS HEALTH': 'HIMS', 'HIMS & HERS': 'HIMS',
+  'IONQ INC': 'IONQ', 'IONQ': 'IONQ',
+  'SUPER MICRO COMPUTER IN': 'SMCI', 'SUPER MICRO COMPUTER INC': 'SMCI', 'SUPER MICRO COMPUTER': 'SMCI', 'SUPERMICRO': 'SMCI',
+  'ACCENTURE PLC': 'ACN', 'ACCENTURE': 'ACN',
+  'FORTINET INC': 'FTNT', 'FORTINET': 'FTNT',
+  'OKLO INC': 'OKLO', 'OKLO': 'OKLO',
+  'APPLIED DIGITAL CORP': 'APLD', 'APPLIED DIGITAL': 'APLD',
+  'PALO ALTO NETWORKS INC': 'PANW', 'PALO ALTO NETWORKS': 'PANW', 'PALO ALTO': 'PANW',
 };
 
 function underlyingToTicker(underlying: string): string | null {
@@ -153,24 +178,6 @@ function underlyingToTicker(underlying: string): string | null {
   
   console.log(`[underlyingToTicker] No mapping for: "${underlying}"`);
   return null;
-}
-
-// ============ OCC SYMBOL CONVERSION ============
-
-function toOCCSymbol(underlying: string, expiry: string, optionType: 'call' | 'put', strike: number): string | null {
-  // First convert underlying name to ticker
-  const ticker = underlyingToTicker(underlying);
-  if (!ticker) {
-    return null;
-  }
-  
-  const date = new Date(expiry);
-  const yy = date.getFullYear().toString().slice(-2);
-  const mm = (date.getMonth() + 1).toString().padStart(2, '0');
-  const dd = date.getDate().toString().padStart(2, '0');
-  const type = optionType === 'call' ? 'C' : 'P';
-  const strikeFormatted = Math.round(strike * 1000).toString().padStart(8, '0');
-  return `${ticker}${yy}${mm}${dd}${type}${strikeFormatted}`;
 }
 
 // ============ ISIN RESOLUTION ============
@@ -253,7 +260,57 @@ async function resolveIsins(isins: string[]): Promise<Map<string, string>> {
   return results;
 }
 
-// ============ YAHOO FINANCE ============
+// ============ YAHOO FINANCE SESSION (crumb + cookies) ============
+
+let yahooCrumb: string | null = null;
+let yahooCookies: string | null = null;
+
+async function getYahooSession(): Promise<{ crumb: string; cookies: string } | null> {
+  if (yahooCrumb && yahooCookies) {
+    return { crumb: yahooCrumb, cookies: yahooCookies };
+  }
+
+  try {
+    console.log('[Yahoo] Fetching new session (crumb + cookie)...');
+    
+    // Step 1: Get cookies from consent page
+    const consentResponse = await fetch('https://fc.yahoo.com/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+    
+    const cookies = consentResponse.headers.get('set-cookie') || '';
+    
+    // Step 2: Get crumb using cookies
+    const crumbResponse = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Cookie': cookies,
+      },
+    });
+    
+    if (!crumbResponse.ok) {
+      console.error(`[Yahoo] Failed to get crumb: ${crumbResponse.status}`);
+      return null;
+    }
+    
+    const crumb = await crumbResponse.text();
+    
+    if (crumb && crumb.length > 0) {
+      yahooCrumb = crumb;
+      yahooCookies = cookies;
+      console.log('[Yahoo] Session obtained successfully');
+      return { crumb, cookies };
+    }
+  } catch (error) {
+    console.error('[Yahoo] Session error:', error);
+  }
+  
+  return null;
+}
+
+// ============ YAHOO FINANCE STOCKS ============
 
 async function fetchYahooPrices(tickers: string[]): Promise<Map<string, PriceData>> {
   const results = new Map<string, PriceData>();
@@ -326,6 +383,175 @@ async function fetchYahooPrices(tickers: string[]): Promise<Map<string, PriceDat
   return results;
 }
 
+// ============ YAHOO FINANCE OPTIONS ============
+
+async function fetchYahooOptionPrices(
+  options: OptionRequest[]
+): Promise<Map<string, PriceData>> {
+  const results = new Map<string, PriceData>();
+  
+  if (options.length === 0) return results;
+
+  // Group options by ticker + expiry for efficient fetching
+  const groupedOptions = new Map<string, {
+    ticker: string;
+    expiryUnix: number;
+    expiryStr: string;
+    requests: OptionRequest[];
+  }>();
+
+  for (const opt of options) {
+    const ticker = underlyingToTicker(opt.underlying);
+    if (!ticker) {
+      results.set(opt.originalId, {
+        symbol: opt.underlying,
+        price: null,
+        change: null,
+        changePct: null,
+        bid: null,
+        ask: null,
+        volume: null,
+        lastUpdated: new Date().toISOString(),
+        source: 'error',
+        error: `Cannot convert underlying "${opt.underlying}" to ticker`,
+      });
+      continue;
+    }
+
+    const expiryDate = new Date(opt.expiry);
+    const expiryUnix = Math.floor(expiryDate.getTime() / 1000);
+    const key = `${ticker}:${expiryUnix}`;
+
+    if (!groupedOptions.has(key)) {
+      groupedOptions.set(key, {
+        ticker,
+        expiryUnix,
+        expiryStr: opt.expiry,
+        requests: [],
+      });
+    }
+    groupedOptions.get(key)!.requests.push(opt);
+  }
+
+  console.log(`[Yahoo Options] Fetching ${options.length} options grouped into ${groupedOptions.size} ticker+expiry combinations`);
+
+  // Fetch each ticker+expiry combination
+  for (const [, group] of groupedOptions) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v7/finance/options/${group.ticker}?date=${group.expiryUnix}`;
+      
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`[Yahoo Options] Error for ${group.ticker} expiry ${group.expiryStr}: ${response.status}`);
+        for (const opt of group.requests) {
+          results.set(opt.originalId, {
+            symbol: opt.underlying,
+            price: null,
+            change: null,
+            changePct: null,
+            bid: null,
+            ask: null,
+            volume: null,
+            lastUpdated: new Date().toISOString(),
+            source: 'error',
+            error: `Yahoo Options API returned ${response.status}`,
+          });
+        }
+        continue;
+      }
+
+      const data = await response.json();
+      const optionData = data?.optionChain?.result?.[0]?.options?.[0];
+      
+      if (!optionData) {
+        for (const opt of group.requests) {
+          results.set(opt.originalId, {
+            symbol: opt.underlying,
+            price: null,
+            change: null,
+            changePct: null,
+            bid: null,
+            ask: null,
+            volume: null,
+            lastUpdated: new Date().toISOString(),
+            source: 'error',
+            error: 'No option data found for expiry',
+          });
+        }
+        continue;
+      }
+
+      // Build map of contracts by strike+type
+      const contractMap = new Map<string, any>();
+      for (const call of optionData.calls || []) {
+        contractMap.set(`C:${call.strike}`, call);
+      }
+      for (const put of optionData.puts || []) {
+        contractMap.set(`P:${put.strike}`, put);
+      }
+
+      // Match each requested option
+      for (const opt of group.requests) {
+        const mapKey = `${opt.optionType === 'call' ? 'C' : 'P'}:${opt.strike}`;
+        const contract = contractMap.get(mapKey);
+
+        if (contract) {
+          results.set(opt.originalId, {
+            symbol: contract.contractSymbol || `${group.ticker}:${opt.strike}${opt.optionType === 'call' ? 'C' : 'P'}`,
+            price: contract.lastPrice ?? null,
+            change: contract.change ?? null,
+            changePct: contract.percentChange ?? null,
+            bid: contract.bid ?? null,
+            ask: contract.ask ?? null,
+            volume: contract.volume ?? null,
+            lastUpdated: new Date().toISOString(),
+            source: 'yahoo-options',
+          });
+        } else {
+          results.set(opt.originalId, {
+            symbol: opt.underlying,
+            price: null,
+            change: null,
+            changePct: null,
+            bid: null,
+            ask: null,
+            volume: null,
+            lastUpdated: new Date().toISOString(),
+            source: 'error',
+            error: `Option not found: ${opt.optionType} strike ${opt.strike}`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error(`[Yahoo Options] Fetch error for ${group.ticker}:`, error);
+      for (const opt of group.requests) {
+        results.set(opt.originalId, {
+          symbol: opt.underlying,
+          price: null,
+          change: null,
+          changePct: null,
+          bid: null,
+          ask: null,
+          volume: null,
+          lastUpdated: new Date().toISOString(),
+          source: 'error',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+    
+    // Small delay to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  return results;
+}
+
 // ============ JUSTETF FOR EUROPEAN ETFs ============
 
 async function fetchJustETFPrice(isin: string): Promise<PriceData | null> {
@@ -377,122 +603,6 @@ async function fetchJustETFPrice(isin: string): Promise<PriceData | null> {
   return null;
 }
 
-// ============ TRADIER OPTIONS ============
-
-async function fetchTradierOptionPrices(
-  options: OptionRequest[],
-  apiKey: string
-): Promise<Map<string, PriceData>> {
-  const results = new Map<string, PriceData>();
-  
-  if (options.length === 0 || !apiKey) {
-    console.log('[Tradier] Skipping - no options or no API key');
-    return results;
-  }
-  
-  try {
-    // Convert options to OCC symbols, filtering out those without valid tickers
-    const occSymbols: { occ: string; originalId: string; original: OptionRequest }[] = [];
-    
-    for (const opt of options) {
-      const occ = toOCCSymbol(opt.underlying, opt.expiry, opt.optionType, opt.strike);
-      if (occ) {
-        occSymbols.push({ occ, originalId: opt.originalId, original: opt });
-      } else {
-        // Return error for options we can't convert
-        results.set(opt.originalId, {
-          symbol: opt.underlying,
-          price: null, change: null, changePct: null, bid: null, ask: null, volume: null,
-          lastUpdated: new Date().toISOString(),
-          source: 'error',
-          error: `Cannot convert underlying "${opt.underlying}" to ticker`,
-        });
-      }
-    }
-    
-    if (occSymbols.length === 0) {
-      console.log('[Tradier] No valid OCC symbols to fetch');
-      return results;
-    }
-    
-    console.log(`[Tradier] Fetching ${occSymbols.length} options: ${occSymbols.slice(0, 3).map(o => o.occ).join(', ')}...`);
-    
-    const symbols = occSymbols.map(o => o.occ).join(',');
-    const url = `https://api.tradier.com/v1/markets/quotes?symbols=${encodeURIComponent(symbols)}`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Accept': 'application/json',
-      },
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Tradier API error: ${response.status} - ${errorText}`);
-      
-      for (const opt of occSymbols) {
-        results.set(opt.originalId, {
-          symbol: opt.occ, price: null, change: null, changePct: null,
-          bid: null, ask: null, volume: null,
-          lastUpdated: new Date().toISOString(),
-          source: 'error', error: `Tradier API returned ${response.status}`,
-        });
-      }
-      return results;
-    }
-    
-    const data = await response.json();
-    
-    let quotes = data?.quotes?.quote || [];
-    if (!Array.isArray(quotes)) {
-      quotes = quotes ? [quotes] : [];
-    }
-    
-    const quoteMap = new Map<string, any>();
-    for (const quote of quotes) {
-      quoteMap.set(quote.symbol, quote);
-    }
-    
-    for (const opt of occSymbols) {
-      const quote = quoteMap.get(opt.occ);
-      
-      if (quote) {
-        results.set(opt.originalId, {
-          symbol: opt.occ,
-          price: quote.last ?? quote.close ?? null,
-          change: quote.change ?? null,
-          changePct: quote.change_percentage ?? null,
-          bid: quote.bid ?? null,
-          ask: quote.ask ?? null,
-          volume: quote.volume ?? null,
-          lastUpdated: new Date().toISOString(),
-          source: 'tradier',
-        });
-      } else {
-        results.set(opt.originalId, {
-          symbol: opt.occ, price: null, change: null, changePct: null,
-          bid: null, ask: null, volume: null,
-          lastUpdated: new Date().toISOString(),
-          source: 'error', error: 'Option not found in Tradier',
-        });
-      }
-    }
-  } catch (error) {
-    console.error('Tradier fetch error:', error);
-    for (const opt of options) {
-      results.set(opt.originalId, {
-        symbol: opt.underlying, price: null, change: null, changePct: null,
-        bid: null, ask: null, volume: null,
-        lastUpdated: new Date().toISOString(),
-        source: 'error', error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  }
-  
-  return results;
-}
-
 // ============ MAIN HANDLER ============
 
 serve(async (req) => {
@@ -505,8 +615,6 @@ serve(async (req) => {
     
     console.log(`[fetch-market-prices] Request: ${tickers.length} tickers, ${isins.length} ISINs, ${options.length} options`);
     
-    const tradierApiKey = Deno.env.get('TRADIER_API_KEY') || '';
-    
     // Step 1: Resolve ISINs to tickers
     const isinToTicker = await resolveIsins(isins);
     
@@ -518,10 +626,10 @@ serve(async (req) => {
     
     console.log(`[fetch-market-prices] Fetching ${allTickers.length} tickers from Yahoo`);
     
-    // Step 3: Fetch all prices in parallel
+    // Step 3: Fetch all prices in parallel (stocks via Yahoo, options via Yahoo Options)
     const [stockPrices, optionPrices] = await Promise.all([
       fetchYahooPrices(allTickers),
-      fetchTradierOptionPrices(options, tradierApiKey),
+      fetchYahooOptionPrices(options),
     ]);
     
     // Step 4: For ISINs that didn't resolve but are ETFs, try JustETF
