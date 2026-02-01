@@ -33,6 +33,78 @@ interface UpdateResult {
   error?: string;
 }
 
+// Exchange rate cache to avoid multiple calls per currency
+const exchangeRateCache: Map<string, number> = new Map();
+
+// Fetch exchange rate from Yahoo Finance (e.g., EURUSD=X)
+async function fetchExchangeRate(pair: string): Promise<number> {
+  // Check cache first
+  if (exchangeRateCache.has(pair)) {
+    return exchangeRateCache.get(pair)!;
+  }
+
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(pair)}?interval=1d&range=1d`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+    
+    if (!response.ok) {
+      console.log(`Yahoo API returned ${response.status} for ${pair}`);
+      return 1;
+    }
+    
+    const data = await response.json();
+    const result = data.chart?.result?.[0];
+    
+    if (!result) {
+      console.log(`No result in Yahoo response for ${pair}`);
+      return 1;
+    }
+    
+    const rate = result.meta?.regularMarketPrice || result.meta?.previousClose;
+    
+    if (!rate || rate <= 0) {
+      console.log(`Invalid rate for ${pair}: ${rate}`);
+      return 1;
+    }
+    
+    // Cache the result
+    exchangeRateCache.set(pair, rate);
+    console.log(`Fetched exchange rate ${pair}: ${rate}`);
+    
+    return rate;
+  } catch (error) {
+    console.error(`Error fetching exchange rate for ${pair}:`, error);
+    return 1; // fallback to no conversion
+  }
+}
+
+// Get exchange rate for a currency (EUR = 1, others use Yahoo Finance)
+async function getExchangeRateForCurrency(currency: string | null): Promise<number> {
+  if (!currency || currency === 'EUR') {
+    return 1;
+  }
+  
+  const pairMap: Record<string, string> = {
+    'USD': 'EURUSD=X',
+    'HKD': 'EURHKD=X',
+    'GBP': 'EURGBP=X',
+    'CHF': 'EURCHF=X',
+  };
+  
+  const pair = pairMap[currency];
+  if (!pair) {
+    console.log(`Unknown currency ${currency}, using rate 1`);
+    return 1;
+  }
+  
+  return await fetchExchangeRate(pair);
+}
+
 // Yahoo Finance Quote API
 async function fetchYahooPrice(ticker: string): Promise<PriceResult | null> {
   try {
@@ -309,7 +381,7 @@ serve(async (req) => {
     const { data: positions, error: fetchError } = await supabase
       .from('positions')
       .select('id, description, isin, ticker, current_price, asset_type, quantity, currency, portfolio_id')
-      .in('asset_type', ['stock', 'etf', 'commodity', 'Stock', 'ETF', 'Commodity']);
+      .in('asset_type', ['stock', 'Stock']);
 
     if (fetchError) {
       throw new Error(`Failed to fetch positions: ${fetchError.message}`);
@@ -360,16 +432,20 @@ serve(async (req) => {
             return;
           }
 
-          // Calculate new market value
-          const newMarketValue = priceData.price * position.quantity;
+          // Get live exchange rate for the position's currency
+          const exchangeRate = await getExchangeRateForCurrency(position.currency);
           
-          // Update position
+          // Calculate new market value in EUR
+          const newMarketValue = (priceData.price * position.quantity) / exchangeRate;
+          
+          // Update position with price, market value, and exchange rate
           const { error: updateError } = await supabase
             .from('positions')
             .update({
               current_price: priceData.price,
               market_value: newMarketValue,
-              ticker: ticker, // Also update ticker if we resolved it
+              exchange_rate: exchangeRate,
+              ticker: ticker,
               updated_at: new Date().toISOString(),
             })
             .eq('id', position.id);
