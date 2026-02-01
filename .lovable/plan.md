@@ -1,414 +1,229 @@
 
 
-# Piano: Auto-Ricerca Settori con Lovable AI (Stock + ETF Multi-Settore)
+# Piano: Fix Auto-Creazione Settori per Stock Mancanti
 
 ## Problema Identificato
 
-L'analisi settoriale mostra molti titoli come "Other" perché:
+Il sistema ha le funzioni AI (`fetchSectorWithAI`) implementate correttamente, ma **non vengono mai chiamate** perché:
 
-| Tipo | Sistema Attuale | Problema |
-|------|-----------------|----------|
-| **Stock** | ISIN → `isin_mappings` → settore singolo | Molti ISIN non esistono nella tabella |
-| **ETF** | justETF scraping → multi-settore | Se scraping fallisce, va tutto in "Other" |
+| Fase | Codice Attuale | Problema |
+|------|----------------|----------|
+| Upload Excel | Posizioni salvate con ISIN | ✅ OK |
+| Risk Analyzer | `useSectorMappings` cerca in `isin_mappings` | ❌ Molti ISIN non esistono nella tabella |
+| Edge function `update-sectors` | Aggiorna solo record con `sector IS NULL` | ❌ Cerca solo record **già esistenti** |
 
-## Soluzione: Lovable AI come Fallback Universale
-
-Usare **Lovable AI** (già disponibile via `LOVABLE_API_KEY`) quando:
-1. Per **Stock**: Yahoo Finance fallisce e il ticker non è in cache
-2. Per **ETF**: justETF non restituisce dati settoriali (minimo 80% copertura, max 20% in Other)
+**Dati dal database**:
+- 60 posizioni stock con ISIN
+- Solo 31 record in `isin_mappings` (18 senza sector)
+- Molti stock (Alphabet, JPM, ecc.) non hanno proprio il record
 
 ---
 
-## Architettura della Soluzione
+## Causa Root
 
-```text
-┌──────────────────────────────────────────────────────────────────────┐
-│                    Richiesta Settore                                 │
-└──────────────────────────────────────────────────────────────────────┘
-                                │
-                ┌───────────────┴───────────────┐
-                ▼                               ▼
-         ┌──────────┐                     ┌──────────┐
-         │  STOCK   │                     │   ETF    │
-         └────┬─────┘                     └────┬─────┘
-              │                                │
-              ▼                                ▼
-    ┌─────────────────┐              ┌─────────────────┐
-    │ 1. Cache locale │              │ 1. justETF      │
-    │    KNOWN_SECTORS│              │    scraping     │
-    └────────┬────────┘              └────────┬────────┘
-             │ miss                           │ fail/incomplete
-             ▼                                ▼
-    ┌─────────────────┐              ┌─────────────────┐
-    │ 2. Database     │              │ 2. INDEX_SECTOR │
-    │    isin_mappings│              │    FALLBACKS    │
-    └────────┬────────┘              └────────┬────────┘
-             │ miss                           │ miss
-             ▼                                ▼
-    ┌─────────────────┐              ┌─────────────────┐
-    │ 3. LOVABLE AI   │              │ 3. LOVABLE AI   │
-    │ "Settore GICS?" │              │ "Top 5 settori?"│
-    │ → 1 settore     │              │ → Multi-settore │
-    │                 │              │   (min 80%)     │
-    └────────┬────────┘              └────────┬────────┘
-             │                                │
-             ▼                                ▼
-    ┌─────────────────────────────────────────────────┐
-    │              Salva in Cache Globale             │
-    │    isin_mappings (stock) / etf_allocations (ETF)│
-    └─────────────────────────────────────────────────┘
+La funzione `updateMissingSectors` (linee 525-582 in `update-prices-cron/index.ts`) fa:
+```typescript
+// PROBLEMA: cerca solo record GIÀ ESISTENTI con sector=null
+let query = supabase
+  .from('isin_mappings')
+  .select('isin, ticker')
+  .is('sector', null);  // ← Solo esistenti!
 ```
 
+**Non crea mai nuovi record per ISIN sconosciuti.**
+
 ---
 
-## Modifiche Tecniche
+## Soluzione
 
-### 1. Nuova Funzione `fetchSectorWithAI` (Stock - Settore Singolo)
+Modificare `useSectorMappings.ts` per:
+1. Identificare ISIN che **non esistono** in `isin_mappings`
+2. Chiamare l'edge function con modalità `resolve-and-get-sectors` 
+3. L'edge function dovrà **creare i record** con ISIN → Ticker → Sector (via Yahoo + AI fallback)
+
+### Modifiche Tecniche
+
+#### 1. Nuovo Modo `resolve-and-get-sectors` in Edge Function
 
 **File**: `supabase/functions/update-prices-cron/index.ts`
 
+Aggiungere un nuovo handler che:
+1. Riceve lista di ISIN
+2. Per ogni ISIN:
+   - Se esiste in `isin_mappings` con sector → skip
+   - Se esiste senza sector → aggiorna con AI
+   - Se **non esiste** → crea nuovo record (resolve ticker + get sector via AI)
+
 ```typescript
-async function fetchSectorWithAI(
-  ticker: string, 
-  description: string
-): Promise<{ sector: string | null; industry: string | null }> {
-  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-  if (!lovableApiKey) return { sector: null, industry: null };
+// Nuovo handler per risolvere ISIN mancanti completamente
+if (body.mode === 'resolve-and-get-sectors') {
+  const isins = body.isins || [];
+  const results = [];
   
-  const validSectors = [
-    'Technology', 'Financials', 'Healthcare',
-    'Consumer Discretionary', 'Consumer Staples', 'Industrials',
-    'Energy', 'Materials', 'Utilities', 'Real Estate',
-    'Communication Services'
-  ];
-  
-  const prompt = `For the stock with ticker "${ticker}" (${description}), 
-    provide the GICS sector classification.
-    Valid sectors: ${validSectors.join(', ')}.
-    Respond with ONLY the sector name, nothing else.`;
-  
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${lovableApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-lite',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 50,
-    }),
-  });
-  
-  const data = await response.json();
-  const sectorText = data.choices?.[0]?.message?.content?.trim();
-  
-  if (validSectors.includes(sectorText)) {
-    console.log(`AI resolved sector for ${ticker}: ${sectorText}`);
-    return { sector: sectorText, industry: null };
+  for (const isin of isins) {
+    // 1. Check if mapping exists
+    const { data: existing } = await supabase
+      .from('isin_mappings')
+      .select('ticker, sector')
+      .eq('isin', isin)
+      .single();
+    
+    if (existing?.sector) {
+      // Already has sector, skip
+      results.push({ isin, sector: existing.sector, source: 'cache' });
+      continue;
+    }
+    
+    // 2. Need to resolve or update
+    let ticker = existing?.ticker;
+    
+    if (!ticker) {
+      // Resolve ISIN to ticker via Yahoo Search
+      const searchResult = await searchYahooByISIN(isin);
+      ticker = searchResult?.ticker || null;
+    }
+    
+    if (!ticker) {
+      results.push({ isin, sector: null, error: 'Could not resolve ticker' });
+      continue;
+    }
+    
+    // 3. Get sector (Yahoo + AI fallback)
+    const sectorInfo = await fetchYahooSectorInfo(ticker, '');
+    
+    // 4. Save to database (UPSERT)
+    await supabase.from('isin_mappings').upsert({
+      isin,
+      ticker,
+      sector: sectorInfo.sector,
+      industry: sectorInfo.industry,
+      source: sectorInfo.sector ? 'ai' : 'unknown',
+      last_verified_at: new Date().toISOString()
+    }, { onConflict: 'isin' });
+    
+    results.push({ 
+      isin, 
+      ticker, 
+      sector: sectorInfo.sector, 
+      source: 'resolved' 
+    });
   }
   
-  return { sector: null, industry: null };
+  return new Response(JSON.stringify({ success: true, results }), ...);
 }
 ```
 
-### 2. Nuova Funzione `fetchETFSectorsWithAI` (ETF - Multi-Settore ≥80%)
+#### 2. Modificare `useSectorMappings.ts`
 
-**File**: `supabase/functions/fetch-etf-allocation/index.ts`
+**File**: `src/hooks/useSectorMappings.ts`
+
+Cambiare la logica per:
+1. Trovare ISIN **completamente mancanti** (non in tabella)
+2. Chiamare il nuovo endpoint `resolve-and-get-sectors`
 
 ```typescript
-async function fetchETFSectorsWithAI(
-  isin: string,
-  etfName: string
-): Promise<Record<string, number>> {
-  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-  if (!lovableApiKey) return {};
+const fetchMappings = useCallback(async (isins: string[]) => {
+  // 1. Fetch existing mappings
+  const { data } = await supabase
+    .from('isin_mappings')
+    .select('isin, ticker, sector, industry')
+    .in('isin', isins);
   
-  const validSectors = [
-    'Technology', 'Financials', 'Healthcare',
-    'Consumer Discretionary', 'Consumer Staples', 'Industrials',
-    'Energy', 'Materials', 'Utilities', 'Real Estate',
-    'Communication Services'
-  ];
+  // 2. Build lookup and find missing
+  const existingIsins = new Set(data?.map(d => d.isin) || []);
+  const missingIsins = isins.filter(isin => !existingIsins.has(isin));
+  const needsSectorUpdate = data?.filter(d => d.ticker && !d.sector).map(d => d.isin) || [];
   
-  const prompt = `For the ETF "${etfName}" (ISIN: ${isin}), provide the sector allocation breakdown.
-
-IMPORTANT RULES:
-1. Return the TOP 5 sectors with their percentage allocations
-2. The percentages MUST sum to at least 80% (maximum 20% can go to "Other")
-3. Use ONLY these sector names: ${validSectors.join(', ')}, Other
-4. For broad market ETFs (MSCI World, S&P 500, etc.) distribute across multiple sectors
-5. For thematic/sector ETFs, concentrate on the main sector(s)
-
-Respond in this EXACT JSON format only:
-{"Technology": 25, "Healthcare": 20, "Financials": 18, "Industrials": 12, "Consumer Discretionary": 10, "Other": 15}
-
-Respond with ONLY the JSON object, no explanation.`;
-
-  try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',  // Modello più capace per JSON
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 200,
-      }),
+  // 3. All ISINs that need resolution (missing + no sector)
+  const toResolve = [...new Set([...missingIsins, ...needsSectorUpdate])];
+  
+  if (toResolve.length > 0) {
+    // Call new endpoint that creates records
+    await supabase.functions.invoke('update-prices-cron', {
+      body: { mode: 'resolve-and-get-sectors', isins: toResolve }
     });
     
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content?.trim() || '';
+    // Re-fetch after resolution
+    const { data: updatedData } = await supabase
+      .from('isin_mappings')
+      .select('isin, ticker, sector, industry')
+      .in('isin', isins);
     
-    // Parse JSON response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return {};
-    
-    const parsed = JSON.parse(jsonMatch[0]);
-    
-    // Validate: only valid sectors, percentages are numbers
-    const result: Record<string, number> = {};
-    let total = 0;
-    
-    for (const [sector, pct] of Object.entries(parsed)) {
-      if ((validSectors.includes(sector) || sector === 'Other') && typeof pct === 'number' && pct > 0) {
-        result[sector] = pct;
-        total += pct;
+    // Update state with new mappings
+    const newMappings = {};
+    for (const row of updatedData || []) {
+      if (row.sector) {
+        newMappings[row.isin] = { ticker: row.ticker, sector: row.sector, industry: row.industry };
       }
     }
-    
-    // Validate minimum 80% coverage (max 20% in Other)
-    const otherPct = result['Other'] || 0;
-    if (otherPct <= 20 && total >= 80) {
-      console.log(`AI resolved ETF sectors for ${etfName}: ${JSON.stringify(result)}`);
-      return result;
-    }
-    
-    // If Other > 20%, redistribute to make it compliant
-    if (otherPct > 20 && Object.keys(result).length > 1) {
-      const excess = otherPct - 20;
-      result['Other'] = 20;
-      
-      // Distribute excess proportionally to other sectors
-      const otherSectors = Object.entries(result).filter(([k]) => k !== 'Other');
-      const otherTotal = otherSectors.reduce((s, [, v]) => s + v, 0);
-      
-      for (const [sector, pct] of otherSectors) {
-        result[sector] = pct + (excess * pct / otherTotal);
-      }
-      
-      return result;
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('Error fetching ETF sectors with AI:', error);
-    return {};
+    setMappings(newMappings);
   }
-}
+}, [hasFetched]);
 ```
 
-### 3. Integrare AI Fallback in `fetch-etf-allocation`
+#### 3. Passare Descrizione Stock per Migliore Risoluzione AI
 
-**File**: `supabase/functions/fetch-etf-allocation/index.ts`
+Il problema è che l'AI ha bisogno della descrizione per capire il settore (es. "AZ.ALPHABET INC-CL A").
 
-Aggiungere dopo i fallback esistenti (linea ~670):
-
-```typescript
-// Existing fallbacks...
-if (Object.keys(sectorAllocations).length === 0) {
-  // Try INDEX_SECTOR_FALLBACKS (existing)
-  const fallbackSectors = getIndexFallbackSectors(name);
-  if (Object.keys(fallbackSectors).length > 0) {
-    Object.assign(sectorAllocations, fallbackSectors);
-  }
-}
-
-// NEW: AI Fallback for ETFs without sector data
-if (Object.keys(sectorAllocations).length === 0) {
-  console.log(`No sector data for ${isin}, trying Lovable AI...`);
-  const aiSectors = await fetchETFSectorsWithAI(isin, name);
-  
-  if (Object.keys(aiSectors).length > 0) {
-    Object.assign(sectorAllocations, aiSectors);
-    console.log(`AI populated sectors for ${name}:`, aiSectors);
-  }
-}
-```
-
-### 4. Integrare AI Fallback in `update-prices-cron`
-
-**File**: `supabase/functions/update-prices-cron/index.ts`
-
-Modificare `fetchYahooSectorInfo` per includere fallback AI:
+Modificare per passare le descrizioni:
 
 ```typescript
-async function fetchYahooSectorInfo(
-  ticker: string, 
-  description?: string
-): Promise<{ sector: string | null; industry: string | null }> {
-  // 1. Check KNOWN_SECTORS (existing)
-  const knownInfo = inferSectorFromName(ticker, description);
-  if (knownInfo.sector) return knownInfo;
-  
-  // 2. Try Yahoo Finance API (existing)
-  // ... existing code ...
-  
-  // 3. NEW: Fallback to Lovable AI
-  if (description) {
-    console.log(`Yahoo failed for ${ticker}, trying Lovable AI...`);
-    const aiResult = await fetchSectorWithAI(ticker, description);
-    if (aiResult.sector) {
-      return aiResult;
-    }
-  }
-  
-  return { sector: null, industry: null };
-}
-```
+// In useSectorMappings.ts - ricevere anche le descrizioni
+fetchMappings(stockIsins, stockDescriptions) 
 
-### 5. Aggiornare `SectorMappingManager` per Admin
-
-**File**: `src/components/admin/SectorMappingManager.tsx`
-
-Modificare per caricare TUTTI gli ISIN stock dalle posizioni e usare UPSERT:
-
-```typescript
-async function loadMappings() {
-  // 1. Carica TUTTI gli ISIN stock dalle posizioni
-  const { data: positions } = await supabase
-    .from('positions')
-    .select('isin, description')
-    .eq('asset_type', 'stock')
-    .not('isin', 'is', null);
-  
-  // 2. Carica i mapping esistenti
-  const { data: mappings } = await supabase
-    .from('isin_mappings')
-    .select('*');
-  
-  // 3. Combina: mostra tutti gli ISIN con info mapping se disponibile
-  const uniqueIsins = [...new Set(positions?.map(p => p.isin) || [])];
-  
-  const combined = uniqueIsins.map(isin => {
-    const mapping = mappings?.find(m => m.isin === isin);
-    const position = positions?.find(p => p.isin === isin);
-    return {
-      isin,
-      description: position?.description || '',
-      ticker: mapping?.ticker || null,
-      sector: mapping?.sector || null,
-      hasMapping: !!mapping,
-    };
-  });
-  
-  setMappings(combined);
-}
-
-// UPSERT per creare nuovi record
-async function handleSaveSector(isin: string) {
-  const { error } = await supabase
-    .from('isin_mappings')
-    .upsert({
-      isin,
-      sector: pendingChanges[isin],
-      source: 'manual',
-      last_verified_at: new Date().toISOString(),
-    }, { onConflict: 'isin' });
-}
+// In edge function - usare descrizione per AI fallback
+const sectorInfo = await fetchYahooSectorInfo(ticker, description);
 ```
 
 ---
 
-## Esempi di Output AI per ETF
+## Flusso Risultante
 
-| ETF | Nome | Output AI Atteso |
-|-----|------|------------------|
-| IE00B4L5Y983 | iShares Core MSCI World | `{"Technology": 24, "Financials": 15, "Healthcare": 12, "Consumer Discretionary": 11, "Industrials": 10, "Other": 18}` |
-| IE00B5BMR087 | iShares Core S&P 500 | `{"Technology": 32, "Healthcare": 12, "Financials": 11, "Consumer Discretionary": 10, "Communication Services": 9, "Other": 16}` |
-| IE00BFMXXD54 | Invesco EQQQ Nasdaq 100 | `{"Technology": 50, "Communication Services": 15, "Consumer Discretionary": 14, "Healthcare": 8, "Other": 13}` |
-| LU1681045370 | Amundi MSCI Emerging Markets | `{"Financials": 22, "Technology": 20, "Consumer Discretionary": 14, "Communication Services": 10, "Materials": 8, "Other": 16}` |
-| IE00B3XXRP09 | Vanguard S&P 500 | `{"Technology": 30, "Healthcare": 13, "Financials": 12, "Consumer Discretionary": 10, "Industrials": 8, "Other": 17}` |
-
----
-
-## Flusso Operativo Risultante
-
-### Per Stock:
 ```text
-1. Utente carica Excel con "AZ.ALPHABET INC-CL A"
+1. Utente carica Excel con "AZ.ALPHABET INC-CL A" (ISIN: US02079K3059)
    │
    ▼
-2. update-prices-cron:
-   ├─ KNOWN_SECTORS["GOOGL"]? → No
-   ├─ Database isin_mappings? → No
-   ├─ Yahoo Finance → 401 Error
-   └─ Lovable AI: "Qual è il settore di GOOGL?"
-      └─ Risposta: "Communication Services"
+2. Posizione salvata in `positions` con ISIN
    │
    ▼
-3. Salva in isin_mappings:
-   { isin: US02079K3059, sector: "Communication Services" }
+3. Utente apre Risk Analyzer → Sector view
    │
    ▼
-4. TUTTI gli utenti vedono: ALPHABET → Communication Services ✓
-```
-
-### Per ETF:
-```text
-1. Utente carica Excel con "ISHSIII-CORE MSCI WLD"
+4. useSectorMappings cerca US02079K3059 in isin_mappings → NON ESISTE
    │
    ▼
-2. fetch-etf-allocation:
-   ├─ justETF scraping → Nessun dato settoriale
-   ├─ INDEX_SECTOR_FALLBACKS → Non match
-   └─ Lovable AI: "Top 5 settori per MSCI World ETF?"
-      └─ Risposta: {"Technology": 24, "Financials": 15, ...}
+5. Chiama edge function mode='resolve-and-get-sectors'
+   │
+   ├─ Yahoo Search: US02079K3059 → GOOGL
+   ├─ Yahoo Quote API → 401 Error
+   └─ Lovable AI: "Settore di GOOGL (Alphabet)?" → "Communication Services"
    │
    ▼
-3. Salva in etf_allocations:
-   { isin: IE00B4L5Y983, sector_allocations: {...} }
+6. CREA nuovo record in isin_mappings:
+   { isin: US02079K3059, ticker: GOOGL, sector: "Communication Services" }
    │
    ▼
-4. TUTTI gli utenti vedono la distribuzione settoriale corretta ✓
+7. Risk Analyzer mostra: ALPHABET → Communication Services ✓
 ```
 
 ---
 
-## File da Creare/Modificare
+## File da Modificare
 
-| File | Azione | Descrizione |
-|------|--------|-------------|
-| `supabase/functions/update-prices-cron/index.ts` | Modifica | Aggiungere `fetchSectorWithAI()` per stock |
-| `supabase/functions/fetch-etf-allocation/index.ts` | Modifica | Aggiungere `fetchETFSectorsWithAI()` per ETF multi-settore |
-| `src/components/admin/SectorMappingManager.tsx` | Modifica | Caricare ISIN da positions, supportare UPSERT |
-
----
-
-## Vantaggi
-
-| Aspetto | Prima | Dopo |
-|---------|-------|------|
-| **Stock senza settore** | ~70% in "Other" | <5% in "Other" |
-| **ETF senza scraping** | 100% in "Other" | Distribuzione multi-settore (≥80% identificato) |
-| **Copertura settoriale ETF** | 0% se scraping fallisce | Minimo 80% (max 20% in Other) |
-| **Manutenzione** | Aggiornare manualmente | Zero (AI impara automaticamente) |
-| **Costo** | N/A | Lovable AI incluso |
+| File | Modifiche |
+|------|-----------|
+| `supabase/functions/update-prices-cron/index.ts` | Aggiungere handler `resolve-and-get-sectors` che crea nuovi record |
+| `src/hooks/useSectorMappings.ts` | Identificare ISIN mancanti e chiamare nuovo endpoint |
+| `src/pages/RiskAnalyzer.tsx` | Passare descrizioni stock al hook |
 
 ---
 
-## Validazione Output AI per ETF
+## Risultato Atteso
 
-L'AI deve rispettare questi vincoli:
-
-1. **Minimo 80% copertura**: La somma dei settori identificati (escluso Other) deve essere ≥80%
-2. **Massimo 20% in Other**: Il settore "Other" non può superare il 20%
-3. **Settori validi**: Solo nomi GICS standard
-4. **Formato JSON**: Output parsabile automaticamente
-
-Se l'AI restituisce un output non conforme, il sistema:
-1. Tenta di redistribuire automaticamente
-2. Se fallisce, usa i fallback statici esistenti
+| Prima | Dopo |
+|-------|------|
+| 60 stock, 31 record in `isin_mappings` | 60 stock, 60 record in `isin_mappings` |
+| ~50% stock in "Other" | <5% in "Other" |
+| AI mai chiamata | AI chiamata automaticamente per ogni stock sconosciuto |
+| Richiede Admin Panel | Zero intervento manuale |
 
