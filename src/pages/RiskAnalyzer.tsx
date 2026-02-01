@@ -27,7 +27,8 @@ export function RiskAnalyzer() {
   const { signOut } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
   const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
-  const [includeDerivatives, setIncludeDerivatives] = useState(false);
+const [includeDerivatives, setIncludeDerivatives] = useState(true);
+  const [includeBonds, setIncludeBonds] = useState(true);
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
@@ -38,8 +39,8 @@ export function RiskAnalyzer() {
   
   // Calculate base currency exposure from existing data
   const baseCurrencyExposure = useMemo(() => 
-    calculateCurrencyExposure(analysis, { includeDerivatives }), 
-    [analysis, includeDerivatives]
+    calculateCurrencyExposure(analysis, { includeDerivatives, includeBonds }), 
+    [analysis, includeDerivatives, includeBonds]
   );
   
   // Pattern per riconoscere ETF (sincronizzato con excelParser.ts e currencyExposure.ts)
@@ -233,6 +234,8 @@ export function RiskAnalyzer() {
                   loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
                   includeDerivatives={includeDerivatives}
                   onIncludeDerivativesChange={setIncludeDerivatives}
+                  includeBonds={includeBonds}
+                  onIncludeBondsChange={setIncludeBonds}
                 />
               </ErrorBoundary>
             ) : (

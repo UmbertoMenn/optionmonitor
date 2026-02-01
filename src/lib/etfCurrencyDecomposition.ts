@@ -153,6 +153,7 @@ export function applyETFDecomposition(
     // Aggregate breakdown by category
     const breakdown = {
       stocks: 0,
+      bonds: 0,
       commodities: 0,
       nakedPuts: 0,
       leapCalls: 0,

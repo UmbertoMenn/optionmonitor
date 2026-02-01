@@ -77,12 +77,24 @@ export interface CommodityRiskDetail {
   exchangeRate: number;
 }
 
+export interface BondRiskDetail {
+  underlying: string;
+  value: number;              // Valore in valuta originale
+  quantity: number;
+  price: number;
+  riskOriginal: number;       // Rischio in valuta originale (= valore)
+  riskEUR: number;            // Rischio convertito in EUR
+  currency: string;
+  exchangeRate: number;
+}
+
 export interface RiskAnalysis {
   // Totali EUR
   totalStockRisk: number;       // Rischio totale Azioni + ETF (per retrocompatibilità)
   totalETFRisk: number;         // Rischio solo ETF
   totalPureStockRisk: number;   // Rischio solo Azioni (no ETF)
   totalCommodityRisk: number;
+  totalBondRisk: number;
   totalNakedPutRisk: number;
   totalLeapCallRisk: number;
   totalStrategyRisk: number;
@@ -91,6 +103,7 @@ export interface RiskAnalysis {
   // Dettagli
   stockDetails: StockRiskDetail[];
   commodityDetails: CommodityRiskDetail[];
+  bondDetails: BondRiskDetail[];
   nakedPutDetails: NakedPutRiskDetail[];
   leapCallDetails: LeapCallRiskDetail[];
   strategyDetails: StrategyRiskDetail[];
@@ -404,16 +417,20 @@ export function analyzePortfolioRisk(
   positions: Position[],
   categories: DerivativeCategories
 ): RiskAnalysis {
-  // Get stock/ETF positions (excluding commodities)
+  // Get stock/ETF positions (excluding commodities and bonds)
   const stockAssetTypes = ['stock', 'etf'];
   const stocks = positions.filter(p => stockAssetTypes.includes(p.asset_type));
   
   // Get commodity positions separately
   const commodities = positions.filter(p => p.asset_type === 'commodity');
   
+  // Get bond positions separately
+  const bonds = positions.filter(p => p.asset_type === 'bond');
+  
   // Calculate each risk category
   const stockDetails = calculateStockRisk(stocks, categories.longPuts);
   const commodityDetails = calculateCommodityRisk(commodities);
+  const bondDetails = calculateBondRisk(bonds);
   const nakedPutDetails = calculateNakedPutRisk(categories.nakedPuts);
   const leapCallDetails = calculateLeapCallRisk(categories.leapCalls);
   const strategyDetails = calculateStrategyRisk(categories);
@@ -423,6 +440,7 @@ export function analyzePortfolioRisk(
   const totalETFRisk = stockDetails.filter(s => s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
   const totalPureStockRisk = stockDetails.filter(s => !s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
   const totalCommodityRisk = commodityDetails.reduce((sum, c) => sum + c.riskEUR, 0);
+  const totalBondRisk = bondDetails.reduce((sum, b) => sum + b.riskEUR, 0);
   const totalNakedPutRisk = nakedPutDetails.reduce((sum, n) => sum + n.riskEUR, 0);
   const totalLeapCallRisk = leapCallDetails.reduce((sum, l) => sum + l.riskEUR, 0);
   const totalStrategyRisk = strategyDetails.reduce((sum, s) => sum + s.maxLossEUR, 0);
@@ -433,12 +451,14 @@ export function analyzePortfolioRisk(
     totalETFRisk,
     totalPureStockRisk,
     totalCommodityRisk,
+    totalBondRisk,
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
     grandTotal,
     stockDetails,
     commodityDetails,
+    bondDetails,
     nakedPutDetails,
     leapCallDetails,
     strategyDetails
@@ -461,6 +481,33 @@ export function calculateCommodityRisk(
     
     return {
       underlying: commodity.ticker || commodity.description,
+      value,
+      quantity,
+      price,
+      riskOriginal: value,
+      riskEUR: value / exchangeRate,
+      currency,
+      exchangeRate
+    };
+  });
+}
+
+/**
+ * Calculate bond risk.
+ * Formula: Quantità × Prezzo / Cambio (no protection available for bonds)
+ */
+export function calculateBondRisk(
+  bonds: Position[]
+): BondRiskDetail[] {
+  return bonds.map(bond => {
+    const quantity = bond.quantity || 0;
+    const price = bond.current_price || 0;
+    const value = quantity * price;
+    const exchangeRate = getEffectiveExchangeRate(bond);
+    const currency = bond.currency || 'EUR';
+    
+    return {
+      underlying: bond.ticker || bond.description,
       value,
       quantity,
       price,

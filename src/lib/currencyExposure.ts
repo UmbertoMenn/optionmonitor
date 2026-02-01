@@ -2,6 +2,7 @@ import { RiskAnalysis, StockRiskDetail, CommodityRiskDetail, NakedPutRiskDetail,
 
 export interface CurrencyBreakdown {
   stocks: number;
+  bonds: number;
   commodities: number;
   nakedPuts: number;
   leapCalls: number;
@@ -12,7 +13,7 @@ export interface InstrumentDetail {
   name: string;
   riskEUR: number;
   riskOriginal: number;
-  category: 'stocks' | 'commodities' | 'nakedPuts' | 'leapCalls' | 'strategies';
+  category: 'stocks' | 'bonds' | 'commodities' | 'nakedPuts' | 'leapCalls' | 'strategies';
   details: string;
   isin?: string;
   isETF?: boolean;
@@ -45,6 +46,7 @@ export function getCurrencyColor(currency: string): string {
 function createEmptyBreakdown(): CurrencyBreakdown {
   return {
     stocks: 0,
+    bonds: 0,
     commodities: 0,
     nakedPuts: 0,
     leapCalls: 0,
@@ -92,13 +94,14 @@ function isETFByDescription(description: string): boolean {
 
 export interface CurrencyExposureOptions {
   includeDerivatives?: boolean; // default: true
+  includeBonds?: boolean; // default: true
 }
 
 export function calculateCurrencyExposure(
   analysis: RiskAnalysis,
   options: CurrencyExposureOptions = {}
 ): CurrencyExposure[] {
-  const { includeDerivatives = true } = options;
+  const { includeDerivatives = true, includeBonds = true } = options;
   const byCurrency = new Map<string, CurrencyExposure>();
   
   // Aggregate stockDetails by currency (always included)
@@ -121,6 +124,25 @@ export function calculateCurrencyExposure(
       isin: stock.isin,
       isETF
     });
+  }
+  
+  // Aggregate bondDetails by currency (if includeBonds is true)
+  if (includeBonds) {
+    for (const bond of analysis.bondDetails) {
+      const curr = bond.currency || 'OTHER';
+      const exposure = getOrCreateCurrency(byCurrency, curr);
+      exposure.breakdown.bonds += bond.riskEUR;
+      exposure.totalRisk += bond.riskEUR;
+      exposure.totalRiskOriginal += bond.riskOriginal;
+      
+      exposure.instruments.push({
+        name: bond.underlying,
+        riskEUR: bond.riskEUR,
+        riskOriginal: bond.riskOriginal,
+        category: 'bonds',
+        details: `${bond.quantity} × ${bond.price.toFixed(2)}`
+      });
+    }
   }
   
   // Aggregate commodityDetails by currency
