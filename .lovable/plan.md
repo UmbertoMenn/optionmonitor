@@ -1,48 +1,147 @@
-# Piano Completato ✅
 
-## Problema Risolto
 
-I derivati venivano classificati come "Other" perché l'edge function falliva nel risolvere i ticker per nomi come `AMAZON.COM.INC`, `Advanced Micro Devices Inc.`, ecc.
+# Piano: Feedback Visivo per Risoluzione Settori AI
 
-## Modifiche Implementate
+## Problema
 
-### File: `supabase/functions/update-prices-cron/index.ts`
+Quando l'utente apre la vista "Sector Allocation", la risoluzione AI dei settori impiega circa 10 secondi. Attualmente:
+- Lo stato `sectorMappingsLoading` esiste nel hook ma **non viene mostrato all'utente**
+- L'unico feedback è per il caricamento ETF, non per la risoluzione settori
+- L'utente vede dati incompleti senza sapere che sta ancora elaborando
 
-1. **Dizionario `specialMappings` espanso** con 50+ mapping comuni:
-   - AMAZON → AMZN
-   - NVIDIA → NVDA
-   - MICROSOFT → MSFT
-   - J.P. MORGAN → JPM
-   - UBER TECHNOLOGIES → UBER
-   - E molti altri...
+## Soluzione Proposta
 
-2. **Nuova funzione `inferTickerWithAI()`**:
-   - Quando il dizionario non trova un match, chiama Lovable AI
-   - Chiede il ticker symbol dato il nome della compagnia
-   - Usa google/gemini-3-flash-preview per velocità
+Implementare un feedback a due livelli:
 
-## Flusso Aggiornato
+### 1. Toast Informativo con Progress (Sonner)
+
+Mostrare un toast persistente durante la risoluzione che indica:
+- Quanti ISIN/nomi devono essere risolti
+- Messaggio chiaro che l'AI sta lavorando
 
 ```
-Nome: "AMAZON.COM.INC"
-  │
-  ├─ Regex → fallisce
-  ├─ specialMappings["AMAZON"] → "AMZN" ✓
-  │
-  └─ fetchSectorWithAI("AMZN") → "Consumer Cyclical"
-
-Nome: "Celestica Inc" (non in dizionario)
-  │
-  ├─ Regex → fallisce
-  ├─ specialMappings → non trovato
-  ├─ inferTickerWithAI("Celestica Inc") → AI risponde "CLS"
-  │
-  └─ fetchSectorWithAI("CLS") → "Technology"
+┌─────────────────────────────────────────────┐
+│  🔄 Aggiornamento settori in corso...       │
+│  Risoluzione AI per 15 strumenti            │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━          │
+└─────────────────────────────────────────────┘
 ```
+
+### 2. Badge Inline nella Card Settoriale
+
+Accanto al conteggio ETF, aggiungere un indicatore per la risoluzione settori:
+
+```
+19 settori identificati
+✓ 6 ETF analizzati
+🔄 Risoluzione AI in corso...  ← NUOVO
+```
+
+## Modifiche Tecniche
+
+### File 1: `src/hooks/useSectorMappings.ts`
+
+Aggiungere:
+- Contatore `resolving` con numero di elementi da risolvere
+- Callback opzionale `onResolutionStart` / `onResolutionEnd` per toast
+
+```typescript
+const [resolvingCount, setResolvingCount] = useState(0);
+
+// Prima della chiamata edge function
+setResolvingCount(isinsToResolve.length + derivativeNamesToResolve.length);
+
+// Dopo completamento
+setResolvingCount(0);
+
+return { 
+  mappings, 
+  fetchMappings, 
+  isLoading, 
+  resolvingCount,  // NUOVO
+  reset 
+};
+```
+
+### File 2: `src/pages/RiskAnalyzer.tsx`
+
+Importare `toast` da sonner e mostrare feedback:
+
+```typescript
+import { toast } from 'sonner';
+
+const { 
+  mappings: sectorMappings, 
+  fetchMappings: fetchSectorMappings, 
+  isLoading: sectorMappingsLoading,
+  resolvingCount  // NUOVO
+} = useSectorMappings();
+
+// Mostrare toast quando inizia risoluzione
+useEffect(() => {
+  if (resolvingCount > 0) {
+    toast.loading(`Risoluzione AI settori per ${resolvingCount} strumenti...`, {
+      id: 'sector-resolution',
+      duration: Infinity
+    });
+  } else if (sectorMappingsLoading === false) {
+    toast.dismiss('sector-resolution');
+  }
+}, [resolvingCount, sectorMappingsLoading]);
+
+// Passare lo stato a SectorAllocationView
+<SectorAllocationView 
+  // ... props esistenti
+  isResolvingSectors={sectorMappingsLoading}
+  resolvingCount={resolvingCount}
+/>
+```
+
+### File 3: `src/components/risk/SectorAllocationView.tsx`
+
+Aggiungere props e indicatore inline:
+
+```typescript
+interface SectorAllocationViewProps {
+  // ... props esistenti
+  isResolvingSectors?: boolean;
+  resolvingCount?: number;
+}
+
+// Nel template, dopo l'indicatore ETF:
+{isResolvingSectors && resolvingCount > 0 && (
+  <span className="ml-2 text-blue-500 animate-pulse">
+    🔄 Risoluzione AI ({resolvingCount} strumenti)...
+  </span>
+)}
+
+{!isResolvingSectors && !isLoadingETFData && (
+  <span className="ml-2 text-green-500">
+    ✓ Settori aggiornati
+  </span>
+)}
+```
+
+## Flusso Utente Risultante
+
+1. Utente clicca su "Sector Allocation"
+2. **Toast appare**: "Risoluzione AI settori per 15 strumenti..."
+3. I dati mostrano progressivamente i settori risolti
+4. **Badge inline**: "🔄 Risoluzione AI (15 strumenti)..."
+5. Dopo ~10s: Toast scompare, badge diventa "✓ Settori aggiornati"
+6. Grafico si aggiorna con settori corretti
+
+## File da Modificare
+
+| File | Modifiche |
+|------|-----------|
+| `src/hooks/useSectorMappings.ts` | Aggiungere `resolvingCount` allo stato |
+| `src/pages/RiskAnalyzer.tsx` | Mostrare toast + passare stato a view |
+| `src/components/risk/SectorAllocationView.tsx` | Mostrare badge inline per risoluzione |
 
 ## Risultato Atteso
 
-| Metrica | Prima | Dopo |
-|---------|-------|------|
-| Nomi risolti | 13/33 (40%) | 30+/33 (90%+) |
-| Derivati in "Other" | ~60% | <10% |
+- L'utente **sa sempre** che sta avvenendo un'elaborazione
+- Feedback visivo chiaro e non invasivo
+- Al completamento, conferma visiva che i dati sono aggiornati
+
