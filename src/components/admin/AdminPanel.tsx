@@ -8,10 +8,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { formatDate } from '@/lib/formatters';
+import { SectorMappingManager } from './SectorMappingManager';
 
 interface UserWithRole {
   id: string;
@@ -264,84 +266,103 @@ export function AdminPanel() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <Card className="border-border bg-card">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Users className="w-5 h-5 text-muted-foreground" />
-              <CardTitle>Utenti Registrati</CardTitle>
-              <Badge variant="secondary">{users.length}</Badge>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="text-center py-8 text-muted-foreground">
-                Caricamento...
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border hover:bg-background-tertiary">
-                    <TableHead>Utente</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Registrato</TableHead>
-                    <TableHead>Ruolo</TableHead>
-                    <TableHead className="text-right">Azioni</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {users.map((targetUser) => (
-                    <TableRow key={targetUser.id} className="border-border hover:bg-background-tertiary">
-                      <TableCell className="font-medium">
-                        {targetUser.full_name || 'Nome non impostato'}
-                        {targetUser.id === user?.id && (
-                          <Badge variant="outline" className="ml-2 text-xs">Tu</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {targetUser.email}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDate(targetUser.created_at)}
-                      </TableCell>
-                      <TableCell>
-                        {targetUser.isAdmin ? (
-                          <Badge className="bg-warning/10 text-warning border-warning/30">
-                            <ShieldCheck className="w-3 h-3 mr-1" />
-                            Admin
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary">Utente</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleToggleAdmin(targetUser.id, targetUser.isAdmin)}
-                            disabled={targetUser.id === user?.id}
-                          >
-                            <Shield className="w-4 h-4 mr-1" />
-                            {targetUser.isAdmin ? 'Rimuovi Admin' : 'Rendi Admin'}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-loss hover:text-loss"
-                            onClick={() => setUserToDelete(targetUser)}
-                            disabled={!canDeleteUser(targetUser)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+        <Tabs defaultValue="users" className="space-y-6">
+          <TabsList className="bg-background-secondary border border-border">
+            <TabsTrigger value="users" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Users className="w-4 h-4 mr-2" />
+              Utenti
+            </TabsTrigger>
+            <TabsTrigger value="sectors" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <PieChart className="w-4 h-4 mr-2" />
+              Settori
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="users">
+            <Card className="border-border bg-card">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Users className="w-5 h-5 text-muted-foreground" />
+                  <CardTitle>Utenti Registrati</CardTitle>
+                  <Badge variant="secondary">{users.length}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Caricamento...
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border hover:bg-background-tertiary">
+                        <TableHead>Utente</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Registrato</TableHead>
+                        <TableHead>Ruolo</TableHead>
+                        <TableHead className="text-right">Azioni</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((targetUser) => (
+                        <TableRow key={targetUser.id} className="border-border hover:bg-background-tertiary">
+                          <TableCell className="font-medium">
+                            {targetUser.full_name || 'Nome non impostato'}
+                            {targetUser.id === user?.id && (
+                              <Badge variant="outline" className="ml-2 text-xs">Tu</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {targetUser.email}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatDate(targetUser.created_at)}
+                          </TableCell>
+                          <TableCell>
+                            {targetUser.isAdmin ? (
+                              <Badge className="bg-warning/10 text-warning border-warning/30">
+                                <ShieldCheck className="w-3 h-3 mr-1" />
+                                Admin
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">Utente</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleToggleAdmin(targetUser.id, targetUser.isAdmin)}
+                                disabled={targetUser.id === user?.id}
+                              >
+                                <Shield className="w-4 h-4 mr-1" />
+                                {targetUser.isAdmin ? 'Rimuovi Admin' : 'Rendi Admin'}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-loss hover:text-loss"
+                                onClick={() => setUserToDelete(targetUser)}
+                                disabled={!canDeleteUser(targetUser)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="sectors">
+            <SectorMappingManager />
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* Delete Confirmation Dialog */}
