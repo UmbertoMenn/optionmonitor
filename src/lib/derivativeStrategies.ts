@@ -141,11 +141,44 @@ export function categorizeDerivatives(
         
       case 'protection':
         if (position.option_type === 'put' && position.quantity > 0) {
+          // Calculate if this is a partial protection
+          let isPartial = false;
+          
+          if (linkedStock && linkedStock.quantity > 0) {
+            // Calculate net exposure for this underlying
+            const stockContracts = Math.floor(linkedStock.quantity / 100);
+            const optionContracts = position.quantity;
+            
+            // Find other PUT positions on the same underlying
+            const underlyingKey = normalizeForMatching(position.underlying || position.description);
+            const otherPuts = derivatives.filter(d => 
+              d.id !== position.id &&
+              d.option_type === 'put' &&
+              normalizeForMatching(d.underlying || d.description) === underlyingKey
+            );
+            
+            const otherBoughtContracts = otherPuts
+              .filter(p => p.quantity > 0)
+              .reduce((sum, p) => sum + p.quantity, 0);
+            const otherSoldContracts = otherPuts
+              .filter(p => p.quantity < 0)
+              .reduce((sum, p) => sum + Math.abs(p.quantity), 0);
+            
+            // Total bought contracts including this position
+            const totalBoughtContracts = optionContracts + otherBoughtContracts;
+            const totalSoldContracts = otherSoldContracts;
+            
+            // Net exposure = stock contracts - (bought - sold)
+            const netExposure = stockContracts - (totalBoughtContracts - totalSoldContracts);
+            
+            isPartial = netExposure > 0;
+          }
+          
           longPuts.push({
             option: position,
             underlying: linkedStock || null,
             contracts: position.quantity,
-            isPartial: false
+            isPartial
           });
           usedDerivatives.add(position.id);
         }
