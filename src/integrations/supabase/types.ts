@@ -233,33 +233,6 @@ export type Database = {
           },
         ]
       }
-      isin_mappings: {
-        Row: {
-          created_at: string
-          exchange: string | null
-          isin: string
-          last_verified_at: string
-          source: string
-          ticker: string
-        }
-        Insert: {
-          created_at?: string
-          exchange?: string | null
-          isin: string
-          last_verified_at?: string
-          source: string
-          ticker: string
-        }
-        Update: {
-          created_at?: string
-          exchange?: string | null
-          isin?: string
-          last_verified_at?: string
-          source?: string
-          ticker?: string
-        }
-        Relationships: []
-      }
       portfolios: {
         Row: {
           average_balance: number | null
@@ -388,36 +361,6 @@ export type Database = {
           },
         ]
       }
-      price_update_logs: {
-        Row: {
-          completed_at: string | null
-          error_message: string | null
-          id: string
-          positions_failed: number | null
-          positions_updated: number | null
-          source: string | null
-          started_at: string
-        }
-        Insert: {
-          completed_at?: string | null
-          error_message?: string | null
-          id?: string
-          positions_failed?: number | null
-          positions_updated?: number | null
-          source?: string | null
-          started_at?: string
-        }
-        Update: {
-          completed_at?: string | null
-          error_message?: string | null
-          id?: string
-          positions_failed?: number | null
-          positions_updated?: number | null
-          source?: string | null
-          started_at?: string
-        }
-        Relationships: []
-      }
       profiles: {
         Row: {
           created_at: string
@@ -442,33 +385,6 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id?: string
-        }
-        Relationships: []
-      }
-      underlying_mappings: {
-        Row: {
-          created_at: string | null
-          id: string
-          source: string | null
-          ticker: string
-          underlying: string
-          updated_at: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          source?: string | null
-          ticker: string
-          underlying: string
-          updated_at?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          source?: string | null
-          ticker?: string
-          underlying?: string
-          updated_at?: string | null
         }
         Relationships: []
       }

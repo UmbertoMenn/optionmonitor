@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
-import { LivePricesProvider } from "@/contexts/LivePricesContext";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { AdminPanel } from "@/components/admin/AdminPanel";
@@ -35,15 +34,13 @@ function AppRoutes() {
 
   return (
     <PortfolioProvider>
-      <LivePricesProvider>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/derivatives" element={<Derivatives />} />
-          <Route path="/risk-analyzer" element={<RiskAnalyzer />} />
-          <Route path="/admin" element={<AdminPanel />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </LivePricesProvider>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/derivatives" element={<Derivatives />} />
+        <Route path="/risk-analyzer" element={<RiskAnalyzer />} />
+        <Route path="/admin" element={<AdminPanel />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
     </PortfolioProvider>
   );
 }

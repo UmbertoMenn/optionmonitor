@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { usePositionsWithLivePrices } from '@/hooks/usePositionsWithLivePrices';
+import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
@@ -18,23 +18,12 @@ import { DepositsSection } from '@/components/dashboard/DepositsSection';
 import { ViewModeSelector, ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { DynamicPortfolioChart } from '@/components/dashboard/DynamicPortfolioChart';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
-import { LivePriceIndicator } from '@/components/dashboard/LivePriceIndicator';
 import { formatRelativeTime } from '@/lib/formatters';
 import { Link } from 'react-router-dom';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
-  const { 
-    portfolio, 
-    positions, 
-    summary, 
-    isLoading,
-    isLoadingPrices,
-    lastFetched,
-    error: livePriceError,
-    refresh: refreshPrices,
-    getPriceForPosition,
-  } = usePositionsWithLivePrices();
+  const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
   const netting = useDerivativeNetting(positions, summary, overrides);
   const { 
@@ -52,6 +41,7 @@ export function Dashboard() {
     isUpserting: isUpsertingDeposit,
   } = useDeposits(portfolio?.id);
 
+  // Centralized state for unified carousel
   const [viewMode, setViewMode] = useState<ViewMode>('base');
   const [selectedHistoricalDate, setSelectedHistoricalDate] = useState<string | null>(
     earliestEntry?.snapshot_date || null
@@ -99,16 +89,6 @@ export function Dashboard() {
               </div>
               <div className="ml-4">
                 <PortfolioSelector />
-              </div>
-              
-              {/* Live Price Status */}
-              <div className="ml-4 border-l border-border pl-4">
-                <LivePriceIndicator
-                  lastFetched={lastFetched}
-                  isLoading={isLoadingPrices}
-                  error={livePriceError}
-                  onRefresh={refreshPrices}
-                />
               </div>
             </div>
             
@@ -239,16 +219,7 @@ export function Dashboard() {
               <CardTitle className="text-lg">Posizioni</CardTitle>
             </CardHeader>
             <CardContent>
-              <PositionsTable 
-                positions={positions} 
-                livePrices={{
-                  getPriceForPosition,
-                  lastFetched,
-                  isLoading: isLoadingPrices,
-                  error: livePriceError,
-                  refresh: refreshPrices,
-                }}
-              />
+              <PositionsTable positions={positions} />
             </CardContent>
           </Card>
         )}

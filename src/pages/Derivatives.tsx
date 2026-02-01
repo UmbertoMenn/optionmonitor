@@ -1,5 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { usePositionsWithLivePrices } from '@/hooks/usePositionsWithLivePrices';
+import { usePortfolio } from '@/hooks/usePortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,7 +26,6 @@ import { formatCurrency, formatPercentage } from '@/lib/formatters';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
-import { LivePriceIndicator } from '@/components/dashboard/LivePriceIndicator';
 
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -40,15 +39,7 @@ function formatExpiryMMY(date: string | null | undefined): string {
 
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
-  const { 
-    portfolio, 
-    positions, 
-    isLoading,
-    isLoadingPrices,
-    lastFetched,
-    error: livePriceError,
-    refresh: refreshPrices,
-  } = usePositionsWithLivePrices();
+  const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
@@ -95,16 +86,6 @@ export function Derivatives() {
               </div>
               <div className="ml-4">
                 <PortfolioSelector />
-              </div>
-              
-              {/* Live Price Status */}
-              <div className="ml-4 border-l border-border pl-4">
-                <LivePriceIndicator
-                  lastFetched={lastFetched}
-                  isLoading={isLoadingPrices}
-                  error={livePriceError}
-                  onRefresh={refreshPrices}
-                />
               </div>
             </div>
             

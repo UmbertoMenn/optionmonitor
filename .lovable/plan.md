@@ -1,130 +1,77 @@
 
-# Piano: Implementare Risoluzione Ticker Dinamica
+# Piano: Differenziazione Icone Strategie Derivati
+
+## Obiettivo
+Cambiare le icone per Double Diagonal e Naked Put per distinguerle visivamente da Iron Condor, e modificare il colore della sezione "Altre Strategie".
+
+---
 
 ## Stato Attuale
 
-Ho verificato il codice e confermato che **il piano non è stato ancora implementato**:
+| Sezione | Icona | Colore |
+|---------|-------|--------|
+| Covered Call | Shield | text-primary |
+| Protezioni - Long Put | Shield | text-primary |
+| Iron Condor | Target | text-amber-500 |
+| Double Diagonal | Target | text-purple-500 |
+| Naked Put | Target | text-primary |
+| Leap Call | TrendingUp | text-green-500 |
+| Altre Strategie | TrendingDown | text-muted-foreground |
 
-- ❌ La tabella `underlying_mappings` non esiste
-- ❌ La funzione `underlyingToTicker` è ancora sincrona e usa solo la lookup table hardcoded
-- ❌ Non c'è caching nel database
+---
 
-## Modifiche da Implementare
+## Modifiche Proposte
 
-### 1. Creare Tabella Database
+| Sezione | Nuova Icona | Nuovo Colore | Motivazione |
+|---------|-------------|--------------|-------------|
+| Double Diagonal | `Layers` | text-purple-500 | Rappresenta le scadenze stratificate/diagonali |
+| Naked Put | `CircleDollarSign` | text-orange-500 | Rappresenta il rischio monetario delle put scoperte |
+| Altre Strategie | `Puzzle` | text-cyan-500 | Colore più vivace per strategie non classificate |
 
-```sql
-CREATE TABLE public.underlying_mappings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  underlying TEXT NOT NULL UNIQUE,
-  ticker TEXT NOT NULL,
-  source TEXT DEFAULT 'yahoo',
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
+---
 
--- RLS: pubblico in lettura, service role per scrittura
-ALTER TABLE public.underlying_mappings ENABLE ROW LEVEL SECURITY;
+## Dettaglio Tecnico
 
-CREATE POLICY "Anyone can read underlying mappings"
-  ON public.underlying_mappings FOR SELECT USING (true);
-```
+### File da Modificare
+`src/pages/Derivatives.tsx`
 
-### 2. Modificare Edge Function `fetch-market-prices`
+### Modifiche
 
-Trasformare `underlyingToTicker` in funzione asincrona con:
+1. **Import aggiuntivi** - Aggiungere le nuove icone da lucide-react:
+   - `Layers` (per Double Diagonal)
+   - `CircleDollarSign` (per Naked Put)
+   - `Puzzle` (per Altre Strategie)
 
-1. **Lookup locale** (veloce)
-2. **Cache database** (underlying_mappings)
-3. **Yahoo Finance Search** come fallback
-4. **Salvataggio in cache** dei nuovi risultati
+2. **Double Diagonal (linea ~247)**
+   - Da: `<Target className="w-5 h-5 text-purple-500" />`
+   - A: `<Layers className="w-5 h-5 text-purple-500" />`
 
-```typescript
-async function underlyingToTicker(
-  underlying: string,
-  supabase: SupabaseClient
-): Promise<string | null> {
-  const normalized = underlying.toUpperCase().trim();
-  
-  // 1. Try local lookup
-  if (UNDERLYING_TO_TICKER[normalized]) {
-    return UNDERLYING_TO_TICKER[normalized];
-  }
-  
-  // 2. Check database cache
-  const { data: cached } = await supabase
-    .from('underlying_mappings')
-    .select('ticker')
-    .eq('underlying', normalized)
-    .maybeSingle();
-  
-  if (cached?.ticker) return cached.ticker;
-  
-  // 3. Resolve via Yahoo Search
-  const ticker = await resolveViaYahooSearch(underlying);
-  
-  if (ticker) {
-    // 4. Cache for future use
-    await supabase.from('underlying_mappings').upsert({
-      underlying: normalized,
-      ticker,
-      source: 'yahoo',
-    }, { onConflict: 'underlying' });
-  }
-  
-  return ticker;
-}
-```
+3. **Naked Put (linea ~287)**
+   - Da: `<Target className="w-5 h-5 text-primary" />`
+   - A: `<CircleDollarSign className="w-5 h-5 text-orange-500" />`
 
-### 3. Aggiungere Helper Yahoo Search
+4. **Altre Strategie (linea ~367)**
+   - Da: `<TrendingDown className="w-5 h-5 text-muted-foreground" />`
+   - A: `<Puzzle className="w-5 h-5 text-cyan-500" />`
 
-```typescript
-async function resolveViaYahooSearch(underlying: string): Promise<string | null> {
-  const searchTerm = underlying
-    .replace(/\s+(INC|CORP|CORPORATION|CO|LTD|LLC|PLC)\.?$/i, '')
-    .trim();
-  
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(searchTerm)}&quotesCount=5`;
-  
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0...' },
-  });
-  
-  if (!response.ok) return null;
-  
-  const data = await response.json();
-  const match = data?.quotes?.find(q => q.quoteType === 'EQUITY');
-  
-  return match?.symbol || null;
-}
-```
+---
 
-### 4. Pre-risolvere Tutti gli Underlying
+## Risultato Finale
 
-Per efficienza, risolvere tutti gli underlying unici in batch prima del loop opzioni:
+| Sezione | Icona | Colore |
+|---------|-------|--------|
+| Covered Call | Shield | text-primary (blu) |
+| Protezioni - Long Put | Shield | text-primary (blu) |
+| Iron Condor | Target | text-amber-500 (giallo/oro) |
+| Double Diagonal | Layers | text-purple-500 (viola) |
+| Naked Put | CircleDollarSign | text-orange-500 (arancione) |
+| Leap Call | TrendingUp | text-green-500 (verde) |
+| Altre Strategie | Puzzle | text-cyan-500 (ciano) |
 
-```typescript
-async function resolveAllUnderlyings(
-  options: OptionRequest[],
-  supabase: SupabaseClient
-): Promise<Map<string, string>> {
-  // 1. Batch check local + database
-  // 2. Resolve missing via Yahoo (con rate limiting)
-  // 3. Return map underlying → ticker
-}
-```
+---
 
 ## File Coinvolti
 
-| File | Azione |
-|------|--------|
-| Database | Creare tabella `underlying_mappings` |
-| `supabase/functions/fetch-market-prices/index.ts` | Aggiungere risoluzione dinamica + caching |
-
-## Vantaggi
-
-| Prima | Dopo |
-|-------|------|
-| ~150 underlying supportati | Qualsiasi underlying |
-| Errori per titoli nuovi | Auto-risoluzione dinamica |
-| Aggiornamento codice per nuovi titoli | Cache automatica nel database |
+| File | Tipo Modifica |
+|------|---------------|
+| `src/pages/Derivatives.tsx` | Aggiornamento import e icone |

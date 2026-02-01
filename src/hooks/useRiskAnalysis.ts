@@ -3,20 +3,10 @@ import { usePortfolio } from './usePortfolio';
 import { useDerivativeOverrides } from './useDerivativeOverrides';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk, RiskAnalysis } from '@/lib/riskCalculator';
-import { Position } from '@/types/portfolio';
 
-interface UseRiskAnalysisOptions {
-  /** Provide external positions (with live prices) instead of using usePortfolio */
-  externalPositions?: Position[];
-}
-
-export function useRiskAnalysis(options: UseRiskAnalysisOptions = {}): RiskAnalysis & { isLoading: boolean } {
-  const { positions: dbPositions, isLoading: isLoadingDb } = usePortfolio();
+export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
+  const { positions, isLoading } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
-  
-  // Use external positions if provided, otherwise fall back to DB positions
-  const positions = options.externalPositions ?? dbPositions;
-  const isLoading = options.externalPositions ? isLoadingOverrides : (isLoadingDb || isLoadingOverrides);
   
   const analysis = useMemo(() => {
     if (!positions || positions.length === 0) {
@@ -47,6 +37,6 @@ export function useRiskAnalysis(options: UseRiskAnalysisOptions = {}): RiskAnaly
   
   return {
     ...analysis,
-    isLoading,
+    isLoading: isLoading || isLoadingOverrides
   };
 }
