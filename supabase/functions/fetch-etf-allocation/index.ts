@@ -18,6 +18,230 @@ const SECTOR_KEYWORDS = [
   'Equity', 'Stock', 'Cash', 'Money Market'
 ];
 
+// Fallback sector allocations for major index ETFs (when scraping fails)
+const INDEX_SECTOR_FALLBACKS: Record<string, Record<string, number>> = {
+  'MSCI WORLD': {
+    'Technology': 24,
+    'Financials': 15,
+    'Healthcare': 12,
+    'Consumer Discretionary': 11,
+    'Industrials': 10,
+    'Communication Services': 8,
+    'Consumer Staples': 7,
+    'Energy': 4,
+    'Materials': 4,
+    'Utilities': 3,
+    'Real Estate': 2,
+  },
+  'S&P 500': {
+    'Technology': 32,
+    'Healthcare': 12,
+    'Financials': 11,
+    'Consumer Discretionary': 10,
+    'Communication Services': 9,
+    'Industrials': 8,
+    'Consumer Staples': 6,
+    'Energy': 4,
+    'Materials': 4,
+    'Utilities': 2,
+    'Real Estate': 2,
+  },
+  'S&P500': {
+    'Technology': 32,
+    'Healthcare': 12,
+    'Financials': 11,
+    'Consumer Discretionary': 10,
+    'Communication Services': 9,
+    'Industrials': 8,
+    'Consumer Staples': 6,
+    'Energy': 4,
+    'Materials': 4,
+    'Utilities': 2,
+    'Real Estate': 2,
+  },
+  'MSCI EMERGING': {
+    'Financials': 22,
+    'Technology': 20,
+    'Consumer Discretionary': 14,
+    'Communication Services': 10,
+    'Materials': 8,
+    'Energy': 6,
+    'Industrials': 6,
+    'Consumer Staples': 5,
+    'Healthcare': 4,
+    'Utilities': 3,
+    'Real Estate': 2,
+  },
+  'MSCI EM': {
+    'Financials': 22,
+    'Technology': 20,
+    'Consumer Discretionary': 14,
+    'Communication Services': 10,
+    'Materials': 8,
+    'Energy': 6,
+    'Industrials': 6,
+    'Consumer Staples': 5,
+    'Healthcare': 4,
+    'Utilities': 3,
+    'Real Estate': 2,
+  },
+  'MSCI EUROPE': {
+    'Financials': 17,
+    'Healthcare': 15,
+    'Industrials': 14,
+    'Consumer Staples': 11,
+    'Consumer Discretionary': 10,
+    'Technology': 8,
+    'Materials': 8,
+    'Energy': 7,
+    'Utilities': 4,
+    'Communication Services': 3,
+    'Real Estate': 3,
+  },
+  'STOXX EUROPE': {
+    'Financials': 17,
+    'Healthcare': 15,
+    'Industrials': 14,
+    'Consumer Staples': 11,
+    'Consumer Discretionary': 10,
+    'Technology': 8,
+    'Materials': 8,
+    'Energy': 7,
+    'Utilities': 4,
+    'Communication Services': 3,
+    'Real Estate': 3,
+  },
+  'EURO STOXX': {
+    'Financials': 18,
+    'Industrials': 16,
+    'Consumer Discretionary': 12,
+    'Technology': 12,
+    'Healthcare': 10,
+    'Consumer Staples': 8,
+    'Materials': 7,
+    'Energy': 6,
+    'Utilities': 5,
+    'Communication Services': 3,
+    'Real Estate': 3,
+  },
+  'FTSE ALL-WORLD': {
+    'Technology': 23,
+    'Financials': 15,
+    'Healthcare': 11,
+    'Consumer Discretionary': 11,
+    'Industrials': 10,
+    'Communication Services': 7,
+    'Consumer Staples': 6,
+    'Energy': 5,
+    'Materials': 5,
+    'Utilities': 3,
+    'Real Estate': 3,
+  },
+  'FTSE ALL WORLD': {
+    'Technology': 23,
+    'Financials': 15,
+    'Healthcare': 11,
+    'Consumer Discretionary': 11,
+    'Industrials': 10,
+    'Communication Services': 7,
+    'Consumer Staples': 6,
+    'Energy': 5,
+    'Materials': 5,
+    'Utilities': 3,
+    'Real Estate': 3,
+  },
+  'NASDAQ': {
+    'Technology': 50,
+    'Communication Services': 15,
+    'Consumer Discretionary': 14,
+    'Healthcare': 8,
+    'Consumer Staples': 4,
+    'Industrials': 4,
+    'Financials': 3,
+    'Utilities': 1,
+    'Energy': 0.5,
+    'Real Estate': 0.5,
+  },
+  'MSCI USA': {
+    'Technology': 30,
+    'Healthcare': 13,
+    'Financials': 12,
+    'Consumer Discretionary': 10,
+    'Communication Services': 9,
+    'Industrials': 8,
+    'Consumer Staples': 6,
+    'Energy': 4,
+    'Materials': 3,
+    'Utilities': 3,
+    'Real Estate': 2,
+  },
+  'MSCI JAPAN': {
+    'Industrials': 22,
+    'Consumer Discretionary': 18,
+    'Technology': 15,
+    'Financials': 12,
+    'Healthcare': 10,
+    'Communication Services': 8,
+    'Materials': 5,
+    'Consumer Staples': 5,
+    'Real Estate': 3,
+    'Utilities': 2,
+  },
+  'TOPIX': {
+    'Industrials': 22,
+    'Consumer Discretionary': 18,
+    'Technology': 15,
+    'Financials': 12,
+    'Healthcare': 10,
+    'Communication Services': 8,
+    'Materials': 5,
+    'Consumer Staples': 5,
+    'Real Estate': 3,
+    'Utilities': 2,
+  },
+  'MSCI CHINA': {
+    'Consumer Discretionary': 28,
+    'Communication Services': 18,
+    'Financials': 15,
+    'Technology': 12,
+    'Industrials': 8,
+    'Healthcare': 6,
+    'Consumer Staples': 5,
+    'Energy': 3,
+    'Materials': 3,
+    'Real Estate': 2,
+  },
+  'MSCI ACWI': {
+    'Technology': 24,
+    'Financials': 15,
+    'Healthcare': 11,
+    'Consumer Discretionary': 11,
+    'Industrials': 10,
+    'Communication Services': 7,
+    'Consumer Staples': 6,
+    'Energy': 5,
+    'Materials': 5,
+    'Utilities': 3,
+    'Real Estate': 3,
+  },
+};
+
+// Get fallback sector allocations based on ETF name matching common indices
+function getIndexFallbackSectors(etfName: string): Record<string, number> {
+  const upperName = etfName.toUpperCase();
+  
+  // Check for specific index matches (more specific first)
+  for (const [indexName, sectors] of Object.entries(INDEX_SECTOR_FALLBACKS)) {
+    if (upperName.includes(indexName)) {
+      console.log(`Using fallback sectors for index: ${indexName}`);
+      return { ...sectors }; // Return a copy
+    }
+  }
+  
+  // No fallback found
+  return {};
+}
+
 // Map countries to their primary currencies
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
   'United States': 'USD',
@@ -440,6 +664,12 @@ async function scrapeJustETF(isin: string): Promise<{
       sectorAllocations['Real Estate'] = 100;
     } else if (upperName.includes('COMMUNICATION') || upperName.includes('TELECOM')) {
       sectorAllocations['Communication Services'] = 100;
+    } else {
+      // Use INDEX_SECTOR_FALLBACKS for broad market ETFs
+      const fallbackSectors = getIndexFallbackSectors(name);
+      if (Object.keys(fallbackSectors).length > 0) {
+        Object.assign(sectorAllocations, fallbackSectors);
+      }
     }
   }
   
