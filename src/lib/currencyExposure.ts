@@ -29,14 +29,20 @@ export interface CurrencyExposure {
 }
 
 export const CURRENCY_COLORS: Record<string, string> = {
-  'USD': 'hsl(217, 91%, 60%)',  // Blue
+  'USD': 'hsl(217, 91%, 60%)',  // Bright Blue
   'EUR': 'hsl(142, 71%, 45%)',  // Green
   'GBP': 'hsl(270, 67%, 58%)',  // Purple
-  'JPY': 'hsl(38, 92%, 50%)',   // Amber
+  'JPY': 'hsl(38, 92%, 50%)',   // Amber/Gold
   'CHF': 'hsl(0, 84%, 60%)',    // Red
-  'CAD': 'hsl(189, 94%, 43%)',  // Cyan
+  'CAD': 'hsl(189, 94%, 43%)',  // Cyan/Teal
   'AUD': 'hsl(25, 95%, 53%)',   // Orange
-  'OTHER': 'hsl(330, 70%, 55%)' // Pink/Magenta for grouped/other currencies
+  'HKD': 'hsl(340, 82%, 52%)',  // Rose/Pink
+  'SEK': 'hsl(200, 80%, 50%)',  // Sky Blue
+  'NOK': 'hsl(160, 70%, 40%)',  // Teal Green
+  'SGD': 'hsl(280, 60%, 55%)',  // Violet
+  'NZD': 'hsl(45, 90%, 50%)',   // Yellow/Gold
+  'DKK': 'hsl(10, 78%, 54%)',   // Coral
+  'OTHER': 'hsl(300, 50%, 50%)' // Magenta for grouped currencies
 };
 
 export function getCurrencyColor(currency: string): string {
