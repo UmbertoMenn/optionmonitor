@@ -26,7 +26,14 @@ export function useETFAllocations() {
   const fetchAllocation = useCallback(async (isin: string, forceRefresh = false): Promise<ETFAllocation | null> => {
     // Return cached if available and not forcing refresh
     if (!forceRefresh && allocations[isin]) {
-      return allocations[isin];
+      // Check if cached but missing sector data - if so, force a refresh
+      const hasNoSectors = Object.keys(allocations[isin].sectorAllocations || {}).length === 0;
+      if (hasNoSectors) {
+        console.log(`${isin} has no sector data in local cache, forcing refresh`);
+        forceRefresh = true;
+      } else {
+        return allocations[isin];
+      }
     }
 
     // Skip if already loading
