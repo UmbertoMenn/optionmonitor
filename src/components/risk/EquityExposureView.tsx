@@ -59,7 +59,7 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
       percentage: getPercentage(totalETFRisk),
       color: 'bg-cyan-500',
       icon: TrendingUp,
-      description: 'ETF (al netto di protezioni PUT)'
+      description: 'ETF azionari'
     },
     { 
       label: 'Rischio Stocks', 
