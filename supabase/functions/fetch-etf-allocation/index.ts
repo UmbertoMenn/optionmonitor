@@ -160,10 +160,18 @@ function parsePercentage(text: string): number {
   return match ? parseFloat(match[1]) : 0;
 }
 
+interface TopHolding {
+  name: string;
+  percentage: number;
+  isin?: string;
+}
+
 async function scrapeJustETF(isin: string): Promise<{
   name: string;
   countryAllocations: Record<string, number>;
   currencyAllocations: Record<string, number>;
+  sectorAllocations: Record<string, number>;
+  topHoldings: TopHolding[];
   isHedged: boolean;
 }> {
   const url = `https://www.justetf.com/en/etf-profile.html?isin=${isin}`;
@@ -196,11 +204,11 @@ async function scrapeJustETF(isin: string): Promise<{
   // Extract country allocations from the page using specific data-testid attributes
   const countryAllocations: Record<string, number> = {};
   const currencyAllocations: Record<string, number> = {};
+  const sectorAllocations: Record<string, number> = {};
+  const topHoldings: TopHolding[] = [];
   
+  // ==================== COUNTRY ALLOCATIONS ====================
   // Method 1: Look for country rows with specific data-testid (most reliable)
-  // Pattern: data-testid="etf-holdings_countries_row" with 
-  //          data-testid="tl_etf-holdings_countries_value_name" and 
-  //          data-testid="tl_etf-holdings_countries_value_percentage"
   const countryRowRegex = /data-testid="etf-holdings_countries_row"[^>]*>[\s\S]*?data-testid="tl_etf-holdings_countries_value_name"[^>]*>([^<]+)<[\s\S]*?data-testid="tl_etf-holdings_countries_value_percentage"[^>]*>[\s]*([\d,\.]+)\s*%/gi;
   
   let match;
@@ -217,7 +225,6 @@ async function scrapeJustETF(isin: string): Promise<{
   // Method 2: Alternative pattern - look for table cells with country name and percentage
   if (Object.keys(countryAllocations).length === 0) {
     console.log('Method 1 failed, trying Method 2...');
-    // Look for patterns like: <td...>United States</td>...<span...>47.82%</span>
     const altCountryRegex = /<tr[^>]*(?:countries|country)[^>]*>[\s\S]*?<td[^>]*>([A-Za-z\s\-]+)<\/td>[\s\S]*?(\d+[.,]\d+)\s*%/gi;
     
     while ((match = altCountryRegex.exec(html)) !== null) {
@@ -262,7 +269,6 @@ async function scrapeJustETF(isin: string): Promise<{
     ];
     
     for (const country of knownCountries) {
-      // Look for country name followed by a percentage within reasonable distance
       const countryPattern = new RegExp(
         country.replace(/\s+/g, '\\s+') + '[^\\d]{0,100}?(\\d+[.,]\\d+)\\s*%',
         'gi'
@@ -302,14 +308,12 @@ async function scrapeJustETF(isin: string): Promise<{
   }
   
   // If we couldn't find detailed allocations, use a fallback approach
-  // based on common ETF patterns in the name
   if (Object.keys(currencyAllocations).length === 0) {
     const upperName = (name + ' ' + html.substring(0, 5000)).toUpperCase();
     
     if (upperName.includes('S&P 500') || upperName.includes('NASDAQ') || upperName.includes('US ')) {
       currencyAllocations['USD'] = 100;
     } else if (upperName.includes('MSCI WORLD')) {
-      // Typical MSCI World allocation
       currencyAllocations['USD'] = 70;
       currencyAllocations['EUR'] = 10;
       currencyAllocations['JPY'] = 6;
@@ -336,12 +340,199 @@ async function scrapeJustETF(isin: string): Promise<{
     }
   }
   
-  console.log(`Parsed allocations for ${isin}:`, { countryAllocations, currencyAllocations, isHedged });
+  // ==================== SECTOR ALLOCATIONS ====================
+  console.log('Extracting sector allocations...');
+  
+  // Method 1: Look for sector rows with specific data-testid
+  const sectorRowRegex = /data-testid="etf-holdings_sectors_row"[^>]*>[\s\S]*?data-testid="tl_etf-holdings_sectors_value_name"[^>]*>([^<]+)<[\s\S]*?data-testid="tl_etf-holdings_sectors_value_percentage"[^>]*>[\s]*([\d,\.]+)\s*%/gi;
+  
+  while ((match = sectorRowRegex.exec(html)) !== null) {
+    const sector = match[1].trim();
+    const percentage = parsePercentage(match[2]);
+    
+    if (percentage > 0 && sector.length > 1) {
+      console.log(`Found sector: ${sector} = ${percentage}%`);
+      sectorAllocations[sector] = (sectorAllocations[sector] || 0) + percentage;
+    }
+  }
+  
+  // Method 2: Alternative pattern for sectors
+  if (Object.keys(sectorAllocations).length === 0) {
+    console.log('Sector Method 1 failed, trying Method 2...');
+    // Look for patterns in allocation tables
+    const altSectorRegex = /<tr[^>]*(?:sector|sectors)[^>]*>[\s\S]*?<td[^>]*>([A-Za-z\s\-]+)<\/td>[\s\S]*?(\d+[.,]\d+)\s*%/gi;
+    
+    while ((match = altSectorRegex.exec(html)) !== null) {
+      const sector = match[1].trim();
+      const percentage = parsePercentage(match[2]);
+      
+      if (percentage > 0 && sector.length > 2) {
+        console.log(`Found sector (Method 2): ${sector} = ${percentage}%`);
+        sectorAllocations[sector] = (sectorAllocations[sector] || 0) + percentage;
+      }
+    }
+  }
+  
+  // Method 3: Search for known sectors in the HTML
+  if (Object.keys(sectorAllocations).length === 0) {
+    console.log('Trying Sector Method 3 (known sector search)...');
+    const knownSectors = [
+      'Technology', 'Information Technology', 'IT',
+      'Financials', 'Financial Services',
+      'Healthcare', 'Health Care',
+      'Consumer Discretionary', 'Consumer Cyclical',
+      'Consumer Staples', 'Consumer Defensive',
+      'Industrials',
+      'Energy',
+      'Materials', 'Basic Materials',
+      'Utilities',
+      'Real Estate',
+      'Communication Services', 'Telecommunications',
+      'Other'
+    ];
+    
+    // Look for sector section context first
+    const sectorSectionMatch = html.match(/(?:sector|Sector|SECTOR)[^<]{0,50}allocation/i);
+    if (sectorSectionMatch) {
+      const sectionStart = sectorSectionMatch.index || 0;
+      const sectionHtml = html.substring(sectionStart, sectionStart + 3000);
+      
+      for (const sector of knownSectors) {
+        const sectorPattern = new RegExp(
+          sector.replace(/\s+/g, '\\s+') + '[^\\d]{0,50}?(\\d+[.,]\\d+)\\s*%',
+          'gi'
+        );
+        
+        const sectorMatch = sectorPattern.exec(sectionHtml);
+        if (sectorMatch && !sectorAllocations[sector]) {
+          const percentage = parsePercentage(sectorMatch[1]);
+          if (percentage > 0 && percentage <= 100) {
+            console.log(`Found sector (Method 3): ${sector} = ${percentage}%`);
+            sectorAllocations[sector] = percentage;
+          }
+        }
+      }
+    }
+  }
+  
+  // Fallback: Use ETF name to infer sector for sector-specific ETFs
+  if (Object.keys(sectorAllocations).length === 0) {
+    const upperName = name.toUpperCase();
+    if (upperName.includes('TECHNOLOGY') || upperName.includes('TECH')) {
+      sectorAllocations['Technology'] = 100;
+    } else if (upperName.includes('FINANCIAL')) {
+      sectorAllocations['Financials'] = 100;
+    } else if (upperName.includes('HEALTHCARE') || upperName.includes('HEALTH')) {
+      sectorAllocations['Healthcare'] = 100;
+    } else if (upperName.includes('ENERGY')) {
+      sectorAllocations['Energy'] = 100;
+    } else if (upperName.includes('CONSUMER DISCRETIONARY')) {
+      sectorAllocations['Consumer Discretionary'] = 100;
+    } else if (upperName.includes('CONSUMER STAPLES')) {
+      sectorAllocations['Consumer Staples'] = 100;
+    } else if (upperName.includes('INDUSTRIAL')) {
+      sectorAllocations['Industrials'] = 100;
+    } else if (upperName.includes('MATERIALS')) {
+      sectorAllocations['Materials'] = 100;
+    } else if (upperName.includes('UTILITIES')) {
+      sectorAllocations['Utilities'] = 100;
+    } else if (upperName.includes('REAL ESTATE')) {
+      sectorAllocations['Real Estate'] = 100;
+    } else if (upperName.includes('COMMUNICATION') || upperName.includes('TELECOM')) {
+      sectorAllocations['Communication Services'] = 100;
+    }
+  }
+  
+  console.log(`Final sector allocations for ${isin}:`, sectorAllocations);
+  
+  // ==================== TOP HOLDINGS ====================
+  console.log('Extracting top holdings...');
+  
+  // Method 1: Look for holdings rows with specific data-testid
+  const holdingsRowRegex = /data-testid="etf-holdings_components_row"[^>]*>[\s\S]*?(?:<a[^>]*>([^<]+)<\/a>|data-testid="tl_etf-holdings_components_value_name"[^>]*>([^<]+)<)[\s\S]*?(\d+[.,]\d+)\s*%/gi;
+  
+  while ((match = holdingsRowRegex.exec(html)) !== null) {
+    const holdingName = (match[1] || match[2] || '').trim();
+    const percentage = parsePercentage(match[3]);
+    
+    if (percentage > 0 && holdingName.length > 1 && topHoldings.length < 15) {
+      console.log(`Found holding: ${holdingName} = ${percentage}%`);
+      topHoldings.push({ name: holdingName, percentage });
+    }
+  }
+  
+  // Method 2: Alternative pattern for holdings
+  if (topHoldings.length === 0) {
+    console.log('Holdings Method 1 failed, trying Method 2...');
+    // Look for company names with percentages in holdings section
+    const altHoldingsRegex = /<tr[^>]*(?:holding|component)[^>]*>[\s\S]*?(?:<a[^>]*>([^<]+)<\/a>|<td[^>]*>([A-Za-z][^<]{2,40})<\/td>)[\s\S]*?(\d+[.,]\d+)\s*%/gi;
+    
+    while ((match = altHoldingsRegex.exec(html)) !== null) {
+      const holdingName = (match[1] || match[2] || '').trim();
+      const percentage = parsePercentage(match[3]);
+      
+      if (percentage > 0 && holdingName.length > 1 && topHoldings.length < 15) {
+        // Filter out sector names
+        const isSector = SECTOR_KEYWORDS.some(kw => 
+          holdingName.toUpperCase().includes(kw.toUpperCase())
+        );
+        if (!isSector) {
+          console.log(`Found holding (Method 2): ${holdingName} = ${percentage}%`);
+          topHoldings.push({ name: holdingName, percentage });
+        }
+      }
+    }
+  }
+  
+  // Method 3: Look for known major company names
+  if (topHoldings.length === 0) {
+    console.log('Trying Holdings Method 3 (known companies search)...');
+    const knownCompanies = [
+      'Apple', 'Microsoft', 'NVIDIA', 'Alphabet', 'Amazon', 'Meta', 'Tesla',
+      'Berkshire Hathaway', 'JPMorgan', 'Johnson & Johnson', 'Visa', 'Mastercard',
+      'UnitedHealth', 'Eli Lilly', 'Broadcom', 'Home Depot', 'Procter & Gamble',
+      'Nestle', 'LVMH', 'Samsung', 'ASML', 'Novo Nordisk', 'AstraZeneca', 'Shell',
+      'Taiwan Semiconductor', 'TSMC', 'Tencent', 'Alibaba'
+    ];
+    
+    // Look for holdings section context
+    const holdingsSectionMatch = html.match(/(?:top\s*holdings|largest\s*positions|components)/i);
+    if (holdingsSectionMatch) {
+      const sectionStart = holdingsSectionMatch.index || 0;
+      const sectionHtml = html.substring(sectionStart, sectionStart + 5000);
+      
+      for (const company of knownCompanies) {
+        if (topHoldings.length >= 15) break;
+        
+        const companyPattern = new RegExp(
+          company.replace(/\s+/g, '\\s*') + '[^\\d]{0,50}?(\\d+[.,]\\d+)\\s*%',
+          'gi'
+        );
+        
+        const companyMatch = companyPattern.exec(sectionHtml);
+        if (companyMatch) {
+          const percentage = parsePercentage(companyMatch[1]);
+          if (percentage > 0 && percentage <= 20) {
+            console.log(`Found holding (Method 3): ${company} = ${percentage}%`);
+            topHoldings.push({ name: company, percentage });
+          }
+        }
+      }
+    }
+  }
+  
+  // Sort holdings by percentage descending
+  topHoldings.sort((a, b) => b.percentage - a.percentage);
+  
+  console.log(`Final top holdings for ${isin}:`, topHoldings);
+  console.log(`Parsed allocations for ${isin}:`, { countryAllocations, currencyAllocations, sectorAllocations, isHedged, topHoldingsCount: topHoldings.length });
   
   return {
     name,
     countryAllocations,
     currencyAllocations,
+    sectorAllocations,
+    topHoldings,
     isHedged,
   };
 }
@@ -386,6 +577,8 @@ serve(async (req) => {
               name: cached.name,
               countryAllocations: cached.country_allocations,
               currencyAllocations: cached.currency_allocations,
+              sectorAllocations: cached.sector_allocations || {},
+              topHoldings: cached.top_holdings || [],
               isHedged: cached.is_hedged,
               cached: true,
             }),
@@ -406,6 +599,8 @@ serve(async (req) => {
         name: data.name,
         country_allocations: data.countryAllocations,
         currency_allocations: data.currencyAllocations,
+        sector_allocations: data.sectorAllocations,
+        top_holdings: data.topHoldings,
         is_hedged: data.isHedged,
         last_fetched_at: new Date().toISOString(),
       }, { onConflict: 'isin' });

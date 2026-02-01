@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type RiskViewMode = 'equity' | 'currency';
+export type RiskViewMode = 'equity' | 'currency' | 'sector';
 
 interface RiskViewModeSelectorProps {
   viewMode: RiskViewMode;
@@ -11,9 +11,10 @@ interface RiskViewModeSelectorProps {
 const VIEW_LABELS: Record<RiskViewMode, string> = {
   equity: 'Equity Exposure',
   currency: 'Currency Exposure',
+  sector: 'Sector Allocation',
 };
 
-const VIEWS: RiskViewMode[] = ['equity', 'currency'];
+const VIEWS: RiskViewMode[] = ['equity', 'currency', 'sector'];
 
 export function RiskViewModeSelector({ viewMode, onViewModeChange }: RiskViewModeSelectorProps) {
   const currentIndex = VIEWS.indexOf(viewMode);
