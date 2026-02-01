@@ -1,92 +1,196 @@
 
 
-# Piano: Assegnare il Ruolo Admin al Tuo Utente
+# Piano: Correzione Completa Scraper ETF e Reset Cache
 
 ## Problema Identificato
 
-Il tuo utente ha il ruolo `user` invece di `admin`. Quando navighi su `/admin`, il sistema verifica il ruolo e ti reindirizza alla homepage perché `isAdmin = false`.
+Lo scraper `fetch-etf-allocation` mescola dati **settoriali** con dati **geografici**, causando esposizioni valutarie errate per tutti gli ETF nel sistema.
 
-## Soluzione
+### Esempio del Bug
 
-Aggiungere un record nella tabella `user_roles` con `role = 'admin'` per il tuo utente.
+| Dati Estratti | Tipo | Corretto? |
+|--------------|------|-----------|
+| United States: 47.82% | Paese | ✅ |
+| Financials: 22.28% | Settore | ❌ |
+| Technology: 15.5% | Settore | ❌ |
 
----
-
-## Implementazione
-
-### Migrazione Database
-
-Eseguire una query per inserire il ruolo admin:
-
-```sql
-INSERT INTO user_roles (user_id, role)
-VALUES ('7b625908-f303-4386-bd1c-a0727f77b5d1', 'admin');
-```
+**Conseguenza**: Totale > 100% → Normalizzazione → Valori diluiti
 
 ---
 
-## Struttura Attuale vs Desiderata
+## Fase 1: Migliorare lo Scraper
 
-**Prima:**
-```text
-user_roles
-┌────────────────────────────────────┬────────┐
-│ user_id                            │ role   │
-├────────────────────────────────────┼────────┤
-│ 7b625908-f303-4386-bd1c-a0727f77b5d1 │ user   │
-└────────────────────────────────────┴────────┘
-```
+### Modifiche a `supabase/functions/fetch-etf-allocation/index.ts`
 
-**Dopo:**
-```text
-user_roles
-┌────────────────────────────────────┬────────┐
-│ user_id                            │ role   │
-├────────────────────────────────────┼────────┤
-│ 7b625908-f303-4386-bd1c-a0727f77b5d1 │ user   │
-│ 7b625908-f303-4386-bd1c-a0727f77b5d1 │ admin  │  <-- NUOVO
-└────────────────────────────────────┴────────┘
-```
-
----
-
-## Flusso di Verifica
-
-```text
-1. Utente naviga su /admin
-2. AuthContext verifica user_roles WHERE role = 'admin'
-3. Trova il record → isAdmin = true
-4. AdminPanel si carica correttamente
-```
-
----
-
-## Dettagli Tecnici
-
-La query nel file `AuthContext.tsx` cerca specificamente il ruolo `admin`:
+#### 1.1 Aggiungere lista di settori da escludere
 
 ```typescript
-const { data } = await supabase
-  .from('user_roles')
-  .select('role')
-  .eq('user_id', session.user.id)
-  .eq('role', 'admin')  // <-- cerca questo specifico ruolo
-  .maybeSingle();
+const SECTOR_KEYWORDS = [
+  'Financials', 'Financial', 'Technology', 'Healthcare', 
+  'Consumer', 'Energy', 'Industrials', 'Materials', 
+  'Utilities', 'Real Estate', 'Communication', 
+  'IT', 'Discretionary', 'Staples', 'Services', 
+  'Sector', 'Industry', 'Basic', 'Telecom'
+];
+```
 
-setIsAdmin(!!data);  // true solo se trova il record
+#### 1.2 Funzione di validazione paese
+
+```typescript
+function isValidCountry(name: string): boolean {
+  // Se contiene keyword settoriale, non è un paese
+  const upperName = name.toUpperCase();
+  for (const sector of SECTOR_KEYWORDS) {
+    if (upperName.includes(sector.toUpperCase())) {
+      return false;
+    }
+  }
+  
+  // Verificare che sia nella mappa paesi conosciuti
+  return getCurrencyFromCountry(name) !== 'OTHER' || 
+         COUNTRY_TO_CURRENCY[name] !== undefined;
+}
+```
+
+#### 1.3 Migliorare il parsing HTML
+
+```typescript
+// Cercare specificamente sezioni geografiche
+const countryPatterns = [
+  /Countries[\s\S]*?<table([\s\S]*?)<\/table>/i,
+  /Länder[\s\S]*?<table([\s\S]*?)<\/table>/i,
+  /Paesi[\s\S]*?<table([\s\S]*?)<\/table>/i,
+];
+
+// Estrarre righe solo dalla sezione corretta
+// Validare ogni voce con isValidCountry()
+```
+
+#### 1.4 Validazione finale
+
+```typescript
+// Se il totale supera 110%, probabilmente c'è un errore
+const total = Object.values(countryAllocations).reduce((a, b) => a + b, 0);
+if (total > 110) {
+  console.warn(`Total allocations ${total}% exceeds 100%, filtering sectors...`);
+  // Rimuovere voci che sembrano settori
+}
 ```
 
 ---
 
-## Azioni da Eseguire
+## Fase 2: Reset Cache Completa
 
-1. Inserire il ruolo admin nel database
-2. Ricaricare la pagina (o effettuare logout/login) per aggiornare il contesto
-3. Navigare su `/admin` per verificare l'accesso
+### Eliminare tutti i dati ETF cached
+
+```sql
+-- Cancellare TUTTI i record dalla tabella etf_allocations
+DELETE FROM etf_allocations;
+```
+
+Questo forzerà il re-fetch di tutti gli ETF al prossimo accesso alla vista Currency Exposure.
+
+---
+
+## Fase 3: Ricalcolo Automatico
+
+Il sistema già prevede il refresh automatico:
+
+```text
+1. Utente carica nuovo Excel o naviga su Currency Exposure
+2. Hook useETFAllocations rileva ETF senza cache
+3. Chiama edge function fetch-etf-allocation per ogni ETF
+4. Edge function usa lo scraper CORRETTO
+5. Dati salvati in cache con valori geografici puri
+6. UI mostra esposizioni valutarie corrette
+```
+
+---
+
+## Flusso di Correzione
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  FASE 1: Deploy Scraper Corretto                        │
+├─────────────────────────────────────────────────────────┤
+│  1. Aggiungere SECTOR_KEYWORDS                          │
+│  2. Implementare isValidCountry()                       │
+│  3. Migliorare parsing sezione geografica               │
+│  4. Aggiungere validazione totale                       │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  FASE 2: Reset Cache                                    │
+├─────────────────────────────────────────────────────────┤
+│  DELETE FROM etf_allocations;                           │
+│  (elimina tutti i dati cached errati)                   │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  FASE 3: Ricalcolo Automatico                           │
+├─────────────────────────────────────────────────────────┤
+│  1. Utente naviga su Currency Exposure                  │
+│  2. Sistema rileva cache vuota                          │
+│  3. Fetch automatico per ogni ETF                       │
+│  4. Scraper corretto estrae solo dati geografici        │
+│  5. Nuovi dati salvati in cache                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## File da Modificare
+
+| File | Azione |
+|------|--------|
+| `supabase/functions/fetch-etf-allocation/index.ts` | Migliorare parsing per escludere settori |
+| Database `etf_allocations` | Svuotare tabella (DELETE) |
 
 ---
 
 ## Risultato Atteso
 
-Dopo l'inserimento del ruolo admin, potrai accedere al pannello di amministrazione su `/admin` e gestire gli utenti (aggiungere, rimuovere ruoli, eliminare utenti).
+### Prima (dati errati per tutti gli ETF)
+
+| ETF | USD Mostrato | USD Reale |
+|-----|-------------|-----------|
+| SPDR S&P Global Dividend | 39.1% | 47.82% |
+| iShares MSCI World | ~55% | ~70% |
+| Vanguard FTSE All-World | ~45% | ~60% |
+
+### Dopo (dati corretti)
+
+| ETF | USD Mostrato | USD Reale |
+|-----|-------------|-----------|
+| SPDR S&P Global Dividend | 47.82% | 47.82% ✅ |
+| iShares MSCI World | ~70% | ~70% ✅ |
+| Vanguard FTSE All-World | ~60% | ~60% ✅ |
+
+---
+
+## Dettagli Tecnici
+
+### Logica di Normalizzazione Esistente (NON modificare)
+
+Il file `src/lib/etfCurrencyDecomposition.ts` normalizza già i pesi a 100%:
+
+```typescript
+function normalizeCurrencyWeights(weights) {
+  const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+  return Object.fromEntries(
+    Object.entries(weights).map(([k, v]) => [k, (v / sum) * 100])
+  );
+}
+```
+
+Questa logica è corretta e necessaria per gestire piccole variazioni nei dati. Il problema è che riceve dati > 100% a causa dei settori mescolati.
+
+### Verifica Post-Deploy
+
+1. Svuotare la cache ETF
+2. Navigare su Risk Analyzer → Currency Exposure
+3. Verificare i log dell'edge function per confermare parsing corretto
+4. Controllare che USD per SPDR S&P Global Dividend mostri ~47.82%
 
