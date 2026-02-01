@@ -1,109 +1,107 @@
 
 
-# Piano: Correzione Completa Scraper ETF e Reset Cache
+# Piano: Riconoscimento Avanzato degli ETF nel Parser Excel
 
 ## Problema Identificato
 
-Lo scraper `fetch-etf-allocation` mescola dati **settoriali** con dati **geografici**, causando esposizioni valutarie errate per tutti gli ETF nel sistema.
+Lo strumento "ISHSIII-MSCI S.A.C.UE DLA" (ISIN: IE00BYYR0489) è un ETF iShares ma viene classificato come "stock" perché:
 
-### Esempio del Bug
+1. Il parser Excel cerca solo le parole "ETF" o "UCITS"
+2. "ISHSIII" è un'abbreviazione di "iShares III" che non viene riconosciuta
+3. La logica avanzata in altri file (currencyExposure.ts, RiskAnalyzer.tsx) usa pattern più ampi ma solo per l'analisi, non per la classificazione iniziale
 
-| Dati Estratti | Tipo | Corretto? |
-|--------------|------|-----------|
-| United States: 47.82% | Paese | ✅ |
-| Financials: 22.28% | Settore | ❌ |
-| Technology: 15.5% | Settore | ❌ |
+## Soluzione
 
-**Conseguenza**: Totale > 100% → Normalizzazione → Valori diluiti
+Espandere la logica di riconoscimento ETF nel parser Excel con:
+
+1. Lista completa di keyword emittenti ETF (ISHARES, ISHSIII, VANGUARD, SPDR, etc.)
+2. Riconoscimento pattern ISIN tipici degli ETF (prefissi IE, LU)
+3. Pattern aggiuntivi comuni negli ETF
 
 ---
 
-## Fase 1: Migliorare lo Scraper
+## Modifiche a `src/lib/excelParser.ts`
 
-### Modifiche a `supabase/functions/fetch-etf-allocation/index.ts`
-
-#### 1.1 Aggiungere lista di settori da escludere
+### Aggiungere lista di emittenti ETF
 
 ```typescript
-const SECTOR_KEYWORDS = [
-  'Financials', 'Financial', 'Technology', 'Healthcare', 
-  'Consumer', 'Energy', 'Industrials', 'Materials', 
-  'Utilities', 'Real Estate', 'Communication', 
-  'IT', 'Discretionary', 'Staples', 'Services', 
-  'Sector', 'Industry', 'Basic', 'Telecom'
+// Pattern per riconoscere ETF dai principali emittenti
+const ETF_ISSUER_PATTERNS = [
+  'ETF', 'UCITS',
+  // iShares (BlackRock)
+  'ISHARES', 'ISHSIII', 'ISHSIV', 'ISHSV', 'ISHSVII',
+  // Vanguard
+  'VANGUARD', 'VNG',
+  // State Street (SPDR)
+  'SPDR', 'SSG',
+  // Lyxor (Amundi)
+  'LYXOR', 'AMUNDI',
+  // Xtrackers (DWS)
+  'XTRACKERS', 'XTRK',
+  // Invesco
+  'INVESCO',
+  // VanEck
+  'VANECK',
+  // WisdomTree
+  'WISDOMTREE', 'WTR',
+  // UBS
+  'UBS ETF',
+  // HSBC
+  'HSBC ETF',
+  // Franklin Templeton
+  'FRANKLIN'
 ];
 ```
 
-#### 1.2 Funzione di validazione paese
+### Aggiungere riconoscimento ISIN
 
 ```typescript
-function isValidCountry(name: string): boolean {
-  // Se contiene keyword settoriale, non è un paese
-  const upperName = name.toUpperCase();
-  for (const sector of SECTOR_KEYWORDS) {
-    if (upperName.includes(sector.toUpperCase())) {
-      return false;
+// ISINs che iniziano con IE (Irlanda) o LU (Lussemburgo) 
+// sono spesso ETF domiciliati in Europa
+function isLikelyETFByISIN(isin: string | undefined): boolean {
+  if (!isin) return false;
+  const prefix = isin.substring(0, 2).toUpperCase();
+  return prefix === 'IE' || prefix === 'LU';
+}
+```
+
+### Migliorare la funzione di riconoscimento
+
+```typescript
+function isETF(description: string, isin?: string): boolean {
+  const descUpper = description.toUpperCase();
+  
+  // Check emitter patterns
+  for (const pattern of ETF_ISSUER_PATTERNS) {
+    if (descUpper.includes(pattern)) {
+      return true;
     }
   }
   
-  // Verificare che sia nella mappa paesi conosciuti
-  return getCurrencyFromCountry(name) !== 'OTHER' || 
-         COUNTRY_TO_CURRENCY[name] !== undefined;
-}
-```
-
-#### 1.3 Migliorare il parsing HTML
-
-```typescript
-// Cercare specificamente sezioni geografiche
-const countryPatterns = [
-  /Countries[\s\S]*?<table([\s\S]*?)<\/table>/i,
-  /Länder[\s\S]*?<table([\s\S]*?)<\/table>/i,
-  /Paesi[\s\S]*?<table([\s\S]*?)<\/table>/i,
-];
-
-// Estrarre righe solo dalla sezione corretta
-// Validare ogni voce con isValidCountry()
-```
-
-#### 1.4 Validazione finale
-
-```typescript
-// Se il totale supera 110%, probabilmente c'è un errore
-const total = Object.values(countryAllocations).reduce((a, b) => a + b, 0);
-if (total > 110) {
-  console.warn(`Total allocations ${total}% exceeds 100%, filtering sectors...`);
-  // Rimuovere voci che sembrano settori
+  // Check ISIN prefix (IE/LU) + description patterns
+  if (isLikelyETFByISIN(isin)) {
+    // If ISIN is Irish/Luxembourg and description contains 
+    // common ETF terms like "MSCI", "FTSE", "S&P", etc.
+    const etfIndexPatterns = ['MSCI', 'FTSE', 'S&P', 'STOXX', 'NASDAQ', 'DOW'];
+    if (etfIndexPatterns.some(p => descUpper.includes(p))) {
+      return true;
+    }
+  }
+  
+  return false;
 }
 ```
 
 ---
 
-## Fase 2: Reset Cache Completa
+## Sincronizzazione con Altri File
 
-### Eliminare tutti i dati ETF cached
+Aggiornare la stessa lista anche in:
 
-```sql
--- Cancellare TUTTI i record dalla tabella etf_allocations
-DELETE FROM etf_allocations;
-```
-
-Questo forzerà il re-fetch di tutti gli ETF al prossimo accesso alla vista Currency Exposure.
-
----
-
-## Fase 3: Ricalcolo Automatico
-
-Il sistema già prevede il refresh automatico:
-
-```text
-1. Utente carica nuovo Excel o naviga su Currency Exposure
-2. Hook useETFAllocations rileva ETF senza cache
-3. Chiama edge function fetch-etf-allocation per ogni ETF
-4. Edge function usa lo scraper CORRETTO
-5. Dati salvati in cache con valori geografici puri
-6. UI mostra esposizioni valutarie corrette
-```
+| File | Funzione | Azione |
+|------|----------|--------|
+| `src/lib/currencyExposure.ts` | `isETFByDescription()` | Aggiungere pattern mancanti |
+| `src/pages/RiskAnalyzer.tsx` | Regex inline | Allineare con nuovi pattern |
 
 ---
 
@@ -111,33 +109,50 @@ Il sistema già prevede il refresh automatico:
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
-│  FASE 1: Deploy Scraper Corretto                        │
+│  1. Aggiornare excelParser.ts                           │
 ├─────────────────────────────────────────────────────────┤
-│  1. Aggiungere SECTOR_KEYWORDS                          │
-│  2. Implementare isValidCountry()                       │
-│  3. Migliorare parsing sezione geografica               │
-│  4. Aggiungere validazione totale                       │
+│  • Aggiungere ETF_ISSUER_PATTERNS                       │
+│  • Aggiungere isLikelyETFByISIN()                       │
+│  • Modificare parsePositionRow per usare nuova logica   │
 └────────────────────────┬────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  FASE 2: Reset Cache                                    │
+│  2. Sincronizzare currencyExposure.ts                   │
 ├─────────────────────────────────────────────────────────┤
-│  DELETE FROM etf_allocations;                           │
-│  (elimina tutti i dati cached errati)                   │
+│  • Aggiornare isETFByDescription() con stessi pattern   │
 └────────────────────────┬────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  FASE 3: Ricalcolo Automatico                           │
+│  3. Sincronizzare RiskAnalyzer.tsx                      │
 ├─────────────────────────────────────────────────────────┤
-│  1. Utente naviga su Currency Exposure                  │
-│  2. Sistema rileva cache vuota                          │
-│  3. Fetch automatico per ogni ETF                       │
-│  4. Scraper corretto estrae solo dati geografici        │
-│  5. Nuovi dati salvati in cache                         │
+│  • Aggiornare regex con nuovi pattern                   │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  4. Ricaricare Excel per aggiornare classificazioni     │
+├─────────────────────────────────────────────────────────┤
+│  • L'utente ricarica il file Excel                      │
+│  • Parser classifica correttamente ISHSIII come ETF     │
+│  • Currency Exposure include lo strumento               │
 └─────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Pattern da Riconoscere
+
+| Pattern | Esempio | Tipo |
+|---------|---------|------|
+| ISHSIII | ISHSIII-MSCI S.A.C.UE DLA | iShares ETF |
+| ISHSIV | ISHSIV-MSCI WORLD | iShares ETF |
+| VANGUARD | VANGUARD FTSE ALL-WORLD | Vanguard ETF |
+| VNG | VNG LIFESTRAT 80 | Vanguard ETF |
+| SPDR | SPDR S&P 500 | State Street ETF |
+| LYXOR | LYXOR MSCI EUROPE | Lyxor ETF |
+| XTRK | XTRK MSCI EM | Xtrackers ETF |
 
 ---
 
@@ -145,52 +160,24 @@ Il sistema già prevede il refresh automatico:
 
 | File | Azione |
 |------|--------|
-| `supabase/functions/fetch-etf-allocation/index.ts` | Migliorare parsing per escludere settori |
-| Database `etf_allocations` | Svuotare tabella (DELETE) |
+| `src/lib/excelParser.ts` | Aggiungere logica avanzata riconoscimento ETF |
+| `src/lib/currencyExposure.ts` | Sincronizzare pattern ETF |
+| `src/pages/RiskAnalyzer.tsx` | Sincronizzare pattern ETF |
 
 ---
 
 ## Risultato Atteso
 
-### Prima (dati errati per tutti gli ETF)
+Dopo la modifica:
 
-| ETF | USD Mostrato | USD Reale |
-|-----|-------------|-----------|
-| SPDR S&P Global Dividend | 39.1% | 47.82% |
-| iShares MSCI World | ~55% | ~70% |
-| Vanguard FTSE All-World | ~45% | ~60% |
+| Strumento | Prima | Dopo |
+|-----------|-------|------|
+| ISHSIII-MSCI S.A.C.UE DLA | stock ❌ | etf ✅ |
+| ISHSIV-MSCI WORLD | stock ❌ | etf ✅ |
+| VNG LIFESTRAT 80 | stock ❌ | etf ✅ |
 
-### Dopo (dati corretti)
-
-| ETF | USD Mostrato | USD Reale |
-|-----|-------------|-----------|
-| SPDR S&P Global Dividend | 47.82% | 47.82% ✅ |
-| iShares MSCI World | ~70% | ~70% ✅ |
-| Vanguard FTSE All-World | ~60% | ~60% ✅ |
-
----
-
-## Dettagli Tecnici
-
-### Logica di Normalizzazione Esistente (NON modificare)
-
-Il file `src/lib/etfCurrencyDecomposition.ts` normalizza già i pesi a 100%:
-
-```typescript
-function normalizeCurrencyWeights(weights) {
-  const sum = Object.values(weights).reduce((a, b) => a + b, 0);
-  return Object.fromEntries(
-    Object.entries(weights).map(([k, v]) => [k, (v / sum) * 100])
-  );
-}
-```
-
-Questa logica è corretta e necessaria per gestire piccole variazioni nei dati. Il problema è che riceve dati > 100% a causa dei settori mescolati.
-
-### Verifica Post-Deploy
-
-1. Svuotare la cache ETF
-2. Navigare su Risk Analyzer → Currency Exposure
-3. Verificare i log dell'edge function per confermare parsing corretto
-4. Controllare che USD per SPDR S&P Global Dividend mostri ~47.82%
+L'ETF verrà:
+1. Classificato correttamente come "etf" nel database
+2. Incluso nell'analisi Currency Exposure
+3. Lo scraper fetch-etf-allocation recupererà la sua allocazione geografica
 
