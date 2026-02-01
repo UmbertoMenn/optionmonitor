@@ -23,6 +23,7 @@ export function RiskAnalyzer() {
   const { signOut } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
   const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
+  const [includeDerivatives, setIncludeDerivatives] = useState(true);
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
@@ -31,8 +32,8 @@ export function RiskAnalyzer() {
   
   // Calculate base currency exposure from existing data
   const baseCurrencyExposure = useMemo(() => 
-    calculateCurrencyExposure(analysis), 
-    [analysis]
+    calculateCurrencyExposure(analysis, { includeDerivatives }), 
+    [analysis, includeDerivatives]
   );
   
   // Pattern per riconoscere ETF (sincronizzato con excelParser.ts e currencyExposure.ts)
@@ -142,10 +143,12 @@ export function RiskAnalyzer() {
               <ErrorBoundary title="Errore nella vista Currency Exposure">
                 <CurrencyExposureView 
                   currencyExposure={currencyExposure}
-                  grandTotal={analysis.grandTotal}
+                  grandTotal={currencyExposure.reduce((sum, c) => sum + c.totalRisk, 0)}
                   isLoadingETFData={isETFDataLoading}
                   etfCount={etfIsins.length}
                   loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
+                  includeDerivatives={includeDerivatives}
+                  onIncludeDerivativesChange={setIncludeDerivatives}
                 />
               </ErrorBoundary>
             )}
