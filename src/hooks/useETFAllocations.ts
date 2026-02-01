@@ -1,11 +1,19 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+export interface ETFTopHolding {
+  name: string;
+  percentage: number;
+  isin?: string;
+}
+
 export interface ETFAllocation {
   isin: string;
   name: string;
   countryAllocations: Record<string, number>;
   currencyAllocations: Record<string, number>;
+  sectorAllocations: Record<string, number>;
+  topHoldings: ETFTopHolding[];
   isHedged: boolean;
   cached?: boolean;
 }
@@ -47,6 +55,8 @@ export function useETFAllocations() {
         name: data.name,
         countryAllocations: data.countryAllocations,
         currencyAllocations: data.currencyAllocations,
+        sectorAllocations: data.sectorAllocations || {},
+        topHoldings: data.topHoldings || [],
         isHedged: data.isHedged,
         cached: data.cached,
       };

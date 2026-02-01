@@ -160,6 +160,8 @@ export type Database = {
           isin: string
           last_fetched_at: string
           name: string | null
+          sector_allocations: Json | null
+          top_holdings: Json | null
           updated_at: string
         }
         Insert: {
@@ -171,6 +173,8 @@ export type Database = {
           isin: string
           last_fetched_at?: string
           name?: string | null
+          sector_allocations?: Json | null
+          top_holdings?: Json | null
           updated_at?: string
         }
         Update: {
@@ -182,6 +186,8 @@ export type Database = {
           isin?: string
           last_fetched_at?: string
           name?: string | null
+          sector_allocations?: Json | null
+          top_holdings?: Json | null
           updated_at?: string
         }
         Relationships: []

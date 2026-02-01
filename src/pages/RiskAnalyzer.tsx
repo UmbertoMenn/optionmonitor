@@ -14,10 +14,12 @@ import { useETFAllocations } from '@/hooks/useETFAllocations';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
 import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
+import { SectorAllocationView } from '@/components/risk/SectorAllocationView';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { calculateCurrencyExposure } from '@/lib/currencyExposure';
 import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
+import { calculateSectorExposure, calculateTopHoldings } from '@/lib/sectorExposure';
 
 export function RiskAnalyzer() {
   const { signOut } = useAuth();
@@ -56,9 +58,9 @@ export function RiskAnalyzer() {
     return isins;
   }, [analysis.stockDetails]);
   
-  // Fetch ETF allocations ONCE when switching to currency view
+  // Fetch ETF allocations ONCE when switching to currency or sector view
   useEffect(() => {
-    if (etfIsins.length > 0 && viewMode === 'currency' && !hasFetchedETFs) {
+    if (etfIsins.length > 0 && (viewMode === 'currency' || viewMode === 'sector') && !hasFetchedETFs) {
       setHasFetchedETFs(true);
       fetchMultipleAllocations(etfIsins);
     }
@@ -71,6 +73,17 @@ export function RiskAnalyzer() {
     }
     return applyETFDecomposition(baseCurrencyExposure, allocations);
   }, [baseCurrencyExposure, allocations]);
+  
+  // Calculate sector exposure
+  const sectorExposure = useMemo(() => {
+    return calculateSectorExposure(analysis, allocations, { includeDerivatives });
+  }, [analysis, allocations, includeDerivatives]);
+  
+  // Calculate top holdings
+  const topHoldings = useMemo(() => {
+    return calculateTopHoldings(analysis, allocations, 20);
+  }, [analysis, allocations]);
+  
   
   // Check if any ETF data is still loading
   const isETFDataLoading = Object.values(etfLoading).some(Boolean);
@@ -139,11 +152,24 @@ export function RiskAnalyzer() {
             {/* Dynamic Content Based on View Mode */}
             {viewMode === 'equity' ? (
               <EquityExposureView analysis={analysis} />
-            ) : (
+            ) : viewMode === 'currency' ? (
               <ErrorBoundary title="Errore nella vista Currency Exposure">
                 <CurrencyExposureView 
                   currencyExposure={currencyExposure}
                   grandTotal={currencyExposure.reduce((sum, c) => sum + c.totalRisk, 0)}
+                  isLoadingETFData={isETFDataLoading}
+                  etfCount={etfIsins.length}
+                  loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
+                  includeDerivatives={includeDerivatives}
+                  onIncludeDerivativesChange={setIncludeDerivatives}
+                />
+              </ErrorBoundary>
+            ) : (
+              <ErrorBoundary title="Errore nella vista Sector Allocation">
+                <SectorAllocationView 
+                  sectorExposure={sectorExposure}
+                  topHoldings={topHoldings}
+                  grandTotal={sectorExposure.reduce((sum, s) => sum + s.totalRisk, 0)}
                   isLoadingETFData={isETFDataLoading}
                   etfCount={etfIsins.length}
                   loadedETFCount={Object.keys(allocations).filter(isin => etfIsins.includes(isin)).length}
