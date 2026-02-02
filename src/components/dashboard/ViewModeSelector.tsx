@@ -29,16 +29,20 @@ export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelecto
   };
 
   return (
-    <div className="flex items-center justify-center gap-4 mb-4">
-      <button
-        onClick={() => cycleView('prev')}
-        className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
-        aria-label="Vista precedente"
-      >
-        <ChevronLeft className="w-5 h-5" />
-      </button>
+    <div className="flex flex-col items-center gap-2 mb-4">
+      <span className="text-sm font-medium">
+        Vista: {VIEW_LABELS[viewMode]}
+      </span>
       
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-center gap-4">
+        <button
+          onClick={() => cycleView('prev')}
+          className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Vista precedente"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+        
         <div className="flex gap-2">
           {VIEWS.map((v) => (
             <button
@@ -52,18 +56,15 @@ export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelecto
             />
           ))}
         </div>
-        <span className="text-sm font-medium min-w-[120px] text-center">
-          Vista: {VIEW_LABELS[viewMode]}
-        </span>
+        
+        <button
+          onClick={() => cycleView('next')}
+          className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Vista successiva"
+        >
+          <ChevronRight className="w-5 h-5" />
+        </button>
       </div>
-      
-      <button
-        onClick={() => cycleView('next')}
-        className="p-1.5 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
-        aria-label="Vista successiva"
-      >
-        <ChevronRight className="w-5 h-5" />
-      </button>
     </div>
   );
 }
