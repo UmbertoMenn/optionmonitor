@@ -1,177 +1,135 @@
 
-# Piano: Migliorare Breakdown Holdings + Fix ETF Top Holdings
+# Piano: Correggere Estrazione Top Holdings ETF
 
-## Problemi Identificati
+## Problema Identificato
 
-### Problema 1: Breakdown manca informazioni protezioni
+Lo scraping delle top holdings nell'edge function `fetch-etf-allocation` estrae dati **errati**:
+- "Method 2" cattura righe con percentuali da sezioni errate (paesi, "Other")
+- Esempio: `topHoldings: [{ name: "Other", percentage: 37.15 }, { name: "Japan", percentage: 5.41 }]`
+- Poiché l'array non è vuoto, il **fallback AI non viene mai attivato**
 
-Nel breakdown dialog, la sezione Stock mostra solo:
-- Quantità azioni e prezzo
-- Valore lordo e valore con protezione
-
-Ma **NON mostra**:
-- Numero di contratti PUT di protezione
-- Strike medio ponderato delle protezioni
-
-Questi dati sono disponibili in `StockRiskDetail` (dal `riskCalculator.ts`):
-- `protectionStrike: number | null`
-- `protectionContracts: number`
-- `hasProtection: boolean`
-
-...ma non vengono passati a `ConsolidatedHoldingWithDetails.stockDetails`.
-
-### Problema 2: ETF Top Holdings vuote nel database
-
-Tutti gli ETF nel database hanno:
-- `top_holdings: []` (array vuoto)
-- `last_fetched_at: 2020-01-01` (cache invalidata)
-
-Il fallback AI per le top holdings è implementato nell'edge function (`fetchETFTopHoldingsWithAI`), ma non viene mai chiamato perché:
-1. La cache è stata invalidata manualmente (data vecchia)
-2. Il frontend usa `useETFAllocations` che non richiede un refresh esplicito se i dati esistono nel database (anche se vecchi)
-3. L'hook ha una logica di caching che evita chiamate ripetute
-
-## Correzioni Richieste
-
-### Correzione 1: Estendere stockDetails con informazioni protezioni
-
-**File**: `src/lib/sectorExposure.ts`
-
-Modificare l'interfaccia `ConsolidatedHoldingWithDetails.stockDetails`:
-
-```typescript
-stockDetails: Array<{
-  quantity: number;
-  price: number;
-  currency: string;
-  value: number;
-  valueWithProtection: number;
-  // NUOVI CAMPI:
-  protectionContracts: number;      // Numero PUT di protezione
-  protectionStrike: number | null;  // Strike medio ponderato
-  hasProtection: boolean;
-}>;
+I log confermano il problema:
+```
+Holdings Method 1 failed, trying Method 2...
+Found holding (Method 2): Other = 37.15%
+Found holding (Method 2): Japan = 5.41%
+Found holding (Method 2): Canada = 2.94%
 ```
 
-E modificare il loop che popola `stockDetails` per includere questi campi:
+## Soluzione
+
+### Modifica 1: Validare le Top Holdings prima del Fallback AI
+
+**File**: `supabase/functions/fetch-etf-allocation/index.ts`
+
+Invece di controllare solo se `topHoldings.length === 0`, verificare che le holdings siano **valide** (non contengano paesi o parole generiche):
 
 ```typescript
-holding.stockDetails.push({
-  quantity: stock.stockQuantity,
-  price: stock.stockPrice,
-  currency: stock.currency,
-  value: stockValueEUR,
-  valueWithProtection: stock.riskEUR,
-  // Nuovi campi dalle protezioni:
-  protectionContracts: stock.protectionContracts,
-  protectionStrike: stock.protectionStrike,
-  hasProtection: stock.hasProtection,
-});
-```
-
-### Correzione 2: Aggiornare HoldingBreakdownDialog per mostrare protezioni
-
-**File**: `src/components/risk/HoldingBreakdownDialog.tsx`
-
-Nella sezione Stock, aggiungere visualizzazione delle protezioni:
-
-```tsx
-{holding.stockDetails.map((stock, i) => (
-  <div key={i} className="p-3">
-    <div className="text-sm">
-      {formatNumber(stock.quantity)} azioni @ {stock.currency} {formatNumber(stock.price, 2)}
-    </div>
-    
-    {/* NUOVO: Mostra info protezione se presente */}
-    {stock.hasProtection && stock.protectionContracts > 0 && (
-      <div className="text-xs text-green-500 mt-1">
-        Protetto: {stock.protectionContracts} PUT × Strike {formatNumber(stock.protectionStrike, 0)}
-      </div>
-    )}
-    
-    <div className="text-right">
-      <div className="font-medium text-blue-500">
-        {formatEUR(includeProtections ? stock.valueWithProtection : stock.value)}
-      </div>
-      {includeProtections && stock.hasProtection && (
-        <div className="text-xs text-green-500">
-          (Lordo: {formatEUR(stock.value)})
-        </div>
-      )}
-    </div>
-  </div>
-))}
-```
-
-### Correzione 3: Forzare refresh ETF con data vecchia
-
-**File**: `src/hooks/useETFAllocations.ts`
-
-Modificare la logica di caching per considerare gli ETF con `last_fetched_at` troppo vecchio come "stale":
-
-```typescript
-// Se cache è più vecchia di 30 giorni, considera stale
-const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 giorni
-
-const isStale = (lastFetchedAt: string) => {
-  const lastFetched = new Date(lastFetchedAt).getTime();
-  return Date.now() - lastFetched > CACHE_TTL_MS;
-};
-```
-
-Oppure, più semplicemente, forzare un refresh immediato per gli ETF con `top_holdings` vuoto.
-
-### Correzione 4: Trigger refresh iniziale al mount
-
-**File**: `src/pages/RiskAnalyzer.tsx` o `src/hooks/useETFAllocations.ts`
-
-Quando la vista carica e rileva ETF senza top holdings, triggerare automaticamente un refresh:
-
-```typescript
-useEffect(() => {
-  // Dopo aver caricato allocations, controlla quanti hanno top_holdings vuote
-  const emptyHoldings = etfIsins.filter(isin => 
-    allocations[isin] && (!allocations[isin].topHoldings || allocations[isin].topHoldings.length === 0)
+// Helper function to validate if holdings are real companies
+function hasValidTopHoldings(holdings: TopHolding[]): boolean {
+  if (holdings.length === 0) return false;
+  
+  const invalidNames = [
+    'Other', 'Others', 'Cash', 'Liquidità',
+    // Countries that might get scraped incorrectly
+    'United States', 'USA', 'Japan', 'Canada', 'United Kingdom', 'UK',
+    'Germany', 'France', 'China', 'Switzerland', 'Australia',
+    // Generic terms
+    'Technology', 'Financials', 'Healthcare', 'Energy', 'Materials'
+  ];
+  
+  // Check if at least 3 holdings are valid company names (not in invalid list)
+  const validHoldings = holdings.filter(h => 
+    !invalidNames.some(invalid => 
+      h.name.toUpperCase() === invalid.toUpperCase()
+    )
   );
   
-  if (emptyHoldings.length > 0 && !hasFetchedETFs) {
-    // Forza refresh con flag per bypassare cache
-    fetchMultipleAllocations(emptyHoldings, true); // forceRefresh = true
+  return validHoldings.length >= 3;
+}
+```
+
+Poi modificare la condizione per il fallback AI (linea ~1032):
+
+```typescript
+// AI Fallback for ETFs without VALID top holdings data
+if (!hasValidTopHoldings(data.topHoldings)) {
+  console.log(`No valid top holdings scraped for ${isin} (found ${data.topHoldings.length} invalid entries), trying Lovable AI...`);
+  const aiHoldings = await fetchETFTopHoldingsWithAI(isin, data.name);
+  
+  if (aiHoldings.length > 0) {
+    data.topHoldings = aiHoldings; // Replace invalid data with AI data
+    console.log(`AI populated top holdings for ${data.name}:`, aiHoldings);
   }
-}, [allocations, etfIsins]);
+}
+```
+
+### Modifica 2: Migliorare Method 2 Holdings Scraping
+
+Aggiungere un filtro più rigoroso nel Method 2 per escludere paesi e termini generici:
+
+```typescript
+// Additional filter: exclude country names and generic terms
+const EXCLUDED_HOLDING_NAMES = [
+  'Other', 'Others', 'United States', 'USA', 'Japan', 'UK', 
+  'United Kingdom', 'Canada', 'Germany', 'France', 'China',
+  'Switzerland', 'Australia', 'Netherlands', 'Sweden', 'Spain'
+];
+
+// In Method 2 loop:
+const isExcluded = EXCLUDED_HOLDING_NAMES.some(name =>
+  holdingName.toUpperCase() === name.toUpperCase()
+);
+if (!isSector && !isExcluded) {
+  topHoldings.push({ name: holdingName, percentage });
+}
 ```
 
 ## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `src/lib/sectorExposure.ts` | Estendere `stockDetails` con campi protezione |
-| `src/components/risk/HoldingBreakdownDialog.tsx` | Mostrare contratti e strike protezione |
-| `src/hooks/useETFAllocations.ts` | Aggiungere logica per refresh ETF stale |
+| `supabase/functions/fetch-etf-allocation/index.ts` | Aggiungere validazione holdings + migliorare filtri Method 2 |
 
 ## Risultato Atteso
 
-### Breakdown per ALIBABA:
+Dopo le modifiche, l'edge function per `IE00B4L5Y983` (iShares Core MSCI World) dovrebbe:
 
-**Stock Diretto**
-- 100 azioni @ USD 175.66
-- Protetto: 1 PUT × Strike 90
-- Valore: €14.669 (Lordo: €14.669) — nota: strike 90 < prezzo 175, quindi protezione non riduce rischio
-
-**Naked PUT**
-- Strike 165 • 1 contratto • GIU/26 → €13.784
-- Strike 170 • 1 contratto • SET/25 → €14.202
-- Subtotale PUT: €27.986
-
-**Totale**: €42.655
-
-### Badge ETF:
-Dopo il refresh degli ETF, le top holdings verranno popolate dall'AI e il badge ETF apparirà per i titoli presenti negli ETF (es. Apple, Microsoft, etc.)
+1. **Rilevare** che le holdings estratte ("Other", "Japan", "Canada") sono **invalide**
+2. **Attivare** il fallback AI per ottenere le vere top holdings
+3. **Restituire** holdings come:
+   ```json
+   {
+     "topHoldings": [
+       {"name": "Apple Inc.", "percentage": 5.2},
+       {"name": "Microsoft Corp.", "percentage": 4.8},
+       {"name": "NVIDIA Corp.", "percentage": 4.1},
+       {"name": "Amazon.com Inc.", "percentage": 2.8},
+       ...
+     ]
+   }
+   ```
 
 ## Sequenza di Implementazione
 
-1. Estendere interfaccia `stockDetails` con campi protezione
-2. Modificare loop in `calculateConsolidatedTopHoldings` per passare i dati protezione
-3. Aggiornare `HoldingBreakdownDialog` per visualizzare le protezioni
-4. Aggiungere logica refresh per ETF con cache stale
-5. Testare che Alibaba mostri correttamente 1 PUT protezione @ strike 90
+1. Aggiungere helper `hasValidTopHoldings()`
+2. Aggiungere lista `EXCLUDED_HOLDING_NAMES` 
+3. Modificare filtro nel Method 2 per escludere paesi
+4. Modificare condizione fallback AI per usare `hasValidTopHoldings()`
+5. Deploy edge function
+6. Testare con `forceRefresh: true` su `IE00B4L5Y983`
+7. Verificare che le top holdings siano aziende reali (Apple, Microsoft, etc.)
+
+## Test di Verifica
+
+Dopo il deploy, chiamare:
+```bash
+curl -X POST ... -d '{"isin": "IE00B4L5Y983", "forceRefresh": true}'
+```
+
+Aspettarsi nei log:
+```
+No valid top holdings scraped for IE00B4L5Y983 (found 4 invalid entries), trying Lovable AI...
+Calling Lovable AI for ETF top holdings: iShares Core MSCI World UCITS ETF USD (Acc)...
+AI resolved 15 top holdings for iShares Core MSCI World UCITS ETF USD (Acc)
+```
