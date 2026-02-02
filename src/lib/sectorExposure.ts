@@ -128,6 +128,8 @@ function normalizeSectorName(sector: string): string {
   return mapping[normalized] || normalized;
 }
 
+export type SectorInstrumentCategory = 'stocks' | 'nakedPuts' | 'leapCalls' | 'strategies';
+
 export interface SectorInstrument {
   name: string;
   riskEUR: number;
@@ -135,6 +137,7 @@ export interface SectorInstrument {
   isFromETFDecomposition: boolean;
   sourceETF?: string;
   percentage?: number;
+  category: SectorInstrumentCategory;
 }
 
 export interface SectorExposure {
@@ -142,6 +145,7 @@ export interface SectorExposure {
   totalRisk: number;
   percentage: number;
   instruments: SectorInstrument[];
+  breakdown: Record<SectorInstrumentCategory, number>;
 }
 
 export interface TopHolding {
@@ -252,6 +256,7 @@ export function calculateSectorExposure(
         totalRisk: 0,
         percentage: 0,
         instruments: [],
+        breakdown: { stocks: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
       });
     }
     return bySector.get(normalizedSector)!;
@@ -278,6 +283,7 @@ export function calculateSectorExposure(
             const riskAmount = grossValueEUR * (percentage / 100);
             
             sectorExposure.totalRisk += riskAmount;
+            sectorExposure.breakdown.stocks += riskAmount;
             sectorExposure.instruments.push({
               name: stock.underlying,
               riskEUR: riskAmount,
@@ -285,29 +291,32 @@ export function calculateSectorExposure(
               isFromETFDecomposition: true,
               sourceETF: allocation.name || stock.underlying,
               percentage,
+              category: 'stocks',
             });
           }
         }
-      } else {
         // ETF without sector data - assign to "Other"
         const sectorExposure = getOrCreateSector('Other');
         sectorExposure.totalRisk += grossValueEUR;
+        sectorExposure.breakdown.stocks += grossValueEUR;
         sectorExposure.instruments.push({
           name: stock.underlying,
           riskEUR: grossValueEUR,
           isETF: true,
           isFromETFDecomposition: false,
+          category: 'stocks',
         });
       }
-    } else if (isETF) {
       // ETF without allocation data - assign to "Other"
       const sectorExposure = getOrCreateSector('Other');
       sectorExposure.totalRisk += grossValueEUR;
+      sectorExposure.breakdown.stocks += grossValueEUR;
       sectorExposure.instruments.push({
         name: stock.underlying,
         riskEUR: grossValueEUR,
         isETF: true,
         isFromETFDecomposition: false,
+        category: 'stocks',
       });
     } else {
       // Single stock - assign sector based on dynamic mapping first, then fallback
@@ -323,11 +332,13 @@ export function calculateSectorExposure(
       
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += grossValueEUR;
+      sectorExposure.breakdown.stocks += grossValueEUR;
       sectorExposure.instruments.push({
         name: stock.underlying,
         riskEUR: grossValueEUR,
         isETF: false,
         isFromETFDecomposition: false,
+        category: 'stocks',
       });
     }
   }
@@ -339,11 +350,13 @@ export function calculateSectorExposure(
       const sector = getStockSectorWithMapping(np.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += np.riskEUR;
+      sectorExposure.breakdown.nakedPuts += np.riskEUR;
       sectorExposure.instruments.push({
         name: `${np.underlying} (PUT ${np.strike})`,
         riskEUR: np.riskEUR,
         isETF: false,
         isFromETFDecomposition: false,
+        category: 'nakedPuts',
       });
     }
     
@@ -352,11 +365,13 @@ export function calculateSectorExposure(
       const sector = getStockSectorWithMapping(lc.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += lc.riskEUR;
+      sectorExposure.breakdown.leapCalls += lc.riskEUR;
       sectorExposure.instruments.push({
         name: `${lc.underlying} (LEAP CALL)`,
         riskEUR: lc.riskEUR,
         isETF: false,
         isFromETFDecomposition: false,
+        category: 'leapCalls',
       });
     }
     
@@ -365,11 +380,13 @@ export function calculateSectorExposure(
       const sector = getStockSectorWithMapping(strat.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += strat.maxLossEUR;
+      sectorExposure.breakdown.strategies += strat.maxLossEUR;
       sectorExposure.instruments.push({
         name: `${strat.underlying} (${strat.strategyName})`,
         riskEUR: strat.maxLossEUR,
         isETF: false,
         isFromETFDecomposition: false,
+        category: 'strategies',
       });
     }
   }

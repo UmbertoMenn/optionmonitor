@@ -11,12 +11,13 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil, HelpCircle } from 'lucide-react';
+import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil, HelpCircle, TrendingDown, DollarSign, Layers } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
   SectorExposure, 
   getSectorColor,
   SectorInstrument,
+  SectorInstrumentCategory,
 } from '@/lib/sectorExposure';
 import { formatEUR } from '@/lib/formatters';
 import { SectorOverrideDialog } from './SectorOverrideDialog';
@@ -34,6 +35,131 @@ interface SectorAllocationViewProps {
   resolvingCount?: number;
   isAdmin?: boolean;
   onRefreshMappings?: () => void;
+}
+
+const CATEGORY_CONFIG: Record<SectorInstrumentCategory, { label: string; icon: React.ComponentType<{ className?: string }>; colorClass: string }> = {
+  stocks: { label: 'Stocks & ETF', icon: TrendingUp, colorClass: 'text-blue-500' },
+  nakedPuts: { label: 'Naked Put', icon: TrendingDown, colorClass: 'text-red-500' },
+  leapCalls: { label: 'Leap Call', icon: DollarSign, colorClass: 'text-amber-500' },
+  strategies: { label: 'Strategie', icon: Layers, colorClass: 'text-purple-500' },
+};
+
+interface InstrumentRowProps {
+  instrument: SectorInstrument;
+  sectorName: string;
+  isAdmin: boolean;
+  onOverrideClick: (instrument: SectorInstrument, sector: string) => void;
+}
+
+function InstrumentRow({ instrument, sectorName, isAdmin, onOverrideClick }: InstrumentRowProps) {
+  const config = CATEGORY_CONFIG[instrument.category];
+  const Icon = config.icon;
+
+  return (
+    <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <Icon className={`w-3.5 h-3.5 ${config.colorClass} flex-shrink-0`} />
+        <div className="flex flex-col min-w-0">
+          <span className="text-sm font-medium truncate">{instrument.name}</span>
+        </div>
+        {instrument.isFromETFDecomposition && instrument.percentage && (
+          <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-blue-500/10 text-blue-500 border-blue-500/30">
+            {instrument.percentage.toFixed(1)}%
+          </Badge>
+        )}
+        {instrument.isETF && !instrument.isFromETFDecomposition && (
+          <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-blue-500/10 text-blue-500 border-blue-500/30">
+            ETF
+          </Badge>
+        )}
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <span className="text-sm font-medium">{formatEUR(instrument.riskEUR)}</span>
+        {isAdmin && !instrument.isFromETFDecomposition && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOverrideClick(instrument, sectorName);
+            }}
+            title="Modifica settore"
+          >
+            <Pencil className="w-3 h-3 text-muted-foreground hover:text-foreground" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface CategoryBreakdownProps {
+  instruments: SectorInstrument[];
+  category: SectorInstrumentCategory;
+  total: number;
+  sectorName: string;
+  isAdmin: boolean;
+  onOverrideClick: (instrument: SectorInstrument, sector: string) => void;
+}
+
+function CategoryBreakdown({ 
+  instruments, 
+  category, 
+  total,
+  sectorName,
+  isAdmin,
+  onOverrideClick,
+}: CategoryBreakdownProps) {
+  const categoryInstruments = instruments.filter(i => i.category === category);
+  if (categoryInstruments.length === 0) return null;
+
+  // PERF: avoid rendering huge lists
+  const DEFAULT_LIMIT = 25;
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? categoryInstruments : categoryInstruments.slice(0, DEFAULT_LIMIT);
+  const hiddenCount = Math.max(0, categoryInstruments.length - visible.length);
+  
+  const config = CATEGORY_CONFIG[category];
+  const Icon = config.icon;
+  
+  return (
+    <AccordionItem value={category} className="border-0">
+      <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-background/50 rounded-lg">
+        <div className="flex items-center gap-2 flex-1">
+          <Icon className={`w-4 h-4 ${config.colorClass}`} />
+          <span className="text-sm">{config.label}</span>
+          <Badge variant="secondary" className="ml-auto mr-2 text-xs">
+            {categoryInstruments.length}
+          </Badge>
+          <span className="font-medium text-sm">{formatEUR(total)}</span>
+        </div>
+      </AccordionTrigger>
+      <AccordionContent className="pt-1 pb-2 px-2">
+        <div className="space-y-1">
+          {visible.map((instrument, idx) => (
+            <InstrumentRow 
+              key={`${instrument.name}-${idx}`} 
+              instrument={instrument}
+              sectorName={sectorName}
+              isAdmin={isAdmin}
+              onOverrideClick={onOverrideClick}
+            />
+          ))}
+
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(v => !v)}
+              className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-2"
+            >
+              {showAll ? 'Mostra meno' : `Mostra altri ${hiddenCount}...`}
+            </button>
+          )}
+        </div>
+      </AccordionContent>
+    </AccordionItem>
+  );
 }
 
 export function SectorAllocationView({
@@ -78,12 +204,6 @@ export function SectorAllocationView({
   });
 
   const hasData = safeSectorExposure.length > 0 && Number.isFinite(grandTotal) && grandTotal > 0;
-  
-  // Calculate total for sectors other than the top one
-  const otherSectorsTotal = useMemo(() => {
-    if (safeSectorExposure.length <= 1) return 0;
-    return safeSectorExposure.slice(1).reduce((sum, s) => sum + s.totalRisk, 0);
-  }, [safeSectorExposure]);
   
   // Prepare chart data
   const chartData = safeSectorExposure.map(s => ({
@@ -249,74 +369,53 @@ export function SectorAllocationView({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <Accordion type="single" collapsible className="w-full">
+          <Accordion type="multiple" className="space-y-2">
             {safeSectorExposure.map((sector) => (
-              <AccordionItem key={sector.sector} value={sector.sector} className="border-0">
-                <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-background/50 rounded-lg">
-                  <div className="flex items-center gap-2 flex-1">
-                    <div
-                      className="w-3 h-3 rounded-full flex-shrink-0"
+              <AccordionItem 
+                key={sector.sector} 
+                value={sector.sector}
+                className="border rounded-lg bg-muted/30"
+              >
+                <AccordionTrigger className="px-4 hover:no-underline">
+                  <div className="flex items-center gap-3 flex-1">
+                    <div 
+                      className="w-4 h-4 rounded-full" 
                       style={{ backgroundColor: getSectorColor(sector.sector) }}
                     />
-                    <span className="text-sm font-medium">{sector.sector}</span>
-                    <Badge variant="secondary" className="ml-auto mr-2 text-xs">
-                      {sector.instruments.length}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground mr-2">
-                      {sector.percentage.toFixed(1)}%
-                    </span>
-                    <span className="font-medium text-sm" style={{ color: getSectorColor(sector.sector) }}>
-                      {formatEUR(sector.totalRisk)}
-                    </span>
+                    <div className="flex items-center justify-between flex-1 pr-2">
+                      <span className="font-semibold">{sector.sector}</span>
+                      <div className="text-right flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {sector.instruments.length}
+                        </Badge>
+                        <span className="text-muted-foreground text-sm">
+                          {sector.percentage.toFixed(1)}%
+                        </span>
+                        <span className="font-semibold" style={{ color: getSectorColor(sector.sector) }}>
+                          {formatEUR(sector.totalRisk)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </AccordionTrigger>
-                <AccordionContent className="pt-1 pb-2 px-2">
-                  <div className="space-y-1 pl-4">
-                    {sector.instruments.map((instrument, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          {instrument.isETF ? (
-                            <BarChart3 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                          ) : (
-                            <TrendingUp className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
-                          )}
-                          <span className="text-sm truncate">{instrument.name}</span>
-                          {instrument.isFromETFDecomposition && instrument.percentage && (
-                            <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-blue-500/10 text-blue-500 border-blue-500/30">
-                              {instrument.percentage.toFixed(1)}%
-                            </Badge>
-                          )}
-                          {instrument.isETF && !instrument.isFromETFDecomposition && (
-                            <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-blue-500/10 text-blue-500 border-blue-500/30">
-                              ETF
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className="text-sm font-medium">
-                            {formatEUR(instrument.riskEUR)}
-                          </span>
-                          {isAdmin && !instrument.isFromETFDecomposition && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenOverrideDialog(instrument, sector.sector);
-                              }}
-                              title="Modifica settore"
-                            >
-                              <Pencil className="w-3 h-3 text-muted-foreground hover:text-foreground" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                <AccordionContent className="px-4 pb-4">
+                  <Accordion type="multiple" className="space-y-1">
+                    {(Object.keys(CATEGORY_CONFIG) as SectorInstrumentCategory[])
+                      .map((key) => ({ key, total: sector.breakdown[key] }))
+                      .filter((x) => Number.isFinite(x.total) && x.total > 0)
+                      .sort((a, b) => b.total - a.total)
+                      .map(({ key, total }) => (
+                        <CategoryBreakdown
+                          key={key}
+                          instruments={sector.instruments}
+                          category={key}
+                          total={total}
+                          sectorName={sector.sector}
+                          isAdmin={isAdmin}
+                          onOverrideClick={handleOpenOverrideDialog}
+                        />
+                      ))}
+                  </Accordion>
                 </AccordionContent>
               </AccordionItem>
             ))}
