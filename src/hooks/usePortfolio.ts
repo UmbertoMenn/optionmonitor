@@ -71,21 +71,31 @@ export function usePortfolio() {
   const summary: PortfolioSummary | null = positionsQuery.data ? calculateSummary(positionsQuery.data, portfolio?.cash_value || 0) : null;
 
   const updatePositionsMutation = useMutation({
-    mutationFn: async (positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]) => {
-      if (!portfolio?.id) throw new Error('Portfolio non trovato');
+    mutationFn: async ({ 
+      positions, 
+      targetPortfolioId 
+    }: { 
+      positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]; 
+      targetPortfolioId?: string;
+    }) => {
+      // IMPORTANTE: usa targetPortfolioId se fornito, altrimenti fallback al portfolio corrente
+      const portfolioId = targetPortfolioId || portfolio?.id;
+      if (!portfolioId) throw new Error('Portfolio non trovato');
       
-      // First delete all existing positions
-      await supabase
+      // First delete all existing positions for the target portfolio
+      const { error: deleteError } = await supabase
         .from('positions')
         .delete()
-        .eq('portfolio_id', portfolio.id);
+        .eq('portfolio_id', portfolioId);
+      
+      if (deleteError) throw deleteError;
       
       // Then insert new positions
       const { data, error } = await supabase
         .from('positions')
         .insert(positions.map(p => ({
           ...p,
-          portfolio_id: portfolio.id,
+          portfolio_id: portfolioId,
         })));
       
       if (error) throw error;
@@ -99,7 +109,7 @@ export function usePortfolio() {
       const { data: portfolioCash, error: cashError } = await supabase
         .from('portfolios')
         .select('cash_value')
-        .eq('id', portfolio.id)
+        .eq('id', portfolioId)
         .single();
 
       if (cashError) throw cashError;
@@ -112,7 +122,7 @@ export function usePortfolio() {
           total_value: totalValue,
           last_updated: new Date().toISOString()
         })
-        .eq('id', portfolio.id);
+        .eq('id', portfolioId);
       
       return data;
     },
@@ -133,7 +143,10 @@ export function usePortfolio() {
     positions: positionsQuery.data || [],
     summary,
     isLoading: positionsQuery.isLoading,
-    updatePositions: updatePositionsMutation.mutate,
+    updatePositions: (args: { 
+      positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]; 
+      targetPortfolioId?: string;
+    }) => updatePositionsMutation.mutate(args),
     isUpdating: updatePositionsMutation.isPending,
     updateInitialValue: updateInitialValueMutation.mutate,
     isUpdatingInitialValue: updateInitialValueMutation.isPending,

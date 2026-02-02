@@ -19,6 +19,16 @@ export function FileUploader() {
     const file = acceptedFiles[0];
     if (!file) return;
 
+    // IMPORTANTE: Cattura il portfolio ID all'inizio per evitare race condition
+    // Se l'utente cambia portfolio durante l'elaborazione, usiamo comunque quello iniziale
+    const targetPortfolioId = portfolio?.id;
+    if (!targetPortfolioId) {
+      toast.error('Nessun portfolio selezionato', {
+        description: 'Seleziona un portfolio prima di caricare il file.',
+      });
+      return;
+    }
+
     setIsProcessing(true);
     setUploadSuccess(false);
 
@@ -28,7 +38,8 @@ export function FileUploader() {
       console.log('[FileUploader] Parsed Excel result:', { 
         positionsCount: positions.length, 
         cashValue, 
-        snapshotDate 
+        snapshotDate,
+        targetPortfolioId, // Log del portfolio target bloccato
       });
       
       if (positions.length === 0) {
@@ -38,32 +49,31 @@ export function FileUploader() {
         return;
       }
 
-      // Update cash value and snapshot date in portfolio
-      if (portfolio?.id) {
-        const updateData: { cash_value?: number; snapshot_date?: string | null } = {};
-        if (cashValue > 0) {
-          updateData.cash_value = cashValue;
-        }
-        // Always update snapshot_date (even if null, to clear old value)
-        updateData.snapshot_date = snapshotDate;
+      // Update cash value and snapshot date in portfolio usando targetPortfolioId
+      const updateData: { cash_value?: number; snapshot_date?: string | null } = {};
+      if (cashValue > 0) {
+        updateData.cash_value = cashValue;
+      }
+      // Always update snapshot_date (even if null, to clear old value)
+      updateData.snapshot_date = snapshotDate;
+      
+      console.log('[FileUploader] Updating portfolio with:', updateData);
+      
+      const { error } = await supabase
+        .from('portfolios')
+        .update(updateData)
+        .eq('id', targetPortfolioId); // Usa targetPortfolioId invece di portfolio.id
         
-        console.log('[FileUploader] Updating portfolio with:', updateData);
-        
-        const { error } = await supabase
-          .from('portfolios')
-          .update(updateData)
-          .eq('id', portfolio.id);
-          
-        if (error) {
-          console.error('[FileUploader] Error updating portfolio:', error);
-        } else {
-          console.log('[FileUploader] Portfolio updated successfully');
-          // Force refresh portfolio query to get the new snapshot_date
-          await queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-        }
+      if (error) {
+        console.error('[FileUploader] Error updating portfolio:', error);
+      } else {
+        console.log('[FileUploader] Portfolio updated successfully');
+        // Force refresh portfolio query to get the new snapshot_date
+        await queryClient.invalidateQueries({ queryKey: ['portfolio'] });
       }
 
-      updatePositions(positions);
+      // Passa targetPortfolioId alla mutation per garantire coerenza
+      updatePositions({ positions, targetPortfolioId });
       setUploadSuccess(true);
       
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
@@ -78,7 +88,7 @@ export function FileUploader() {
     } finally {
       setIsProcessing(false);
     }
-  }, [portfolio, updatePositions, queryClient]);
+  }, [portfolio?.id, updatePositions, queryClient]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
