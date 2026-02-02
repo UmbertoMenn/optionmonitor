@@ -12,6 +12,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
+import { Info } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { 
   ShieldAlert, 
@@ -126,6 +127,21 @@ export function EquityExposureView({ analysis }: EquityExposureViewProps) {
                 <ShieldAlert className="w-4 h-4 text-primary" />
               </div>
               <span className="text-sm font-medium text-primary">Esposizione Totale in Equity e Commodities</span>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button 
+                      className="p-0.5 rounded-full hover:bg-primary/20 text-primary/70 hover:text-primary transition-colors"
+                      aria-label="Info sul calcolo del rischio"
+                    >
+                      <Info className="w-4 h-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-sm">
+                    <p>Le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il totale dei premi pagati.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
             <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
