@@ -14,7 +14,6 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil } from 'lucide-react';
 import { 
   SectorExposure, 
-  TopHolding, 
   getSectorColor,
   SectorInstrument,
 } from '@/lib/sectorExposure';
@@ -24,7 +23,6 @@ import { SectorOverrideData } from '@/hooks/useSectorOverride';
 
 interface SectorAllocationViewProps {
   sectorExposure: SectorExposure[];
-  topHoldings: TopHolding[];
   grandTotal: number;
   isLoadingETFData: boolean;
   etfCount: number;
@@ -39,7 +37,6 @@ interface SectorAllocationViewProps {
 
 export function SectorAllocationView({
   sectorExposure,
-  topHoldings,
   grandTotal,
   isLoadingETFData,
   etfCount,
@@ -316,72 +313,6 @@ export function SectorAllocationView({
         </CardContent>
       </Card>
       
-      {/* Top 20 Holdings */}
-      <Card className="border-border bg-card">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <TrendingUp className="w-5 h-5 text-primary" />
-            Top 20 Holdings
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {topHoldings.length === 0 ? (
-            <div className="text-center text-muted-foreground py-8">
-              {isLoadingETFData ? (
-                <span className="animate-pulse">Caricamento dati holdings ETF...</span>
-              ) : (
-                <span>Nessun dato disponibile sui top holdings degli ETF</span>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {topHoldings.map((holding, index) => (
-                <div
-                  key={holding.name}
-                  className="flex items-center justify-between p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="text-sm font-medium text-muted-foreground w-6 text-right">
-                      {index + 1}.
-                    </span>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-sm font-medium truncate">{holding.name}</span>
-                      <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
-                        {holding.sources.slice(0, 3).map((source, idx) => (
-                          <span key={idx}>
-                            {source.isDirectHolding ? (
-                              <Badge variant="outline" className="text-xs px-1 py-0 h-4 bg-green-500/10 text-green-500 border-green-500/30">
-                                Diretto
-                              </Badge>
-                            ) : (
-                              <span className="text-muted-foreground">
-                                via {source.source.length > 20 ? source.source.substring(0, 20) + '...' : source.source}
-                                {source.percentage ? ` (${source.percentage.toFixed(1)}%)` : ''}
-                              </span>
-                            )}
-                            {idx < Math.min(2, holding.sources.length - 1) && ', '}
-                          </span>
-                        ))}
-                        {holding.sources.length > 3 && (
-                          <span>+{holding.sources.length - 3} altri</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className="text-xs text-muted-foreground">
-                      {holding.percentage.toFixed(1)}%
-                    </span>
-                    <span className="text-sm font-medium text-primary min-w-[80px] text-right">
-                      {formatEUR(holding.totalExposure)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
       
       {/* Admin Sector Override Dialog */}
       <SectorOverrideDialog
