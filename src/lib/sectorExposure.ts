@@ -258,8 +258,11 @@ export function calculateSectorExposure(
   };
   
   // Process stocks (including ETFs)
+  // NOTE: For sector analysis, stocks are ALWAYS valued at gross value (before protections)
   for (const stock of analysis.stockDetails) {
     const isETF = isETFByName(stock.underlying);
+    // Use gross value (stockValue / exchangeRate) instead of riskEUR (which is net of protections)
+    const grossValueEUR = stock.stockValue / stock.exchangeRate;
     
     if (isETF && stock.isin && etfAllocations[stock.isin]) {
       // ETF with sector allocation data - decompose by sector
@@ -272,7 +275,7 @@ export function calculateSectorExposure(
         for (const [sector, percentage] of Object.entries(sectorData)) {
           if (percentage > 0) {
             const sectorExposure = getOrCreateSector(sector);
-            const riskAmount = stock.riskEUR * (percentage / 100);
+            const riskAmount = grossValueEUR * (percentage / 100);
             
             sectorExposure.totalRisk += riskAmount;
             sectorExposure.instruments.push({
@@ -288,10 +291,10 @@ export function calculateSectorExposure(
       } else {
         // ETF without sector data - assign to "Other"
         const sectorExposure = getOrCreateSector('Other');
-        sectorExposure.totalRisk += stock.riskEUR;
+        sectorExposure.totalRisk += grossValueEUR;
         sectorExposure.instruments.push({
           name: stock.underlying,
-          riskEUR: stock.riskEUR,
+          riskEUR: grossValueEUR,
           isETF: true,
           isFromETFDecomposition: false,
         });
@@ -299,10 +302,10 @@ export function calculateSectorExposure(
     } else if (isETF) {
       // ETF without allocation data - assign to "Other"
       const sectorExposure = getOrCreateSector('Other');
-      sectorExposure.totalRisk += stock.riskEUR;
+      sectorExposure.totalRisk += grossValueEUR;
       sectorExposure.instruments.push({
         name: stock.underlying,
-        riskEUR: stock.riskEUR,
+        riskEUR: grossValueEUR,
         isETF: true,
         isFromETFDecomposition: false,
       });
@@ -319,10 +322,10 @@ export function calculateSectorExposure(
       }
       
       const sectorExposure = getOrCreateSector(sector);
-      sectorExposure.totalRisk += stock.riskEUR;
+      sectorExposure.totalRisk += grossValueEUR;
       sectorExposure.instruments.push({
         name: stock.underlying,
-        riskEUR: stock.riskEUR,
+        riskEUR: grossValueEUR,
         isETF: false,
         isFromETFDecomposition: false,
       });

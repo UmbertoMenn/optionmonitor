@@ -161,7 +161,7 @@ export function SectorAllocationView({
             <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
               <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
               <span className="text-xs text-blue-600 dark:text-blue-400">
-                Commodities escluse dall'analisi settoriale
+                Commodities e Protezioni (Long Put) escluse dall'analisi settoriale. Le azioni sono valorizzate al lordo delle protezioni.
               </span>
             </div>
           </CardContent>
