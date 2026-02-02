@@ -386,7 +386,149 @@ Respond in this EXACT JSON format only, no explanation:
   }
 }
 
-// Fetch ETF top holdings using Lovable AI when scraping fails
+// Fetch ETF top holdings by scraping official provider websites (more accurate than AI)
+// Supports SPDR/SSGA, iShares, Vanguard, etc.
+async function fetchETFTopHoldingsFromProvider(
+  isin: string,
+  etfName: string
+): Promise<TopHolding[]> {
+  const upperName = etfName.toUpperCase();
+  
+  // SPDR ETFs - State Street Global Advisors
+  if (upperName.includes('SPDR') || upperName.includes('SSG')) {
+    return await scrapeSSGAHoldings(isin, etfName);
+  }
+  
+  // iShares ETFs - BlackRock (future implementation)
+  if (upperName.includes('ISHARES') || upperName.includes('ISHS')) {
+    console.log(`iShares ETF detected for ${isin}, provider scraping not yet implemented`);
+  }
+  
+  // Vanguard ETFs (future implementation)
+  if (upperName.includes('VANGUARD') || upperName.includes('VNG')) {
+    console.log(`Vanguard ETF detected for ${isin}, provider scraping not yet implemented`);
+  }
+  
+  return [];
+}
+
+// Scrape State Street Global Advisors (SSGA) for SPDR ETF holdings
+async function scrapeSSGAHoldings(isin: string, etfName: string): Promise<TopHolding[]> {
+  try {
+    // SSGA uses ticker-based URLs, try common SPDR tickers
+    const tickers = ['zprg', 'gldv', 'spyd', 'sdy', 'nobl'];
+    const regions = ['it/en_gb/intermediary', 'us/en/individual', 'uk/en/professional'];
+    
+    for (const region of regions) {
+      // Try to find the ETF by searching SSGA
+      const searchUrl = `https://www.ssga.com/${region}/etfs/library-content/products/fund-data/etfs/emea/holdings-daily-emea-en-zprg-gy.xlsx`;
+      console.log(`Trying SSGA region: ${region} for ${isin}`);
+      
+      // For SPDR S&P Global Dividend Aristocrats specifically (IE00B9CQXS71)
+      if (isin === 'IE00B9CQXS71') {
+        const url = `https://www.ssga.com/${region}/etfs/spdr-sp-global-dividend-aristocrats-ucits-etf-dist-zprg-gy`;
+        
+        const response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+        });
+        
+        if (response.ok) {
+          const html = await response.text();
+          const holdings = parseSSGAHoldings(html);
+          if (holdings.length > 0) {
+            console.log(`SSGA scraping successful for ${isin}: ${holdings.length} holdings`);
+            return holdings;
+          }
+        }
+      }
+    }
+    
+    console.log(`SSGA scraping failed for ${isin}, no holdings found`);
+    return [];
+  } catch (error) {
+    console.error(`Error scraping SSGA for ${isin}:`, error);
+    return [];
+  }
+}
+
+// Parse SSGA HTML to extract top holdings
+function parseSSGAHoldings(html: string): TopHolding[] {
+  const holdings: TopHolding[] = [];
+  
+  // Look for the Top Holdings table pattern on SSGA
+  // Pattern: | Security Name | Weight |
+  // Followed by rows like: | Flowers Foods Inc. | 2,03% |
+  
+  // Method 1: Table with "Security Name" and "Weight" headers
+  const tableRegex = /Security\s*Name[\s\S]*?Weight[\s\S]*?((?:\|[^|]+\|[^|]+\|\s*\n?)+)/gi;
+  const tableMatch = tableRegex.exec(html);
+  
+  if (tableMatch) {
+    const tableContent = tableMatch[1];
+    const rowRegex = /\|\s*([^|]+)\s*\|\s*(\d+[.,]\d+)\s*%\s*\|/g;
+    let rowMatch;
+    
+    while ((rowMatch = rowRegex.exec(tableContent)) !== null && holdings.length < 15) {
+      const name = rowMatch[1].trim();
+      const percentage = parseFloat(rowMatch[2].replace(',', '.'));
+      
+      if (percentage > 0 && name.length > 2 && !name.includes('---')) {
+        holdings.push({ name, percentage });
+      }
+    }
+  }
+  
+  // Method 2: Look for markdown table rows with company names and percentages
+  if (holdings.length === 0) {
+    // Pattern matches: | Company Name | X,XX% |
+    const mdRowRegex = /\|\s*([A-Z][^|]{3,50}(?:Inc\.|Corp\.|Ltd\.|PLC|AG|SA|SE|NV|Co\.)?[^|]*)\s*\|\s*(\d+[.,]\d+)\s*%\s*\|/gi;
+    let match;
+    
+    while ((match = mdRowRegex.exec(html)) !== null && holdings.length < 15) {
+      const name = match[1].trim();
+      const percentage = parseFloat(match[2].replace(',', '.'));
+      
+      // Filter out headers and non-company names
+      if (percentage > 0 && percentage < 20 && 
+          name.length > 2 && 
+          !name.toLowerCase().includes('security') &&
+          !name.toLowerCase().includes('name') &&
+          !name.toLowerCase().includes('weight') &&
+          !name.includes('---')) {
+        holdings.push({ name, percentage });
+      }
+    }
+  }
+  
+  // Method 3: Look for specific holding patterns
+  if (holdings.length === 0) {
+    // Look for company names followed by percentage in any format
+    const generalRegex = /([A-Z][A-Za-z\s&\-\.,']+(?:Inc\.|Corp\.|Ltd\.|PLC|AG|SA|SE|NV|Co\.|Corporation|Company|Limited))[^0-9]*(\d+[.,]\d+)\s*%/g;
+    let match;
+    
+    while ((match = generalRegex.exec(html)) !== null && holdings.length < 15) {
+      const name = match[1].trim();
+      const percentage = parseFloat(match[2].replace(',', '.'));
+      
+      if (percentage > 0 && percentage < 20 && name.length > 3) {
+        // Avoid duplicates
+        if (!holdings.some(h => h.name === name)) {
+          holdings.push({ name, percentage });
+        }
+      }
+    }
+  }
+  
+  // Sort by percentage descending
+  holdings.sort((a, b) => b.percentage - a.percentage);
+  
+  return holdings.slice(0, 15);
+}
+
+// Fetch ETF top holdings using Lovable AI as last resort fallback
 // Returns top 10-15 holdings with percentage weights
 async function fetchETFTopHoldingsWithAI(
   isin: string,
@@ -397,6 +539,14 @@ async function fetchETFTopHoldingsWithAI(
     console.log('LOVABLE_API_KEY not configured, skipping AI top holdings lookup for ETF');
     return [];
   }
+  
+  // First try provider scraping (more accurate)
+  const providerHoldings = await fetchETFTopHoldingsFromProvider(isin, etfName);
+  if (providerHoldings.length >= 5) {
+    return providerHoldings;
+  }
+  
+  console.log(`Provider scraping returned only ${providerHoldings.length} holdings, falling back to AI...`);
   
   const prompt = `For the ETF "${etfName}" (ISIN: ${isin}), provide the top 10-15 largest holdings.
 
@@ -428,7 +578,7 @@ Respond in this EXACT JSON array format only, no explanation:
     
     if (!response.ok) {
       console.error(`AI gateway error for holdings: ${response.status}`);
-      return [];
+      return providerHoldings; // Return whatever we got from provider
     }
     
     const data = await response.json();
@@ -438,7 +588,7 @@ Respond in this EXACT JSON array format only, no explanation:
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
       console.error('AI did not return valid JSON array for ETF holdings');
-      return [];
+      return providerHoldings;
     }
     
     const parsed = JSON.parse(jsonMatch[0]);
@@ -461,10 +611,10 @@ Respond in this EXACT JSON array format only, no explanation:
     }
     
     console.log(`AI returned no valid holdings for ${etfName}`);
-    return [];
+    return providerHoldings;
   } catch (error) {
     console.error('Error fetching ETF top holdings with AI:', error);
-    return [];
+    return providerHoldings;
   }
 }
 
