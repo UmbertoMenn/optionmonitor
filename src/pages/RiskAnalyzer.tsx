@@ -65,13 +65,13 @@ export function RiskAnalyzer() {
     return isins;
   }, [analysis.stockDetails]);
   
-  // Fetch ETF allocations ONCE when switching to currency or sector view
+  // Fetch ETF allocations ONCE when component mounts (needed for ALL views including equity)
   useEffect(() => {
-    if (etfIsins.length > 0 && (viewMode === 'currency' || viewMode === 'sector') && !hasFetchedETFs) {
+    if (etfIsins.length > 0 && !hasFetchedETFs) {
       setHasFetchedETFs(true);
       fetchMultipleAllocations(etfIsins);
     }
-  }, [etfIsins, viewMode, hasFetchedETFs, fetchMultipleAllocations]);
+  }, [etfIsins, hasFetchedETFs, fetchMultipleAllocations]);
   
   // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names
   const stocksForSectorMapping = useMemo(() => {
