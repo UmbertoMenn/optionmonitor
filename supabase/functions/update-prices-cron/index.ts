@@ -111,8 +111,8 @@ const KNOWN_SECTORS: Record<string, { sector: string; industry: string }> = {
   'NVDA': { sector: 'Technology', industry: 'Semiconductors' },
   'AAPL': { sector: 'Technology', industry: 'Consumer Electronics' },
   'MSFT': { sector: 'Technology', industry: 'Software - Infrastructure' },
-  'GOOGL': { sector: 'Communication Services', industry: 'Internet Content & Information' },
-  'GOOG': { sector: 'Communication Services', industry: 'Internet Content & Information' },
+  'GOOGL': { sector: 'Technology', industry: 'Internet Content & Information' },
+  'GOOG': { sector: 'Technology', industry: 'Internet Content & Information' },
   'META': { sector: 'Communication Services', industry: 'Internet Content & Information' },
   'AMZN': { sector: 'Consumer Cyclical', industry: 'Internet Retail' },
   'TSLA': { sector: 'Consumer Cyclical', industry: 'Auto Manufacturers' },
@@ -974,8 +974,33 @@ serve(async (req) => {
         continue;
       }
       
-      // 2. Get sector using AI
-      console.log(`Getting sector for ${inferredTicker} (from name: ${name})...`);
+      // 2. Check DB for existing mapping first (supports both real and synthetic ISINs)
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const supabaseClient = createClient(supabaseUrl, supabaseKey);
+      
+      // Try to find by ticker (both real ISIN entries and synthetic TICKER: entries)
+      const { data: existingMappings } = await supabaseClient
+        .from('isin_mappings')
+        .select('sector, industry')
+        .or(`ticker.eq.${inferredTicker.toUpperCase()},isin.eq.TICKER:${inferredTicker.toUpperCase()}`)
+        .not('sector', 'is', null)
+        .limit(1);
+      
+      if (existingMappings && existingMappings.length > 0 && existingMappings[0].sector) {
+        console.log(`Using cached DB sector for ${inferredTicker}: ${existingMappings[0].sector}`);
+        nameResults.push({
+          name,
+          ticker: inferredTicker,
+          sector: existingMappings[0].sector,
+          industry: existingMappings[0].industry,
+          source: 'db_cache',
+        });
+        continue;
+      }
+      
+      // 3. Get sector using AI (fallback)
+      console.log(`Getting sector for ${inferredTicker} (from name: ${name}) via AI...`);
       const sectorInfo = await fetchSectorWithAI(inferredTicker, name);
       
       nameResults.push({

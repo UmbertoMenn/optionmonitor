@@ -205,6 +205,13 @@ export function useSectorMappings() {
     setHasFetched(false);
     isFetchingRef.current = false;
   }, []);
+  
+  // Force refresh after an override
+  const invalidateAndRefetch = useCallback(() => {
+    setMappings({});
+    setHasFetched(false);
+    isFetchingRef.current = false;
+  }, []);
 
-  return { mappings, fetchMappings, isLoading, resolvingCount, reset };
+  return { mappings, fetchMappings, isLoading, resolvingCount, reset, invalidateAndRefetch };
 }

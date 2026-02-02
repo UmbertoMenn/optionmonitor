@@ -24,17 +24,17 @@ import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
 import { calculateSectorExposure, calculateTopHoldings } from '@/lib/sectorExposure';
 
 export function RiskAnalyzer() {
-  const { signOut } = useAuth();
+  const { signOut, isAdmin } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
   const [hasFetchedETFs, setHasFetchedETFs] = useState(false);
-const [includeDerivatives, setIncludeDerivatives] = useState(true);
+  const [includeDerivatives, setIncludeDerivatives] = useState(true);
   const [includeBonds, setIncludeBonds] = useState(true);
   
   const riskAnalysis = useRiskAnalysis();
   const { isLoading, ...analysis } = riskAnalysis;
   
   const { allocations, fetchMultipleAllocations, loading: etfLoading } = useETFAllocations();
-  const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount } = useSectorMappings();
+  const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
   const toastShownRef = useRef(false);
   
   // Calculate base currency exposure from existing data
@@ -251,6 +251,18 @@ const [includeDerivatives, setIncludeDerivatives] = useState(true);
                   onIncludeDerivativesChange={setIncludeDerivatives}
                   isResolvingSectors={sectorMappingsLoading}
                   resolvingCount={resolvingCount}
+                  isAdmin={isAdmin}
+                  onRefreshMappings={() => {
+                    // Reset mappings to force refetch
+                    resetSectorMappings();
+                    const { stocks, names } = stocksForSectorMapping;
+                    if (stocks.length > 0 || names.length > 0) {
+                      // Refetch after a short delay
+                      setTimeout(() => {
+                        fetchSectorMappings(stocks, names);
+                      }, 300);
+                    }
+                  }}
                 />
               </ErrorBoundary>
             )}
