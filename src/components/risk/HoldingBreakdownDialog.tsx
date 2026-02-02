@@ -149,7 +149,7 @@ export function HoldingBreakdownDialog({
                     </div>
                     <div className="text-right">
                       <div className="font-medium text-amber-500">
-                        {formatEUR(lc.premiumPaid)}
+                        {formatEUR(lc.marketValue)}
                       </div>
                     </div>
                   </div>

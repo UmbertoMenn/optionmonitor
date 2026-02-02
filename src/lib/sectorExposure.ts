@@ -162,7 +162,7 @@ export interface ConsolidatedHolding {
   stockRisk: number;             // Direct stock risk WITHOUT protections (€)
   stockRiskWithProtection: number; // Direct stock risk WITH protections (€)
   nakedPutRisk: number;          // Naked PUT risk (€)
-  leapCallRisk: number;          // Leap Call risk - premium paid (€)
+  leapCallRisk: number;          // Leap Call risk - market value (€)
   totalExposure: number;         // Total with/without protections (calculated based on toggle)
   sources: Array<{
     type: 'stock' | 'nakedPut' | 'leapCall';
@@ -609,7 +609,8 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     strike: number;
     contracts: number;
     avgCost: number;
-    premiumPaid: number;
+    marketPrice: number;
+    marketValue: number;
     expiry: string;
   }>;
   stockDetails: Array<{
@@ -752,7 +753,7 @@ export function calculateConsolidatedTopHoldings(
     });
   }
   
-  // 4. Add Leap Call risk (premium paid)
+  // 4. Add Leap Call risk (market value)
   for (const lc of analysis.leapCallDetails) {
     const holding = getOrCreateHolding(lc.underlying);
     
@@ -766,7 +767,8 @@ export function calculateConsolidatedTopHoldings(
       strike: lc.strike,
       contracts: lc.contracts,
       avgCost: lc.avgCost,
-      premiumPaid: lc.riskEUR,
+      marketPrice: lc.marketPrice,
+      marketValue: lc.riskEUR,
       expiry: lc.expiry,
     });
   }
