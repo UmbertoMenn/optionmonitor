@@ -7,13 +7,14 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink, AlertTriangle, Landmark, Info, ShieldCheck } from 'lucide-react';
+import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink, AlertTriangle, Landmark, Info, ShieldCheck, HelpCircle } from 'lucide-react';
 import { CurrencyExposure, getCurrencyColor, InstrumentDetail } from '@/lib/currencyExposure';
 import { formatEUR, formatCurrency } from '@/lib/formatters';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface CurrencyExposureViewProps {
   currencyExposure: CurrencyExposure[];
@@ -223,6 +224,16 @@ export function CurrencyExposureView({
                   <Coins className="w-4 h-4 text-primary" />
                 </div>
                 <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                      <p>Le azioni sono calcolate al lordo delle protezioni, mentre queste ultime sono aggiunte alla lista con la valorizzazione ai prezzi di mercato. Le strategie sono valorizzate come max loss convertite al cambio.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
