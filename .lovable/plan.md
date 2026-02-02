@@ -1,227 +1,231 @@
 
 
-# Piano: Override Manuale Settori (Solo Admin) + Fix Google
+# Piano: Gestione Robusta della Selezione Portfolio
 
-## Riepilogo
+## Problema Identificato
 
-Implementazione della funzionalità di override manuale dei settori dalla vista Sector Allocation, accessibile esclusivamente agli amministratori. Le modifiche vengono salvate nella tabella `isin_mappings` e condivise globalmente tra tutti gli utenti.
+Il comportamento di "switching" automatico del portfolio è causato da una **race condition** nel `PortfolioContext.tsx`:
+
+### Flusso Problematico Attuale
+
+```text
+1. App si carica
+   │
+2. localStorage.getItem('selectedPortfolioId') → "portfolio-A" (l'ultimo usato)
+   │
+3. React Query inizia fetch portfolio (async)
+   │
+4. useEffect si esegue con portfolios = [] (vuoto, cache non pronta)
+   │                                      ↓
+   │                            selectedId = "portfolio-A" MA portfolios.length = 0
+   │                            → Nessuna azione (condizione portfolios.length > 0 non vera)
+   │
+5. React Query restituisce dati dalla CACHE (dati vecchi/parziali)
+   │
+6. useEffect riesegue: portfolios = [...], selectedId = "portfolio-A"
+   │                    ↓
+   │         portfolios.some(p => p.id === selectedId) → FALSE temporaneamente!
+   │         (la cache potrebbe non contenere portfolio-A o ordine diverso)
+   │                    ↓
+   │         → FALLBACK: setSelectedId(portfolios[0].id) → "portfolio-B" (il più vecchio!)
+   │
+7. React Query fa REFETCH dal server
+   │
+8. useEffect riesegue ma ormai selectedId = "portfolio-B" (cambiato!)
+```
+
+### Problemi Specifici
+
+| Problema | Codice Attuale | Conseguenza |
+|----------|---------------|-------------|
+| Ordinamento ASC | `order('created_at', { ascending: true })` | Il fallback seleziona il portfolio più **vecchio**, non l'ultimo usato |
+| No protezione durante caricamento | `useEffect` esegue anche con dati parziali | Race condition con cache React Query |
+| No validazione localStorage | Non verifica se l'ID salvato esiste ancora | Possibile loop infinito se portfolio eliminato |
 
 ---
 
-## Parte 1: Fix Classificazione Google
+## Soluzione Proposta
 
-### Problema
-Nella `KNOWN_SECTORS` dell'edge function, GOOGL e GOOG sono mappati su "Communication Services" (classificazione GICS ufficiale). L'utente preferisce "Technology".
+### 1. Aggiungere Flag di Sincronizzazione
 
-### Soluzione
-Modificare la mappatura statica in `update-prices-cron/index.ts`:
+Introdurre uno stato `hasInitialized` per eseguire la logica di auto-selezione **una sola volta** dopo il primo caricamento completo.
+
+```typescript
+const [hasInitialized, setHasInitialized] = useState(false);
+```
+
+### 2. Modificare la Logica useEffect
+
+```typescript
+useEffect(() => {
+  // Esegui SOLO dopo il primo fetch completato con successo
+  if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
+  if (portfolios.length === 0) return;
+  
+  // Se già inizializzato e l'ID selezionato esiste, non fare nulla
+  if (hasInitialized && selectedId && portfolios.some(p => p.id === selectedId)) {
+    return;
+  }
+  
+  // Verifica se l'ID salvato in localStorage esiste ancora
+  const savedId = localStorage.getItem(SELECTED_PORTFOLIO_KEY);
+  const savedExists = savedId && portfolios.some(p => p.id === savedId);
+  
+  if (savedExists) {
+    // Usa il portfolio salvato
+    setSelectedId(savedId);
+  } else {
+    // Fallback: usa il portfolio più recente (per last_updated)
+    const mostRecent = [...portfolios].sort((a, b) => 
+      new Date(b.last_updated || b.created_at).getTime() - 
+      new Date(a.last_updated || a.created_at).getTime()
+    )[0];
+    
+    setSelectedId(mostRecent.id);
+    localStorage.setItem(SELECTED_PORTFOLIO_KEY, mostRecent.id);
+  }
+  
+  setHasInitialized(true);
+}, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, hasInitialized]);
+```
+
+### 3. Modificare l'Ordinamento Query
+
+Cambiare l'ordinamento da `ascending: true` a `descending` per avere i portfolio più recenti per primi:
+
+```typescript
+.order('last_updated', { ascending: false, nullsFirst: false })
+```
+
+In questo modo, se scatta il fallback, verrà selezionato il portfolio aggiornato più di recente, non quello creato per primo.
+
+### 4. Aggiungere Cleanup al Logout
+
+Quando l'utente esce, resettare lo stato per evitare che al prossimo login si usi un ID di un altro utente:
+
+```typescript
+// Nel PortfolioContext, ascoltare i cambiamenti di user
+useEffect(() => {
+  if (!user) {
+    setSelectedId(null);
+    setHasInitialized(false);
+    // Non rimuovere da localStorage - verrà validato al prossimo login
+  }
+}, [user]);
+```
+
+---
+
+## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `supabase/functions/update-prices-cron/index.ts` | Linee 114-115: Cambiare `Communication Services` in `Technology` per GOOGL e GOOG |
+| `src/contexts/PortfolioContext.tsx` | Aggiungere `hasInitialized`, modificare useEffect, cambiare ordinamento query, aggiungere cleanup |
 
 ---
 
-## Parte 2: Consultare DB Prima di AI per Derivati
+## Codice Completo della Modifica
 
-### Problema Attuale
-Quando si risolvono i settori per i nomi dei derivati (es. "GOOGLE CORP"), il sistema:
-1. Inferisce il ticker
-2. Chiama direttamente `fetchSectorWithAI()` - **senza controllare prima i mapping manuali**
+### PortfolioContext.tsx - Nuova Logica
 
-### Soluzione
-Prima di chiamare l'AI, verificare se esiste un mapping manuale nel database per quel ticker.
+```typescript
+// Nuovo stato per tracking inizializzazione
+const [hasInitialized, setHasInitialized] = useState(false);
 
-| File | Modifica |
-|------|----------|
-| `supabase/functions/update-prices-cron/index.ts` | Linee 977-979: Aggiungere controllo DB prima di chiamare `fetchSectorWithAI()` |
+// Query con ordinamento per last_updated DESC
+const portfoliosQuery = useQuery({
+  queryKey: ['portfolios', user?.id],
+  queryFn: async () => {
+    if (!user) return [];
+    
+    const { data, error } = await supabase
+      .from('portfolios')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('last_updated', { ascending: false, nullsFirst: false });
+    
+    if (error) throw error;
+    return data as unknown as Portfolio[];
+  },
+  enabled: !!user,
+  staleTime: 5000, // Evita refetch troppo frequenti
+});
+
+// Reset quando user cambia (logout/login)
+useEffect(() => {
+  if (!user) {
+    setSelectedId(null);
+    setHasInitialized(false);
+  }
+}, [user]);
+
+// Auto-selezione robusta
+useEffect(() => {
+  // Non eseguire durante loading o fetching
+  if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
+  if (portfolios.length === 0) return;
+  
+  // Se già inizializzato e selezione valida, non fare nulla
+  if (hasInitialized && selectedId && portfolios.some(p => p.id === selectedId)) {
+    return;
+  }
+  
+  // Verifica se ID in localStorage esiste
+  const savedId = localStorage.getItem(SELECTED_PORTFOLIO_KEY);
+  const savedExists = savedId && portfolios.some(p => p.id === savedId);
+  
+  if (savedExists) {
+    if (selectedId !== savedId) {
+      setSelectedId(savedId);
+    }
+  } else {
+    // Fallback: primo della lista (già ordinata per last_updated DESC)
+    const fallbackId = portfolios[0].id;
+    setSelectedId(fallbackId);
+    localStorage.setItem(SELECTED_PORTFOLIO_KEY, fallbackId);
+  }
+  
+  if (!hasInitialized) {
+    setHasInitialized(true);
+  }
+}, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized]);
+```
+
+---
+
+## Flusso Corretto Dopo le Modifiche
 
 ```text
-FLUSSO ATTUALE:
-  inferredTicker → fetchSectorWithAI()
-
-FLUSSO CORRETTO:
-  inferredTicker → Query DB per ticker → se trovato, usa quello
-                                       → altrimenti, fetchSectorWithAI()
+1. App si carica
+   │
+2. localStorage.getItem('selectedPortfolioId') → "portfolio-A"
+   │
+3. React Query inizia fetch (isLoading = true)
+   │
+4. useEffect: isLoading = true → RETURN (nessuna azione)
+   │
+5. React Query completa fetch (isLoading = false, portfolios = [...])
+   │
+6. useEffect esegue:
+   │  - hasInitialized = false
+   │  - savedId = "portfolio-A"
+   │  - portfolios.some(p => p.id === "portfolio-A") → TRUE
+   │  - setSelectedId("portfolio-A") ✓
+   │  - setHasInitialized(true)
+   │
+7. Eventuali refetch successivi:
+   │  - hasInitialized = true
+   │  - selectedId = "portfolio-A" esiste nella lista
+   │  → RETURN (nessuna azione) ✓
 ```
-
----
-
-## Parte 3: Override Manuale - UI (Solo Admin)
-
-### Nuovi Componenti
-
-| File | Descrizione |
-|------|-------------|
-| `src/components/risk/SectorOverrideDialog.tsx` | Dialog modale per selezionare nuovo settore GICS |
-| `src/hooks/useSectorOverride.ts` | Hook per salvare override su `isin_mappings` |
-
-### Modifiche a Componenti Esistenti
-
-| File | Modifica |
-|------|----------|
-| `src/components/risk/SectorAllocationView.tsx` | Aggiungere icona "modifica" (Pencil) accanto a ogni strumento - **visibile solo se `isAdmin`** |
-| `src/pages/RiskAnalyzer.tsx` | Passare `isAdmin` e callback refresh a `SectorAllocationView` |
-| `src/hooks/useSectorMappings.ts` | Aggiungere metodo `invalidateAndRefetch()` per forzare refresh dopo modifica |
-
-### Props Aggiuntive per SectorAllocationView
-
-```typescript
-interface SectorAllocationViewProps {
-  // ... props esistenti
-  isAdmin: boolean;
-  onSectorOverride?: (instrument: InstrumentInfo, newSector: string) => Promise<void>;
-  onRefreshMappings?: () => void;
-}
-```
-
----
-
-## Parte 4: Logica di Salvataggio Override
-
-### Strumenti con ISIN (azioni dirette, ETF)
-```typescript
-await supabase
-  .from('isin_mappings')
-  .upsert({
-    isin: instrument.isin,
-    ticker: instrument.ticker || 'UNKNOWN',
-    sector: newSector,
-    source: 'manual',
-    last_verified_at: new Date().toISOString()
-  }, { onConflict: 'isin' });
-```
-
-### Strumenti senza ISIN (derivati)
-Creare un ISIN sintetico basato sul ticker:
-```typescript
-const syntheticIsin = `TICKER:${ticker.toUpperCase()}`;
-await supabase
-  .from('isin_mappings')
-  .upsert({
-    isin: syntheticIsin,
-    ticker: ticker.toUpperCase(),
-    sector: newSector,
-    source: 'manual',
-    last_verified_at: new Date().toISOString()
-  }, { onConflict: 'isin' });
-```
-
----
-
-## Parte 5: Lookup Aggiornato per ISIN Sintetici
-
-### Modifica a useSectorMappings.ts
-
-Quando si cercano i mapping per derivati, cercare anche gli ISIN sintetici:
-
-```typescript
-// Per ogni nome derivativo, costruire ISIN sintetico
-const tickerIsins = derivativeNames.map(name => {
-  const ticker = extractTickerFromName(name);
-  return ticker ? `TICKER:${ticker.toUpperCase()}` : null;
-}).filter(Boolean);
-
-// Query unica con tutti gli ISIN (reali + sintetici)
-const allIsins = [...realIsins, ...tickerIsins];
-```
-
----
-
-## File da Modificare/Creare
-
-| File | Azione | Descrizione |
-|------|--------|-------------|
-| `supabase/functions/update-prices-cron/index.ts` | Modifica | Fix GOOGL/GOOG + controllo DB prima di AI |
-| `src/components/risk/SectorOverrideDialog.tsx` | **Nuovo** | Dialog per override settore |
-| `src/hooks/useSectorOverride.ts` | **Nuovo** | Hook per CRUD override |
-| `src/components/risk/SectorAllocationView.tsx` | Modifica | Icona edit (solo admin) + dialog |
-| `src/pages/RiskAnalyzer.tsx` | Modifica | Passare `isAdmin` a SectorAllocationView |
-| `src/hooks/useSectorMappings.ts` | Modifica | Supportare lookup ISIN sintetici + refresh |
-
----
-
-## UX - Vista Sector Allocation (Admin)
-
-```text
-┌────────────────────────────────────────────────────────────────┐
-│ ▼ Technology                                   [15] 45.2% €123K│
-├────────────────────────────────────────────────────────────────┤
-│   📈 NVIDIA CORP                                  €50,000   ✏️ │
-│   📈 ALPHABET (PUT 180)                           €30,000   ✏️ │
-│   📊 iShares Technology ETF [ETF]                 €23,000   ✏️ │
-└────────────────────────────────────────────────────────────────┘
-        ↑                                                     ↑
-   Icona tipo asset                               Solo se isAdmin
-```
-
-### Dialog Override (Solo Admin)
-
-```text
-┌─────────────────────────────────────────────┐
-│  Modifica Settore                       ✕   │
-├─────────────────────────────────────────────┤
-│                                             │
-│  Strumento: ALPHABET (PUT 180)              │
-│  Settore attuale: Communication Services    │
-│                                             │
-│  Nuovo settore:                             │
-│  ┌─────────────────────────────────────┐    │
-│  │ Technology                        ▼ │    │
-│  └─────────────────────────────────────┘    │
-│                                             │
-│  ⓘ La modifica sarà salvata nella cache    │
-│    globale e visibile a tutti gli utenti   │
-│                                             │
-│           [Annulla]  [Salva]                │
-└─────────────────────────────────────────────┘
-```
-
----
-
-## Controllo Accesso Admin
-
-Il sistema già dispone di `useAuth()` con `isAdmin` verificato lato server tramite la tabella `user_roles`:
-
-```typescript
-// In RiskAnalyzer.tsx
-const { isAdmin } = useAuth();
-
-<SectorAllocationView 
-  {...otherProps}
-  isAdmin={isAdmin}
-/>
-```
-
-```typescript
-// In SectorAllocationView.tsx
-{isAdmin && (
-  <Button variant="ghost" size="icon" onClick={() => openOverrideDialog(instrument)}>
-    <Pencil className="w-3.5 h-3.5" />
-  </Button>
-)}
-```
-
----
-
-## Sicurezza
-
-- **Controllo UI**: L'icona di modifica viene mostrata solo se `isAdmin === true`
-- **Controllo DB**: La tabella `isin_mappings` ha RLS policy che permette scritture solo agli admin:
-  ```sql
-  Policy: "Admins can manage isin mappings"
-  Command: ALL
-  Using: has_role(auth.uid(), 'admin')
-  ```
-- **Nessun rischio di privilege escalation**: Lo stato `isAdmin` viene verificato lato server dalla tabella `user_roles`, non da localStorage
 
 ---
 
 ## Note Tecniche
 
-1. **Priorità mapping**: `manual` > `yahoo_search` > `ai` > `unknown`
-2. **Cache globale**: Tutti gli utenti vedono le stesse classificazioni settoriali
-3. **Persistenza**: Override salvati in Supabase, non in localStorage
-4. **Lista settori GICS**: Stessa utilizzata in `SectorMappingManager.tsx` (Admin Panel)
-5. **Refresh automatico**: Dopo ogni override, i mapping vengono ricaricati per aggiornare la UI
+1. **staleTime: 5000**: Riduce refetch inutili nei primi 5 secondi dopo il caricamento
+2. **Ordinamento per last_updated**: Il fallback ora seleziona il portfolio usato più di recente
+3. **hasInitialized**: Previene loop e race condition
+4. **Reset su logout**: Evita conflitti tra sessioni di utenti diversi
+5. **Controllo isFetching**: Distingue tra loading iniziale e background refetch
 
