@@ -1,105 +1,140 @@
 
-# Piano: Aggiungere Tooltip Esplicativi ai Titoli del Carousel Risk Analyzer
+# Piano: Aggiungere Percentuali all'Equity Exposure
 
 ## Obiettivo
 
-Aggiungere un'icona informativa (i) accanto al titolo di ogni vista nel carousel del Risk Analyzer, con un tooltip che spieghi come viene calcolato il rischio per quella categoria.
+Implementare due miglioramenti nella vista Equity Exposure del Risk Analyzer:
 
-## Testi dei Tooltip
+1. **Card Principale**: Mostrare la percentuale del rischio totale rispetto al valore degli asset del portafoglio (grandTotal / Valore Asset Portfolio × 100)
 
-| Vista | Testo Tooltip |
-|-------|---------------|
-| Equity Exposure | Le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie e calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il totale dei premi pagati. |
-| Currency Exposure | (stesso testo) |
-| Sector Allocation | (stesso testo) |
+2. **Barra Naked PUT**: Aggiungere una percentuale accanto al valore del rischio Naked PUT che indica il rapporto con il valore totale dei Bond (totalNakedPutRisk / totalBondRisk × 100), con un tooltip esplicativo
+
+---
+
+## Analisi Tecnica
+
+### Dati Disponibili
+
+Dall'analisi di `useRiskAnalysis.ts` e `riskCalculator.ts`:
+
+- `grandTotal`: Somma di tutti i rischi (disponibile in analysis)
+- `totalBondRisk`: Rischio totale obbligazioni (disponibile in analysis)
+- `totalNakedPutRisk`: Rischio Naked PUT (disponibile in analysis)
+
+Dall'analisi di `usePortfolio.ts`:
+
+- Il valore totale degli asset (esclusi derivati) e calcolato in `summary.totalValue`
+
+### Problema
+
+Attualmente `EquityExposureView` riceve solo l'oggetto `analysis: RiskAnalysis`. Per calcolare la percentuale rispetto al valore degli asset del portafoglio, e necessario passare anche il valore totale del portafoglio.
 
 ---
 
 ## Implementazione
 
-### File da Modificare
+### 1. Modificare l'interfaccia di EquityExposureView
 
-`src/components/risk/RiskViewModeSelector.tsx`
-
-### Modifiche
-
-1. **Import del componente Tooltip** - Aggiungere gli import necessari da `@/components/ui/tooltip` e l'icona `Info` da lucide-react
-
-2. **Aggiungere il tooltip** - Posizionare l'icona (i) accanto al testo "Vista: [Nome Vista]" con il tooltip esplicativo
-
-### Codice Risultante
+File: `src/components/risk/EquityExposureView.tsx`
 
 ```typescript
-import { ChevronLeft, ChevronRight, Info } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-
-export type RiskViewMode = 'equity' | 'currency' | 'sector';
-
-// ... existing code ...
-
-const RISK_CALCULATION_TOOLTIP = 
-  "Le azioni singole sono calcolate al netto delle protezioni (Long PUT). " +
-  "Il rischio Strategie e calcolato come il max loss di ogni strategia. " +
-  "Le Leap Call sono calcolate come il totale dei premi pagati.";
-
-export function RiskViewModeSelector({ viewMode, onViewModeChange }: RiskViewModeSelectorProps) {
-  // ... existing code ...
-
-  return (
-    <div className="flex items-center justify-center gap-4 mb-6">
-      {/* ... chevron left button ... */}
-      
-      <div className="flex items-center gap-3">
-        {/* ... dots ... */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm font-medium min-w-[140px] text-center">
-            Vista: {VIEW_LABELS[viewMode]}
-          </span>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button 
-                  className="p-0.5 rounded-full hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Info sul calcolo del rischio"
-                >
-                  <Info className="w-4 h-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-xs text-sm">
-                <p>{RISK_CALCULATION_TOOLTIP}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
-      </div>
-      
-      {/* ... chevron right button ... */}
-    </div>
-  );
+interface EquityExposureViewProps {
+  analysis: RiskAnalysis;
+  portfolioTotalValue?: number;  // Nuovo: valore totale asset portafoglio
 }
+```
+
+### 2. Aggiungere la percentuale nella Card Principale
+
+Sotto "Somma di tutte le categorie di rischio", aggiungere:
+
+```typescript
+// Nel CardContent della card principale
+<div className="text-xs text-muted-foreground mt-1">
+  Somma di tutte le categorie di rischio
+</div>
+{portfolioTotalValue && portfolioTotalValue > 0 && (
+  <div className="text-xs text-muted-foreground mt-0.5">
+    ({((grandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
+  </div>
+)}
+```
+
+### 3. Aggiungere percentuale Naked PUT vs Bond
+
+Modificare l'array `riskCategories` per includere una percentuale opzionale vs bond:
+
+```typescript
+const nakedPutVsBondPct = analysis.totalBondRisk > 0 
+  ? (analysis.totalNakedPutRisk / analysis.totalBondRisk) * 100 
+  : null;
+```
+
+Nel rendering della barra Naked PUT, aggiungere accanto al valore:
+
+```typescript
+// Per la categoria Naked PUT, aggiungere dopo il valore:
+{cat.label === 'Rischio Naked PUT' && nakedPutVsBondPct !== null && (
+  <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="text-xs text-red-400 ml-2 cursor-help">
+          [{nakedPutVsBondPct.toFixed(0)}% vs Bond]
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-sm">
+        <p>Percentuale del rischio Naked PUT rispetto al valore totale delle obbligazioni in portafoglio.</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+)}
+```
+
+### 4. Passare portfolioTotalValue da RiskAnalyzer
+
+File: `src/pages/RiskAnalyzer.tsx`
+
+Aggiungere l'import di `usePortfolio` e passare il valore:
+
+```typescript
+// Aggiungere in RiskAnalyzer:
+const { summary } = usePortfolio();
+
+// Nel rendering:
+<EquityExposureView 
+  analysis={analysis} 
+  portfolioTotalValue={summary?.totalValue} 
+/>
 ```
 
 ---
 
 ## Risultato Visivo
 
+### Card Principale
+
 ```
-    [<]  ●○○  Vista: Equity Exposure (i)  [>]
+Esposizione Totale in Equity e Commodities (i)
+€ 1.234.567
+Somma di tutte le categorie di rischio
+(75.3% del valore asset)
 ```
 
-L'icona (i) apparira subito dopo il nome della vista. Al passaggio del mouse, mostrera il tooltip con la spiegazione del calcolo del rischio.
+### Barra Naked PUT
+
+```
+Rischio Naked PUT         € 45.000 (3.6%) [120% vs Bond]
+Strike × Contratti × 100
+[████████                    ]
+```
+
+Il testo "[120% vs Bond]" appare in rosso chiaro e al passaggio del mouse mostra il tooltip: "Percentuale del rischio Naked PUT rispetto al valore totale delle obbligazioni in portafoglio."
 
 ---
 
-## Note Tecniche
+## File da Modificare
 
-- Il tooltip utilizza i componenti shadcn/ui gia presenti nel progetto (`@/components/ui/tooltip`)
-- L'icona `Info` proviene da lucide-react (gia installato)
-- Il testo del tooltip e identico per tutte e tre le viste (Equity, Currency, Sector)
-- `max-w-xs` sul TooltipContent garantisce che il testo vada a capo correttamente
+| File | Modifiche |
+|------|-----------|
+| `src/components/risk/EquityExposureView.tsx` | Aggiungere prop `portfolioTotalValue`, percentuale nella card principale, percentuale vs bond per Naked PUT con tooltip |
+| `src/pages/RiskAnalyzer.tsx` | Importare `usePortfolio`, passare `summary?.totalValue` a EquityExposureView |
