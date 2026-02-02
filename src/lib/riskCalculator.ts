@@ -23,7 +23,7 @@ export interface StockRiskDetail {
   stockPrice: number;           // Prezzo azione
   protectionStrike: number | null;
   protectionContracts: number;
-  protectionPMC: number | null; // PMC (avg cost) delle protezioni
+  protectionOptionPrice: number | null; // Prezzo opzione (mkt se disponibile, fallback avg_cost)
   protectedValue: number;       // Valore protetto in valuta originale
   riskOriginal: number;         // Rischio in valuta originale
   riskEUR: number;              // Rischio convertito in EUR
@@ -223,9 +223,9 @@ export function calculateStockRisk(
     const contractsFromPositions = additionalPuts.reduce((sum, p) => sum + (p.quantity || 0), 0);
     const protectionContracts = contractsFromClassified + contractsFromPositions;
     
-    // Calculate weighted average strike and PMC (if multiple PUTs at different strikes)
+    // Calculate weighted average strike and option price (market if available)
     let avgStrike = 0;
-    let avgPMC = 0;
+    let avgOptionPrice = 0;
     if (protectionContracts > 0) {
       const classifiedWeightedSum = classifiedPuts.reduce((sum, lp) => 
         sum + (lp.option.strike_price || 0) * lp.contracts, 0
@@ -235,14 +235,16 @@ export function calculateStockRisk(
       );
       avgStrike = (classifiedWeightedSum + positionsWeightedSum) / protectionContracts;
       
-      // Calculate weighted average PMC
-      const classifiedPMCWeightedSum = classifiedPuts.reduce((sum, lp) => 
-        sum + (lp.option.avg_cost || 0) * lp.contracts, 0
-      );
-      const positionsPMCWeightedSum = additionalPuts.reduce((sum, p) => 
-        sum + (p.avg_cost || 0) * (p.quantity || 0), 0
-      );
-      avgPMC = (classifiedPMCWeightedSum + positionsPMCWeightedSum) / protectionContracts;
+      // Weighted average option price: prefer current_price, fallback avg_cost
+      const classifiedPriceWeightedSum = classifiedPuts.reduce((sum, lp) => {
+        const px = (lp.option.current_price ?? lp.option.avg_cost ?? 0);
+        return sum + px * lp.contracts;
+      }, 0);
+      const positionsPriceWeightedSum = additionalPuts.reduce((sum, p) => {
+        const px = (p.current_price ?? p.avg_cost ?? 0);
+        return sum + px * (p.quantity || 0);
+      }, 0);
+      avgOptionPrice = (classifiedPriceWeightedSum + positionsPriceWeightedSum) / protectionContracts;
     }
     
     // Calculate protected vs unprotected shares
@@ -266,7 +268,7 @@ export function calculateStockRisk(
       stockPrice,
       protectionStrike: avgStrike > 0 ? avgStrike : null,
       protectionContracts,
-      protectionPMC: avgPMC > 0 ? avgPMC : null,
+      protectionOptionPrice: avgOptionPrice > 0 ? avgOptionPrice : null,
       protectedValue,
       riskOriginal,
       riskEUR,

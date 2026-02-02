@@ -137,9 +137,9 @@ export function calculateCurrencyExposure(
     });
     
     // Add protection as separate derivative entry (if includeDerivatives is ON and has protection)
-    if (includeDerivatives && stock.hasProtection && stock.protectionContracts > 0 && stock.protectionPMC) {
-      // Protection value = contracts × PMC × 100 (premium paid for the protection)
-      const protectionValueOriginal = stock.protectionContracts * stock.protectionPMC * 100;
+    if (includeDerivatives && stock.hasProtection && stock.protectionContracts > 0 && stock.protectionOptionPrice) {
+      // Protection value = contracts × option price × 100 (mark-to-market, fallback avg_cost)
+      const protectionValueOriginal = stock.protectionContracts * stock.protectionOptionPrice * 100;
       const protectionValueEUR = protectionValueOriginal / stock.exchangeRate;
       
       exposure.breakdown.protections += protectionValueEUR;
@@ -151,7 +151,7 @@ export function calculateCurrencyExposure(
         riskEUR: protectionValueEUR,
         riskOriginal: protectionValueOriginal,
         category: 'protections',
-        details: `PUT ${stock.protectionStrike?.toFixed(0) || '?'} × ${stock.protectionContracts} ctr @ ${stock.protectionPMC.toFixed(2)}`
+        details: `PUT ${stock.protectionStrike?.toFixed(0) || '?'} × ${stock.protectionContracts} ctr @ ${stock.protectionOptionPrice.toFixed(2)}`
       });
     }
   }

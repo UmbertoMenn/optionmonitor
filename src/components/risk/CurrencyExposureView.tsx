@@ -37,6 +37,8 @@ const CATEGORY_CONFIG = {
   strategies: { label: 'Strategie', icon: Layers, colorClass: 'text-purple-500' },
 };
 
+type CategoryKey = keyof typeof CATEGORY_CONFIG;
+
 function InstrumentRow({ instrument }: { instrument: InstrumentDetail }) {
   const config = CATEGORY_CONFIG[instrument.category];
   const Icon = config.icon;
@@ -377,41 +379,18 @@ export function CurrencyExposureView({
                   </AccordionTrigger>
                   <AccordionContent className="px-4 pb-4">
                     <Accordion type="multiple" className="space-y-1">
-                      <CategoryBreakdown 
-                        instruments={curr.instruments} 
-                        category="stocks" 
-                        total={curr.breakdown.stocks} 
-                      />
-                      <CategoryBreakdown 
-                        instruments={curr.instruments} 
-                        category="bonds" 
-                        total={curr.breakdown.bonds} 
-                      />
-                      <CategoryBreakdown 
-                        instruments={curr.instruments} 
-                        category="commodities" 
-                        total={curr.breakdown.commodities} 
-                      />
-                      <CategoryBreakdown 
-                        instruments={curr.instruments} 
-                        category="protections" 
-                        total={curr.breakdown.protections} 
-                      />
-                      <CategoryBreakdown 
-                        instruments={curr.instruments} 
-                        category="nakedPuts" 
-                        total={curr.breakdown.nakedPuts} 
-                      />
-                      <CategoryBreakdown 
-                        instruments={curr.instruments} 
-                        category="leapCalls" 
-                        total={curr.breakdown.leapCalls} 
-                      />
-                      <CategoryBreakdown 
-                        instruments={curr.instruments} 
-                        category="strategies" 
-                        total={curr.breakdown.strategies} 
-                      />
+                      {(Object.keys(CATEGORY_CONFIG) as CategoryKey[])
+                        .map((key) => ({ key, total: curr.breakdown[key] }))
+                        .filter((x) => Number.isFinite(x.total) && x.total > 0)
+                        .sort((a, b) => b.total - a.total)
+                        .map(({ key, total }) => (
+                          <CategoryBreakdown
+                            key={key}
+                            instruments={curr.instruments}
+                            category={key}
+                            total={total}
+                          />
+                        ))}
                     </Accordion>
                   </AccordionContent>
                 </AccordionItem>
