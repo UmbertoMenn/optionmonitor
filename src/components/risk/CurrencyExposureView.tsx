@@ -7,7 +7,7 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink, AlertTriangle, Landmark, Info } from 'lucide-react';
+import { Coins, TrendingUp, BarChart3, TrendingDown, DollarSign, Layers, ExternalLink, AlertTriangle, Landmark, Info, ShieldCheck } from 'lucide-react';
 import { CurrencyExposure, getCurrencyColor, InstrumentDetail } from '@/lib/currencyExposure';
 import { formatEUR, formatCurrency } from '@/lib/formatters';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,7 @@ const CATEGORY_CONFIG = {
   stocks: { label: 'Stocks & ETF', icon: TrendingUp, colorClass: 'text-blue-500' },
   bonds: { label: 'Obbligazioni', icon: Landmark, colorClass: 'text-cyan-500' },
   commodities: { label: 'Commodities', icon: BarChart3, colorClass: 'text-orange-500' },
+  protections: { label: 'Protezioni (Long PUT)', icon: ShieldCheck, colorClass: 'text-emerald-500' },
   nakedPuts: { label: 'Naked PUT', icon: TrendingDown, colorClass: 'text-red-500' },
   leapCalls: { label: 'Leap Call', icon: DollarSign, colorClass: 'text-amber-500' },
   strategies: { label: 'Strategie', icon: Layers, colorClass: 'text-purple-500' },
@@ -200,7 +201,7 @@ export function CurrencyExposureView({
         totalRisk: otherTotalRisk,
         totalRiskOriginal: otherTotalRisk,
         percentage: otherPercentage,
-        breakdown: existingOther?.breakdown || { stocks: 0, bonds: 0, commodities: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
+        breakdown: existingOther?.breakdown || { stocks: 0, bonds: 0, commodities: 0, protections: 0, nakedPuts: 0, leapCalls: 0, strategies: 0 },
         instruments: existingOther?.instruments || [],
         chartKey: 'OTHER-grouped'
       }
@@ -390,6 +391,11 @@ export function CurrencyExposureView({
                         instruments={curr.instruments} 
                         category="commodities" 
                         total={curr.breakdown.commodities} 
+                      />
+                      <CategoryBreakdown 
+                        instruments={curr.instruments} 
+                        category="protections" 
+                        total={curr.breakdown.protections} 
                       />
                       <CategoryBreakdown 
                         instruments={curr.instruments} 
