@@ -1,6 +1,7 @@
 import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { RiskAnalysis } from './riskCalculator';
 import { SectorMapping } from '@/hooks/useSectorMappings';
+import { normalizeForMatching, getCanonicalKey, SPECIAL_ALIASES } from './derivativeStrategies';
 
 // Sector colors for charts
 export const SECTOR_COLORS: Record<string, string> = {
@@ -151,6 +152,22 @@ export interface TopHolding {
     source: string;
     exposure: number;
     isDirectHolding: boolean;
+    percentage?: number;
+  }>;
+}
+
+// Interface for Consolidated Top 10 Holdings
+export interface ConsolidatedHolding {
+  name: string;
+  etfExposure: number;           // Exposure via ETF (€)
+  stockRisk: number;             // Direct stock risk WITHOUT protections (€)
+  stockRiskWithProtection: number; // Direct stock risk WITH protections (€)
+  nakedPutRisk: number;          // Naked PUT risk (€)
+  totalExposure: number;         // Total with/without protections (calculated based on toggle)
+  sources: Array<{
+    type: 'etf' | 'stock' | 'nakedPut';
+    name: string;
+    exposure: number;
     percentage?: number;
   }>;
 }
@@ -440,6 +457,168 @@ export function calculateTopHoldings(
       ...h,
       percentage: grandTotal > 0 ? (h.totalExposure / grandTotal) * 100 : 0,
     }))
+    .sort((a, b) => b.totalExposure - a.totalExposure)
+    .slice(0, limit);
+  
+  return result;
+}
+
+/**
+ * Normalizes holding names for matching across different sources
+ * Handles variations like "NVIDIA Corp" vs "NVDA" vs "NVIDIA CORP"
+ */
+function normalizeHoldingName(name: string): string {
+  return normalizeForMatching(name);
+}
+
+/**
+ * Checks if two holding names represent the same company
+ */
+function isSameHolding(name1: string, name2: string): boolean {
+  const norm1 = normalizeHoldingName(name1);
+  const norm2 = normalizeHoldingName(name2);
+  
+  // Direct match
+  if (norm1 === norm2) return true;
+  
+  // Check special aliases
+  const canon1 = getCanonicalKey(name1);
+  const canon2 = getCanonicalKey(name2);
+  if (canon1 && canon2 && canon1 === canon2) return true;
+  
+  // Token-based matching
+  const tokens1 = norm1.split(' ').filter(t => t.length >= 2);
+  const tokens2 = norm2.split(' ').filter(t => t.length >= 2);
+  
+  // For single-word names, require exact match of the main token
+  if (tokens1.length === 1 || tokens2.length === 1) {
+    const shortToken = tokens1.length === 1 ? tokens1[0] : tokens2[0];
+    const otherTokens = tokens1.length === 1 ? tokens2 : tokens1;
+    return otherTokens.some(t => t === shortToken || t.includes(shortToken) || shortToken.includes(t));
+  }
+  
+  // For multi-word names, require significant overlap
+  const shared = tokens1.filter(t => tokens2.includes(t)).length;
+  const minTokens = Math.min(tokens1.length, tokens2.length);
+  return shared >= Math.max(1, minTokens - 1);
+}
+
+export interface ConsolidatedTopHoldingsOptions {
+  includeProtections: boolean;
+}
+
+/**
+ * Calculates consolidated top holdings aggregating exposure from:
+ * 1. ETF holdings (top 10 from each ETF, weighted by ETF value)
+ * 2. Direct stock positions (with or without protection based on toggle)
+ * 3. Naked PUT positions
+ */
+export function calculateConsolidatedTopHoldings(
+  analysis: RiskAnalysis,
+  etfAllocations: Record<string, ETFAllocation>,
+  options: ConsolidatedTopHoldingsOptions,
+  limit: number = 10
+): ConsolidatedHolding[] {
+  const holdingsMap = new Map<string, ConsolidatedHolding>();
+  
+  // Pattern per riconoscere ETF
+  const ETF_PATTERN = /ETF|UCITS|ISHARES|ISHSIII|ISHSIV|ISHSV|ISHSVII|VANGUARD|VNG|SPDR|SSG|LYXOR|AMUNDI|XTRACKERS|XTRK|INVESCO|VANECK|WISDOMTREE|WTR|UBS ETF|HSBC ETF|FRANKLIN/i;
+  
+  const getOrCreateHolding = (name: string): ConsolidatedHolding => {
+    // Check if we already have this holding under a different name variation
+    for (const [existingName, holding] of holdingsMap.entries()) {
+      if (isSameHolding(name, existingName)) {
+        return holding;
+      }
+    }
+    
+    // Create new holding
+    const cleanName = name.trim();
+    const holding: ConsolidatedHolding = {
+      name: cleanName,
+      etfExposure: 0,
+      stockRisk: 0,
+      stockRiskWithProtection: 0,
+      nakedPutRisk: 0,
+      totalExposure: 0,
+      sources: [],
+    };
+    holdingsMap.set(cleanName, holding);
+    return holding;
+  };
+  
+  // 1. Add ETF holdings (top 10 from each ETF)
+  for (const stock of analysis.stockDetails) {
+    const isETF = ETF_PATTERN.test(stock.underlying);
+    
+    if (isETF && stock.isin && etfAllocations[stock.isin]) {
+      const allocation = etfAllocations[stock.isin];
+      const topHoldings = allocation.topHoldings || [];
+      
+      // Take top 10 holdings from each ETF
+      for (const etfHolding of topHoldings.slice(0, 10)) {
+        if (etfHolding.percentage > 0) {
+          const exposure = stock.riskEUR * (etfHolding.percentage / 100);
+          const holding = getOrCreateHolding(etfHolding.name);
+          
+          holding.etfExposure += exposure;
+          holding.sources.push({
+            type: 'etf',
+            name: allocation.name || stock.underlying,
+            exposure,
+            percentage: etfHolding.percentage,
+          });
+        }
+      }
+    }
+  }
+  
+  // 2. Add direct stock risk
+  for (const stock of analysis.stockDetails) {
+    const isETF = ETF_PATTERN.test(stock.underlying);
+    
+    if (!isETF) {
+      const holding = getOrCreateHolding(stock.underlying);
+      
+      // stockValue is full value, riskEUR is value with protections
+      holding.stockRisk += stock.stockValue / stock.exchangeRate;
+      holding.stockRiskWithProtection += stock.riskEUR;
+      
+      holding.sources.push({
+        type: 'stock',
+        name: 'Diretto',
+        exposure: options.includeProtections ? stock.riskEUR : (stock.stockValue / stock.exchangeRate),
+      });
+    }
+  }
+  
+  // 3. Add Naked PUT risk
+  for (const np of analysis.nakedPutDetails) {
+    const holding = getOrCreateHolding(np.underlying);
+    
+    holding.nakedPutRisk += np.riskEUR;
+    holding.sources.push({
+      type: 'nakedPut',
+      name: `PUT ${np.strike}`,
+      exposure: np.riskEUR,
+    });
+  }
+  
+  // Calculate total exposure based on toggle
+  for (const holding of holdingsMap.values()) {
+    const stockPart = options.includeProtections 
+      ? holding.stockRiskWithProtection 
+      : holding.stockRisk;
+    
+    holding.totalExposure = holding.etfExposure + stockPart + holding.nakedPutRisk;
+    
+    // Sort sources by exposure
+    holding.sources.sort((a, b) => b.exposure - a.exposure);
+  }
+  
+  // Sort by total exposure and take top N
+  const result = Array.from(holdingsMap.values())
+    .filter(h => h.totalExposure > 0)
     .sort((a, b) => b.totalExposure - a.totalExposure)
     .slice(0, limit);
   

@@ -22,7 +22,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { calculateCurrencyExposure } from '@/lib/currencyExposure';
 import { applyETFDecomposition } from '@/lib/etfCurrencyDecomposition';
-import { calculateSectorExposure, calculateTopHoldings } from '@/lib/sectorExposure';
+import { calculateSectorExposure } from '@/lib/sectorExposure';
 
 export function RiskAnalyzer() {
   const { signOut, isAdmin } = useAuth();
@@ -153,10 +153,6 @@ export function RiskAnalyzer() {
     return calculateSectorExposure(analysis, allocations, { includeDerivatives, sectorMappings });
   }, [analysis, allocations, includeDerivatives, sectorMappings]);
   
-  // Calculate top holdings
-  const topHoldings = useMemo(() => {
-    return calculateTopHoldings(analysis, allocations, 20);
-  }, [analysis, allocations]);
   
   
   // Check if any ETF data is still loading
@@ -225,7 +221,12 @@ export function RiskAnalyzer() {
             
             {/* Dynamic Content Based on View Mode */}
             {viewMode === 'equity' ? (
-              <EquityExposureView analysis={analysis} portfolioTotalValue={summary?.totalValue} />
+              <EquityExposureView 
+                analysis={analysis} 
+                portfolioTotalValue={summary?.totalValue}
+                etfAllocations={allocations}
+                isLoadingETFData={isETFDataLoading}
+              />
             ) : viewMode === 'currency' ? (
               <ErrorBoundary title="Errore nella vista Currency Exposure">
                 <CurrencyExposureView 
@@ -244,7 +245,6 @@ export function RiskAnalyzer() {
               <ErrorBoundary title="Errore nella vista Sector Allocation">
                 <SectorAllocationView 
                   sectorExposure={sectorExposure}
-                  topHoldings={topHoldings}
                   grandTotal={sectorExposure.reduce((sum, s) => sum + s.totalRisk, 0)}
                   isLoadingETFData={isETFDataLoading}
                   etfCount={etfIsins.length}

@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { 
   Accordion, 
@@ -12,7 +13,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
-import { Info } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Info, Loader2 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { 
   ShieldAlert, 
@@ -21,17 +24,29 @@ import {
   DollarSign, 
   BarChart3, 
   Shield, 
-  AlertTriangle 
+  AlertTriangle,
+  Layers
 } from 'lucide-react';
 import { RiskAnalysis } from '@/lib/riskCalculator';
 import { formatEUR, formatNumber } from '@/lib/formatters';
+import { ETFAllocation } from '@/hooks/useETFAllocations';
+import { calculateConsolidatedTopHoldings } from '@/lib/sectorExposure';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
   portfolioTotalValue?: number;
+  etfAllocations?: Record<string, ETFAllocation>;
+  isLoadingETFData?: boolean;
 }
 
-export function EquityExposureView({ analysis, portfolioTotalValue }: EquityExposureViewProps) {
+export function EquityExposureView({ 
+  analysis, 
+  portfolioTotalValue,
+  etfAllocations = {},
+  isLoadingETFData = false,
+}: EquityExposureViewProps) {
+  const [includeProtections, setIncludeProtections] = useState(true);
+  
   const {
     totalStockRisk,
     totalETFRisk,
@@ -48,6 +63,11 @@ export function EquityExposureView({ analysis, portfolioTotalValue }: EquityExpo
     leapCallDetails,
     strategyDetails
   } = analysis;
+  
+  // Calculate consolidated top 10 holdings
+  const consolidatedHoldings = useMemo(() => {
+    return calculateConsolidatedTopHoldings(analysis, etfAllocations, { includeProtections }, 10);
+  }, [analysis, etfAllocations, includeProtections]);
 
   const getPercentage = (value: number) => grandTotal > 0 ? (value / grandTotal) * 100 : 0;
   
@@ -677,6 +697,114 @@ export function EquityExposureView({ analysis, portfolioTotalValue }: EquityExpo
           </AccordionItem>
         )}
       </Accordion>
+      
+      {/* Top 10 Holdings Consolidate */}
+      <Card className="border-border bg-card">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Layers className="w-5 h-5 text-primary" />
+              Top 10 Holdings Consolidate
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Switch 
+                id="include-protections"
+                checked={includeProtections}
+                onCheckedChange={setIncludeProtections}
+              />
+              <Label htmlFor="include-protections" className="text-sm text-muted-foreground cursor-pointer">
+                Includi Protezioni
+              </Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button className="p-0.5 rounded-full hover:bg-primary/20 text-primary/70 hover:text-primary transition-colors">
+                      <Info className="w-4 h-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-sm">
+                    <p>Quando attivo, il rischio stock è calcolato al netto delle protezioni PUT. Quando disattivo, mostra il valore pieno.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            Aggregazione esposizione: ETF holdings + Stock diretti + Naked PUT
+          </p>
+        </CardHeader>
+        <CardContent>
+          {isLoadingETFData ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+              <span>Caricamento dati ETF...</span>
+            </div>
+          ) : consolidatedHoldings.length === 0 ? (
+            <div className="text-center text-muted-foreground py-8">
+              Nessun holding consolidato disponibile
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {consolidatedHoldings.map((holding, index) => {
+                const hasETF = holding.etfExposure > 0;
+                const hasStock = (includeProtections ? holding.stockRiskWithProtection : holding.stockRisk) > 0;
+                const hasNakedPut = holding.nakedPutRisk > 0;
+                const stockValue = includeProtections ? holding.stockRiskWithProtection : holding.stockRisk;
+                
+                return (
+                  <div
+                    key={holding.name}
+                    className="p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-sm font-bold text-muted-foreground w-6 text-right flex-shrink-0">
+                          {index + 1}.
+                        </span>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="font-medium truncate">{holding.name}</span>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {hasETF && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-cyan-500/10 text-cyan-500 border-cyan-500/30">
+                                ETF: {formatEUR(holding.etfExposure)}
+                              </Badge>
+                            )}
+                            {hasStock && (
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs px-1.5 py-0 h-5 ${
+                                  includeProtections && holding.stockRiskWithProtection < holding.stockRisk
+                                    ? 'bg-green-500/10 text-green-500 border-green-500/30'
+                                    : 'bg-blue-500/10 text-blue-500 border-blue-500/30'
+                                }`}
+                              >
+                                Stock: {formatEUR(stockValue)}
+                                {includeProtections && holding.stockRiskWithProtection < holding.stockRisk && (
+                                  <Shield className="w-3 h-3 ml-1" />
+                                )}
+                              </Badge>
+                            )}
+                            {hasNakedPut && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-red-500/10 text-red-500 border-red-500/30">
+                                PUT: {formatEUR(holding.nakedPutRisk)}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="font-semibold text-primary">
+                          {formatEUR(holding.totalExposure)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Empty State */}
       {!hasData && (
