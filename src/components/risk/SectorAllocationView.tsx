@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { 
@@ -10,13 +11,16 @@ import {
   AccordionTrigger 
 } from '@/components/ui/accordion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info } from 'lucide-react';
+import { Building2, TrendingUp, BarChart3, AlertTriangle, Loader2, CheckCircle2, Info, Pencil } from 'lucide-react';
 import { 
   SectorExposure, 
   TopHolding, 
-  getSectorColor 
+  getSectorColor,
+  SectorInstrument,
 } from '@/lib/sectorExposure';
 import { formatEUR } from '@/lib/formatters';
+import { SectorOverrideDialog } from './SectorOverrideDialog';
+import { SectorOverrideData } from '@/hooks/useSectorOverride';
 
 interface SectorAllocationViewProps {
   sectorExposure: SectorExposure[];
@@ -29,6 +33,8 @@ interface SectorAllocationViewProps {
   onIncludeDerivativesChange: (value: boolean) => void;
   isResolvingSectors?: boolean;
   resolvingCount?: number;
+  isAdmin?: boolean;
+  onRefreshMappings?: () => void;
 }
 
 export function SectorAllocationView({
@@ -42,7 +48,28 @@ export function SectorAllocationView({
   onIncludeDerivativesChange,
   isResolvingSectors,
   resolvingCount,
+  isAdmin = false,
+  onRefreshMappings,
 }: SectorAllocationViewProps) {
+  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
+  const [selectedInstrument, setSelectedInstrument] = useState<SectorOverrideData | null>(null);
+  
+  const handleOpenOverrideDialog = (instrument: SectorInstrument, currentSector: string) => {
+    // Extract ticker from name (e.g., "NVIDIA CORP" → "NVDA", "ALPHABET (PUT 180)" → "GOOGL")
+    const nameClean = instrument.name.replace(/\s*\([^)]*\)\s*/g, '').trim();
+    const tickerMatch = nameClean.match(/^([A-Z]{1,5})(?:\s|$)/);
+    
+    setSelectedInstrument({
+      instrumentName: instrument.name,
+      currentSector,
+      ticker: tickerMatch?.[1],
+    });
+    setOverrideDialogOpen(true);
+  };
+  
+  const handleOverrideSuccess = () => {
+    onRefreshMappings?.();
+  };
   const safeSectorExposure = sectorExposure.filter((s) => {
     return (
       typeof s.sector === 'string' &&
@@ -260,9 +287,25 @@ export function SectorAllocationView({
                             </Badge>
                           )}
                         </div>
-                        <span className="text-sm font-medium flex-shrink-0">
-                          {formatEUR(instrument.riskEUR)}
-                        </span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-sm font-medium">
+                            {formatEUR(instrument.riskEUR)}
+                          </span>
+                          {isAdmin && !instrument.isFromETFDecomposition && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenOverrideDialog(instrument, sector.sector);
+                              }}
+                              title="Modifica settore"
+                            >
+                              <Pencil className="w-3 h-3 text-muted-foreground hover:text-foreground" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     ))}
                     {sector.instruments.length > 15 && (
@@ -344,6 +387,14 @@ export function SectorAllocationView({
           )}
         </CardContent>
       </Card>
+      
+      {/* Admin Sector Override Dialog */}
+      <SectorOverrideDialog
+        open={overrideDialogOpen}
+        onOpenChange={setOverrideDialogOpen}
+        instrumentData={selectedInstrument}
+        onSuccess={handleOverrideSuccess}
+      />
     </div>
   );
 }
