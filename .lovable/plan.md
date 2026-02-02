@@ -1,202 +1,227 @@
 
-# Piano: Toggle Attivo di Default + Avvisi Commodities/Bond
 
-## Modifiche Richieste
+# Piano: Override Manuale Settori (Solo Admin) + Fix Google
 
-L'utente ha richiesto 3 modifiche:
+## Riepilogo
 
-| # | Modifica | Vista | File |
-|---|----------|-------|------|
-| 1 | Toggle "Includi Derivati" attivo di default | Risk Analyzer | `RiskAnalyzer.tsx` |
-| 2 | Avviso che le commodities sono escluse | Sector Allocation | `SectorAllocationView.tsx` |
-| 3 | Toggle "Includi Bond" + avviso se disattivato | Currency Exposure | `CurrencyExposureView.tsx`, `currencyExposure.ts` |
+Implementazione della funzionalità di override manuale dei settori dalla vista Sector Allocation, accessibile esclusivamente agli amministratori. Le modifiche vengono salvate nella tabella `isin_mappings` e condivise globalmente tra tutti gli utenti.
 
 ---
 
-## Dettaglio Implementazione
+## Parte 1: Fix Classificazione Google
 
-### 1. Toggle Derivati Attivo di Default
+### Problema
+Nella `KNOWN_SECTORS` dell'edge function, GOOGL e GOOG sono mappati su "Communication Services" (classificazione GICS ufficiale). L'utente preferisce "Technology".
 
-**File**: `src/pages/RiskAnalyzer.tsx` (linea 30)
+### Soluzione
+Modificare la mappatura statica in `update-prices-cron/index.ts`:
 
-```typescript
-// Da:
-const [includeDerivatives, setIncludeDerivatives] = useState(false);
+| File | Modifica |
+|------|----------|
+| `supabase/functions/update-prices-cron/index.ts` | Linee 114-115: Cambiare `Communication Services` in `Technology` per GOOGL e GOOG |
 
-// A:
-const [includeDerivatives, setIncludeDerivatives] = useState(true);
+---
+
+## Parte 2: Consultare DB Prima di AI per Derivati
+
+### Problema Attuale
+Quando si risolvono i settori per i nomi dei derivati (es. "GOOGLE CORP"), il sistema:
+1. Inferisce il ticker
+2. Chiama direttamente `fetchSectorWithAI()` - **senza controllare prima i mapping manuali**
+
+### Soluzione
+Prima di chiamare l'AI, verificare se esiste un mapping manuale nel database per quel ticker.
+
+| File | Modifica |
+|------|----------|
+| `supabase/functions/update-prices-cron/index.ts` | Linee 977-979: Aggiungere controllo DB prima di chiamare `fetchSectorWithAI()` |
+
+```text
+FLUSSO ATTUALE:
+  inferredTicker → fetchSectorWithAI()
+
+FLUSSO CORRETTO:
+  inferredTicker → Query DB per ticker → se trovato, usa quello
+                                       → altrimenti, fetchSectorWithAI()
 ```
 
-### 2. Avviso Commodities Escluse (Sector Allocation)
+---
 
-**File**: `src/components/risk/SectorAllocationView.tsx`
+## Parte 3: Override Manuale - UI (Solo Admin)
 
-Aggiungere un avviso sotto l'avviso derivati (sempre visibile, non controllato da toggle):
+### Nuovi Componenti
 
-```typescript
-// Dopo l'avviso derivati esistente (linea ~136)
-<div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
-  <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
-  <span className="text-xs text-blue-600 dark:text-blue-400">
-    Commodities escluse dall'analisi settoriale
-  </span>
-</div>
-```
+| File | Descrizione |
+|------|-------------|
+| `src/components/risk/SectorOverrideDialog.tsx` | Dialog modale per selezionare nuovo settore GICS |
+| `src/hooks/useSectorOverride.ts` | Hook per salvare override su `isin_mappings` |
 
-Importare `Info` da lucide-react.
+### Modifiche a Componenti Esistenti
 
-### 3. Toggle Bond + Avviso (Currency Exposure)
+| File | Modifica |
+|------|----------|
+| `src/components/risk/SectorAllocationView.tsx` | Aggiungere icona "modifica" (Pencil) accanto a ogni strumento - **visibile solo se `isAdmin`** |
+| `src/pages/RiskAnalyzer.tsx` | Passare `isAdmin` e callback refresh a `SectorAllocationView` |
+| `src/hooks/useSectorMappings.ts` | Aggiungere metodo `invalidateAndRefetch()` per forzare refresh dopo modifica |
 
-**File**: `src/components/risk/CurrencyExposureView.tsx`
-
-**3.1 Aggiungere props per bonds:**
+### Props Aggiuntive per SectorAllocationView
 
 ```typescript
-interface CurrencyExposureViewProps {
+interface SectorAllocationViewProps {
   // ... props esistenti
-  includeBonds: boolean;
-  onIncludeBondsChange: (value: boolean) => void;
+  isAdmin: boolean;
+  onSectorOverride?: (instrument: InstrumentInfo, newSector: string) => Promise<void>;
+  onRefreshMappings?: () => void;
 }
 ```
 
-**3.2 Aggiungere toggle UI:**
+---
 
-Accanto al toggle derivati, aggiungere:
+## Parte 4: Logica di Salvataggio Override
 
+### Strumenti con ISIN (azioni dirette, ETF)
 ```typescript
-<div className="flex items-center gap-2">
-  <Switch 
-    id="include-bonds"
-    checked={includeBonds}
-    onCheckedChange={onIncludeBondsChange}
-  />
-  <Label htmlFor="include-bonds" className="text-sm text-muted-foreground cursor-pointer">
-    Includi Bond
-  </Label>
-</div>
+await supabase
+  .from('isin_mappings')
+  .upsert({
+    isin: instrument.isin,
+    ticker: instrument.ticker || 'UNKNOWN',
+    sector: newSector,
+    source: 'manual',
+    last_verified_at: new Date().toISOString()
+  }, { onConflict: 'isin' });
 ```
 
-**3.3 Aggiungere avviso se bond esclusi:**
+### Strumenti senza ISIN (derivati)
+Creare un ISIN sintetico basato sul ticker:
+```typescript
+const syntheticIsin = `TICKER:${ticker.toUpperCase()}`;
+await supabase
+  .from('isin_mappings')
+  .upsert({
+    isin: syntheticIsin,
+    ticker: ticker.toUpperCase(),
+    sector: newSector,
+    source: 'manual',
+    last_verified_at: new Date().toISOString()
+  }, { onConflict: 'isin' });
+```
+
+---
+
+## Parte 5: Lookup Aggiornato per ISIN Sintetici
+
+### Modifica a useSectorMappings.ts
+
+Quando si cercano i mapping per derivati, cercare anche gli ISIN sintetici:
 
 ```typescript
-{!includeBonds && (
-  <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
-    <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
-    <span className="text-xs text-blue-600 dark:text-blue-400">
-      Obbligazioni escluse dall'analisi
-    </span>
-  </div>
+// Per ogni nome derivativo, costruire ISIN sintetico
+const tickerIsins = derivativeNames.map(name => {
+  const ticker = extractTickerFromName(name);
+  return ticker ? `TICKER:${ticker.toUpperCase()}` : null;
+}).filter(Boolean);
+
+// Query unica con tutti gli ISIN (reali + sintetici)
+const allIsins = [...realIsins, ...tickerIsins];
+```
+
+---
+
+## File da Modificare/Creare
+
+| File | Azione | Descrizione |
+|------|--------|-------------|
+| `supabase/functions/update-prices-cron/index.ts` | Modifica | Fix GOOGL/GOOG + controllo DB prima di AI |
+| `src/components/risk/SectorOverrideDialog.tsx` | **Nuovo** | Dialog per override settore |
+| `src/hooks/useSectorOverride.ts` | **Nuovo** | Hook per CRUD override |
+| `src/components/risk/SectorAllocationView.tsx` | Modifica | Icona edit (solo admin) + dialog |
+| `src/pages/RiskAnalyzer.tsx` | Modifica | Passare `isAdmin` a SectorAllocationView |
+| `src/hooks/useSectorMappings.ts` | Modifica | Supportare lookup ISIN sintetici + refresh |
+
+---
+
+## UX - Vista Sector Allocation (Admin)
+
+```text
+┌────────────────────────────────────────────────────────────────┐
+│ ▼ Technology                                   [15] 45.2% €123K│
+├────────────────────────────────────────────────────────────────┤
+│   📈 NVIDIA CORP                                  €50,000   ✏️ │
+│   📈 ALPHABET (PUT 180)                           €30,000   ✏️ │
+│   📊 iShares Technology ETF [ETF]                 €23,000   ✏️ │
+└────────────────────────────────────────────────────────────────┘
+        ↑                                                     ↑
+   Icona tipo asset                               Solo se isAdmin
+```
+
+### Dialog Override (Solo Admin)
+
+```text
+┌─────────────────────────────────────────────┐
+│  Modifica Settore                       ✕   │
+├─────────────────────────────────────────────┤
+│                                             │
+│  Strumento: ALPHABET (PUT 180)              │
+│  Settore attuale: Communication Services    │
+│                                             │
+│  Nuovo settore:                             │
+│  ┌─────────────────────────────────────┐    │
+│  │ Technology                        ▼ │    │
+│  └─────────────────────────────────────┘    │
+│                                             │
+│  ⓘ La modifica sarà salvata nella cache    │
+│    globale e visibile a tutti gli utenti   │
+│                                             │
+│           [Annulla]  [Salva]                │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## Controllo Accesso Admin
+
+Il sistema già dispone di `useAuth()` con `isAdmin` verificato lato server tramite la tabella `user_roles`:
+
+```typescript
+// In RiskAnalyzer.tsx
+const { isAdmin } = useAuth();
+
+<SectorAllocationView 
+  {...otherProps}
+  isAdmin={isAdmin}
+/>
+```
+
+```typescript
+// In SectorAllocationView.tsx
+{isAdmin && (
+  <Button variant="ghost" size="icon" onClick={() => openOverrideDialog(instrument)}>
+    <Pencil className="w-3.5 h-3.5" />
+  </Button>
 )}
 ```
 
 ---
 
-**File**: `src/pages/RiskAnalyzer.tsx`
+## Sicurezza
 
-**3.4 Gestire stato bonds:**
-
-```typescript
-const [includeBonds, setIncludeBonds] = useState(true);
-
-// Nel calcolo currencyExposure:
-const baseCurrencyExposure = useMemo(() => 
-  calculateCurrencyExposure(analysis, { includeDerivatives, includeBonds }), 
-  [analysis, includeDerivatives, includeBonds]
-);
-
-// Passare a CurrencyExposureView:
-<CurrencyExposureView 
-  // ... props esistenti
-  includeBonds={includeBonds}
-  onIncludeBondsChange={setIncludeBonds}
-/>
-```
+- **Controllo UI**: L'icona di modifica viene mostrata solo se `isAdmin === true`
+- **Controllo DB**: La tabella `isin_mappings` ha RLS policy che permette scritture solo agli admin:
+  ```sql
+  Policy: "Admins can manage isin mappings"
+  Command: ALL
+  Using: has_role(auth.uid(), 'admin')
+  ```
+- **Nessun rischio di privilege escalation**: Lo stato `isAdmin` viene verificato lato server dalla tabella `user_roles`, non da localStorage
 
 ---
 
-**File**: `src/lib/currencyExposure.ts`
+## Note Tecniche
 
-**3.5 Modificare calcolo per supportare bonds:**
+1. **Priorità mapping**: `manual` > `yahoo_search` > `ai` > `unknown`
+2. **Cache globale**: Tutti gli utenti vedono le stesse classificazioni settoriali
+3. **Persistenza**: Override salvati in Supabase, non in localStorage
+4. **Lista settori GICS**: Stessa utilizzata in `SectorMappingManager.tsx` (Admin Panel)
+5. **Refresh automatico**: Dopo ogni override, i mapping vengono ricaricati per aggiornare la UI
 
-```typescript
-export interface CurrencyBreakdown {
-  stocks: number;
-  bonds: number;        // NUOVO
-  commodities: number;
-  nakedPuts: number;
-  leapCalls: number;
-  strategies: number;
-}
-
-export interface InstrumentDetail {
-  name: string;
-  riskEUR: number;
-  riskOriginal: number;
-  category: 'stocks' | 'bonds' | 'commodities' | 'nakedPuts' | 'leapCalls' | 'strategies';
-  // ...
-}
-
-export interface CurrencyExposureOptions {
-  includeDerivatives?: boolean;
-  includeBonds?: boolean;  // NUOVO
-}
-```
-
-**3.6 Modificare RiskAnalysis per includere bondDetails:**
-
-Prima devo verificare se `RiskAnalysis` ha già i dettagli dei bond. Dalla lettura del codice, noto che `riskCalculator.ts` non calcola i bond separatamente. I bond potrebbero essere inclusi negli stockDetails o potrebbero essere gestiti in modo diverso.
-
-Guardando il file `riskCalculator.ts` linee 150-154:
-```typescript
-// Include only stocks and ETFs (commodities are calculated separately)
-const stockAssetTypes = ['stock', 'etf'];
-```
-
-I **bond sono esclusi** dal calcolo del rischio attuale! Questo significa che per includere i bond nell'analisi valutaria, bisogna:
-
-1. Aggiungere `BondRiskDetail` interface
-2. Aggiungere `calculateBondRisk()` function
-3. Estendere `RiskAnalysis` con `bondDetails`
-4. Modificare `currencyExposure.ts` per usare i bondDetails
-
----
-
-## File da Modificare
-
-| File | Modifiche |
-|------|-----------|
-| `src/pages/RiskAnalyzer.tsx` | Toggle derivati default `true`, nuovo stato `includeBonds`, passare props |
-| `src/components/risk/SectorAllocationView.tsx` | Aggiungere avviso commodities escluse |
-| `src/components/risk/CurrencyExposureView.tsx` | Aggiungere toggle bond + avviso |
-| `src/lib/currencyExposure.ts` | Estendere interfacce con `bonds`, filtrare se disabilitato |
-| `src/lib/riskCalculator.ts` | Aggiungere `BondRiskDetail` e `calculateBondRisk()` |
-| `src/hooks/useRiskAnalysis.ts` | Passare bonds a RiskAnalysis |
-
----
-
-## Risultato Visivo Atteso
-
-### Sector Allocation
-```text
-┌─────────────────────────────────────────────┐
-│  📊 Esposizione Settoriale Totale           │
-│  € 123.456                                  │
-│                                             │
-│  ⚠️ Derivati esclusi dall'analisi           │  ← se toggle OFF
-│  ℹ️ Commodities escluse dall'analisi        │  ← SEMPRE VISIBILE
-└─────────────────────────────────────────────┘
-```
-
-### Currency Exposure
-```text
-┌─────────────────────────────────────────────┐
-│  💰 Esposizione Valutaria Totale            │
-│                                             │
-│  ◯ Includi Derivati   ◯ Includi Bond       │  ← DUE TOGGLE
-│                                             │
-│  € 234.567                                  │
-│                                             │
-│  ⚠️ Derivati esclusi dall'analisi           │  ← se toggle OFF
-│  ℹ️ Obbligazioni escluse dall'analisi       │  ← se toggle OFF
-└─────────────────────────────────────────────┘
-```
