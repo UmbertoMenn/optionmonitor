@@ -163,7 +163,7 @@ export function EquityExposureView({
                     <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-sm">
-                    <p>Le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il totale dei premi pagati.</p>
+                    <p>Le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -614,7 +614,7 @@ export function EquityExposureView({
                         {formatEUR(lc.riskEUR)}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Premio: {lc.currency} {formatNumber(lc.premiumPaid, 0)}
+                        Mkt: {lc.currency} {formatNumber(lc.marketValue, 0)}
                       </div>
                     </div>
                   </div>

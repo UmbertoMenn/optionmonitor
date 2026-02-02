@@ -217,12 +217,12 @@ export function calculateCurrencyExposure(
       const exposure = getOrCreateCurrency(byCurrency, curr);
       exposure.breakdown.leapCalls += lc.riskEUR;
       exposure.totalRisk += lc.riskEUR;
-      exposure.totalRiskOriginal += lc.premiumPaid;
+      exposure.totalRiskOriginal += lc.marketValue;
       
       exposure.instruments.push({
         name: lc.underlying,
         riskEUR: lc.riskEUR,
-        riskOriginal: lc.premiumPaid,
+        riskOriginal: lc.marketValue,
         category: 'leapCalls',
         details: `CALL ${lc.strike} × ${lc.contracts} (${lc.expiry})`
       });

@@ -50,8 +50,9 @@ export interface LeapCallRiskDetail {
   strike: number;
   contracts: number;
   avgCost: number;
+  marketPrice: number;          // Prezzo di mercato dell'opzione
   expiry: string;
-  premiumPaid: number;          // Rischio = premio pagato (contratti × PMC × 100)
+  marketValue: number;          // Rischio = prezzo mercato × contratti × 100
   riskEUR: number;
   currency: string;
   exchangeRate: number;
@@ -311,7 +312,7 @@ export function calculateNakedPutRisk(
 
 /**
  * Calculate leap call risk.
- * Formula: Contratti × PMC × 100 / Cambio (premio pagato)
+ * Formula: Prezzo mercato × Contratti × 100 / Cambio (valore di mercato)
  */
 export function calculateLeapCallRisk(
   leapCalls: LeapCallPosition[]
@@ -319,17 +320,19 @@ export function calculateLeapCallRisk(
   return leapCalls.map(lc => {
     const contracts = lc.contracts;
     const avgCost = lc.option.avg_cost || 0;
+    const marketPrice = lc.option.current_price || avgCost; // Fallback to avgCost if no market price
     const exchangeRate = getEffectiveExchangeRate(lc.option);
-    const premiumPaid = contracts * avgCost * 100;
+    const marketValue = contracts * marketPrice * 100;
     
     return {
       underlying: lc.option.underlying || lc.option.description,
       strike: lc.option.strike_price || 0,
       contracts,
       avgCost,
+      marketPrice,
       expiry: lc.option.expiry_date || '',
-      premiumPaid,
-      riskEUR: premiumPaid / exchangeRate,
+      marketValue,
+      riskEUR: marketValue / exchangeRate,
       currency: lc.option.currency || 'USD',
       exchangeRate
     };
