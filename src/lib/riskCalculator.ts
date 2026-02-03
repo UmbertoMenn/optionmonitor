@@ -483,6 +483,13 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
 }
 
 /**
+ * Helper to check if a position is an EUROFOREX instrument (excluded from risk analysis).
+ */
+function isEuroforexInstrument(name: string | undefined | null): boolean {
+  return name?.toUpperCase().includes('EUROFOREX') || false;
+}
+
+/**
  * Main function: analyze portfolio risk across all categories.
  */
 export function analyzePortfolioRisk(
@@ -504,8 +511,18 @@ export function analyzePortfolioRisk(
   const stockDetails = calculateStockRisk(stocks, categories.longPuts, positions);
   const commodityDetails = calculateCommodityRisk(commodities);
   const bondDetails = calculateBondRisk(bonds);
-  const nakedPutDetails = calculateNakedPutRisk(categories.nakedPuts);
-  const leapCallDetails = calculateLeapCallRisk(categories.leapCalls);
+  
+  // Filter EUROFOREX from Naked Puts and Leap Calls
+  const filteredNakedPuts = categories.nakedPuts.filter(
+    np => !isEuroforexInstrument(np.option.underlying || np.option.description)
+  );
+  const nakedPutDetails = calculateNakedPutRisk(filteredNakedPuts);
+  
+  const filteredLeapCalls = categories.leapCalls.filter(
+    lc => !isEuroforexInstrument(lc.option.underlying || lc.option.description)
+  );
+  const leapCallDetails = calculateLeapCallRisk(filteredLeapCalls);
+  
   const strategyDetails = calculateStrategyRisk(categories);
   
   // Sum up totals in EUR
