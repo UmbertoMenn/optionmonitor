@@ -167,9 +167,10 @@ export interface ConsolidatedHolding {
   stockRiskWithProtection: number; // Direct stock risk WITH protections (€)
   nakedPutRisk: number;          // Naked PUT risk (€)
   leapCallRisk: number;          // Leap Call risk - market value (€)
+  strategyRisk: number;          // Strategy Max Loss (€)
   totalExposure: number;         // Total with/without protections (calculated based on toggle)
   sources: Array<{
-    type: 'stock' | 'nakedPut' | 'leapCall';
+    type: 'stock' | 'nakedPut' | 'leapCall' | 'strategy';
     name: string;
     exposure: number;
     percentage?: number;
@@ -663,6 +664,11 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     protectionStrike: number | null;
     hasProtection: boolean;
   }>;
+  strategyDetails: Array<{
+    strategyName: string;
+    maxLossEUR: number;
+    hasUnlimitedRisk: boolean;
+  }>;
 }
 
 /**
@@ -701,11 +707,13 @@ export function calculateConsolidatedTopHoldings(
     stockRiskWithProtection: 0,
     nakedPutRisk: 0,
     leapCallRisk: 0,
+    strategyRisk: 0,
     totalExposure: 0,
     sources: [],
     nakedPutDetails: [],
     leapCallDetails: [],
     stockDetails: [],
+    strategyDetails: [],
   });
   
   const getOrCreateHolding = (name: string): ConsolidatedHoldingWithDetails => {
@@ -812,6 +820,23 @@ export function calculateConsolidatedTopHoldings(
     });
   }
   
+  // 5. Add Strategy Max Loss
+  for (const strat of analysis.strategyDetails) {
+    const holding = getOrCreateHolding(strat.underlying);
+    
+    holding.strategyRisk += strat.maxLossEUR;
+    holding.sources.push({
+      type: 'strategy',
+      name: strat.strategyName,
+      exposure: strat.maxLossEUR,
+    });
+    holding.strategyDetails.push({
+      strategyName: strat.strategyName,
+      maxLossEUR: strat.maxLossEUR,
+      hasUnlimitedRisk: strat.hasUnlimitedRisk,
+    });
+  }
+  
   // Combine both maps
   const allHoldings = [...holdingsByKey.values(), ...holdingsByExactName.values()];
   
@@ -821,7 +846,7 @@ export function calculateConsolidatedTopHoldings(
       ? holding.stockRiskWithProtection 
       : holding.stockRisk;
     
-    holding.totalExposure = stockPart + holding.nakedPutRisk + holding.leapCallRisk;
+    holding.totalExposure = stockPart + holding.nakedPutRisk + holding.leapCallRisk + holding.strategyRisk;
     
     // Sort sources by exposure
     holding.sources.sort((a, b) => b.exposure - a.exposure);
