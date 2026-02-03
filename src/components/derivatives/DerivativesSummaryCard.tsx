@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, Umbrella } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { 
@@ -33,48 +33,61 @@ function getTicker(position: Position | { description?: string; ticker?: string;
 // Expandable section component
 function ExpandableSection({ 
   title, 
+  icon: Icon,
+  iconColor,
   items, 
   renderItem,
+  alwaysVisible = false,
 }: { 
   title: string;
+  icon: React.ElementType;
+  iconColor: string;
   items: any[];
   renderItem: (item: any, idx: number) => React.ReactNode;
+  alwaysVisible?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const INITIAL_SHOW = 5;
   const hasMore = items.length > INITIAL_SHOW;
   const displayItems = isExpanded ? items : items.slice(0, INITIAL_SHOW);
 
-  if (items.length === 0) return null;
+  if (items.length === 0 && !alwaysVisible) return null;
 
   return (
     <div className="p-3 rounded-lg border border-border bg-background/50">
       <div className="flex items-center gap-2 mb-2">
+        <Icon className={`w-4 h-4 ${iconColor}`} />
         <span className="text-sm font-semibold">{title}</span>
         <span className="text-xs text-muted-foreground">({items.length})</span>
       </div>
-      <div className="space-y-1">
-        {displayItems.map((item, idx) => renderItem(item, idx))}
-      </div>
-      {hasMore && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full mt-2 h-7 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setIsExpanded(!isExpanded)}
-        >
-          {isExpanded ? (
-            <>
-              <ChevronUp className="w-3 h-3 mr-1" />
-              Mostra meno
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-3 h-3 mr-1" />
-              Mostra altri {items.length - INITIAL_SHOW}
-            </>
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic">Nessun elemento</p>
+      ) : (
+        <>
+          <div className="space-y-1">
+            {displayItems.map((item, idx) => renderItem(item, idx))}
+          </div>
+          {hasMore && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full mt-2 h-7 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setIsExpanded(!isExpanded)}
+            >
+              {isExpanded ? (
+                <>
+                  <ChevronUp className="w-3 h-3 mr-1" />
+                  Mostra meno
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-3 h-3 mr-1" />
+                  Mostra altri {items.length - INITIAL_SHOW}
+                </>
+              )}
+            </Button>
           )}
-        </Button>
+        </>
       )}
     </div>
   );
@@ -324,13 +337,98 @@ export function DerivativesSummaryCard({
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [categories.leapCalls]);
   
-  // Check if there's anything to show
+  // ============ 7. Protezioni Attive (Long Put ITM) ============
+  const activeProtections = useMemo(() => {
+    const result: { ticker: string; strike: number; contracts: number }[] = [];
+    
+    categories.longPuts.forEach(lp => {
+      const strikePrice = lp.option.strike_price || 0;
+      const underlyingPrice = lp.underlying?.current_price || 0;
+      // PUT is ITM when strike > underlying price
+      const isITM = underlyingPrice > 0 && strikePrice > underlyingPrice;
+      
+      if (isITM) {
+        result.push({
+          ticker: getTicker({ ticker: lp.option.ticker, description: lp.option.underlying || lp.option.description }),
+          strike: strikePrice,
+          contracts: lp.contracts
+        });
+      }
+    });
+    
+    return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  }, [categories.longPuts]);
+  
+  // ============ 8. Altre Strategie OOR/OOB ============
+  const otherStrategiesOOROOB = useMemo(() => {
+    const result: { ticker: string; strategyName: string; status: 'OOR' | 'OOB' }[] = [];
+    
+    // Strategies that use IR/OOR (range-based)
+    const rangeBasedStrategies = ['Short Strangle', 'Put Spread', 'Call Spread', 'Diagonal Put Spread', 'Diagonal Call Spread'];
+    
+    categories.groupedOtherStrategies
+      .filter(g => g.strategyName && g.strategyName !== 'Alternative Double Diagonal')
+      .forEach(group => {
+        const underlyingPrice = underlyingPrices[group.underlying]?.price || 0;
+        if (underlyingPrice <= 0) return;
+        
+        const strategyName = group.strategyName || 'Strategia';
+        const isRangeBased = rangeBasedStrategies.some(s => strategyName.includes(s));
+        
+        let isInBadState = false;
+        let status: 'OOR' | 'OOB';
+        
+        if (isRangeBased) {
+          status = 'OOR';
+          // IR/OOR logic
+          if (strategyName.includes('Short Strangle')) {
+            const soldPut = group.options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+            const soldCall = group.options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+            if (soldPut && soldCall) {
+              const soldPutStrike = soldPut.option.strike_price || 0;
+              const soldCallStrike = soldCall.option.strike_price || 0;
+              isInBadState = !(underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike);
+            }
+          } else if (strategyName.includes('Put Spread') || strategyName.includes('Diagonal Put Spread')) {
+            const soldPut = group.options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+            if (soldPut) {
+              const soldPutStrike = soldPut.option.strike_price || 0;
+              isInBadState = underlyingPrice < soldPutStrike;
+            }
+          } else if (strategyName.includes('Call Spread') || strategyName.includes('Diagonal Call Spread')) {
+            const soldCall = group.options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+            if (soldCall) {
+              const soldCallStrike = soldCall.option.strike_price || 0;
+              isInBadState = underlyingPrice > soldCallStrike;
+            }
+          }
+        } else {
+          status = 'OOB';
+          // IB/OOB logic - negative P/L means out of breakeven
+          isInBadState = group.totalProfitLoss < 0;
+        }
+        
+        if (isInBadState) {
+          result.push({
+            ticker: group.underlying.split(' ')[0] || group.underlying,
+            strategyName: strategyName.replace('Alternative ', '').replace('Diagonal ', 'Diag. '),
+            status
+          });
+        }
+      });
+    
+    return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  }, [categories.groupedOtherStrategies, underlyingPrices]);
+  
+  // Check if there's anything to show (Iron Condor OOR always visible)
   const hasContent = uncoveredCalls.length > 0 || 
                      coveredCallsITM.length > 0 || 
                      doubleDiagonalOOR.length > 0 ||
-                     ironCondorOOR.length > 0 || 
+                     categories.ironCondors.length > 0 || // Always show Iron Condor section
                      nakedPutsITM.length > 0 ||
-                     leapCallsInGain.length > 0;
+                     leapCallsInGain.length > 0 ||
+                     activeProtections.length > 0 ||
+                     otherStrategiesOOROOB.length > 0;
   
   if (!hasContent) {
     return null;
@@ -350,6 +448,8 @@ export function DerivativesSummaryCard({
           {/* 1. Call non coperte (ALERT) */}
           <ExpandableSection
             title="Call non coperte"
+            icon={ShieldAlert}
+            iconColor="text-red-500"
             items={uncoveredCalls}
             renderItem={(uc, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm">
@@ -364,6 +464,8 @@ export function DerivativesSummaryCard({
           {/* 2. Covered Call ITM */}
           <ExpandableSection
             title="Covered Call ITM"
+            icon={ShieldAlert}
+            iconColor="text-amber-500"
             items={coveredCallsITM}
             renderItem={(cc, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm">
@@ -378,6 +480,8 @@ export function DerivativesSummaryCard({
           {/* 3. Double Diagonal OOR */}
           <ExpandableSection
             title="Double Diagonal OOR"
+            icon={Layers}
+            iconColor="text-purple-500"
             items={doubleDiagonalOOR}
             renderItem={(dd, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm">
@@ -395,10 +499,13 @@ export function DerivativesSummaryCard({
             )}
           />
           
-          {/* 4. Iron Condor OOR */}
+          {/* 4. Iron Condor OOR - Always visible */}
           <ExpandableSection
             title="Iron Condor OOR"
+            icon={Target}
+            iconColor="text-amber-500"
             items={ironCondorOOR}
+            alwaysVisible={categories.ironCondors.length > 0}
             renderItem={(ic, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm">
                 <span className="font-medium">{ic.ticker}</span>
@@ -415,6 +522,8 @@ export function DerivativesSummaryCard({
           {/* 5. Naked Put ITM */}
           <ExpandableSection
             title="Naked Put ITM"
+            icon={CircleDollarSign}
+            iconColor="text-orange-500"
             items={nakedPutsITM}
             renderItem={(np, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm">
@@ -434,6 +543,8 @@ export function DerivativesSummaryCard({
           {/* 6. Leap Call in Gain */}
           <ExpandableSection
             title="Leap Call in Gain"
+            icon={Rocket}
+            iconColor="text-blue-500"
             items={leapCallsInGain}
             renderItem={(lc, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm">
@@ -445,6 +556,47 @@ export function DerivativesSummaryCard({
                   className="text-xs text-green-500 border-green-500"
                 >
                   G
+                </Badge>
+              </div>
+            )}
+          />
+          
+          {/* 7. Protezioni Attive (Long Put ITM) */}
+          <ExpandableSection
+            title="Protezioni Attive"
+            icon={Umbrella}
+            iconColor="text-emerald-500"
+            items={activeProtections}
+            renderItem={(lp, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-sm">
+                <span className="font-medium">{lp.ticker}</span>
+                <span className="text-muted-foreground">${lp.strike}</span>
+                <span className="text-xs">×{lp.contracts}</span>
+                <Badge 
+                  variant="outline"
+                  className="text-xs text-green-500 border-green-500"
+                >
+                  ITM
+                </Badge>
+              </div>
+            )}
+          />
+          
+          {/* 8. Altre Strategie OOR/OOB */}
+          <ExpandableSection
+            title="Altre Strategie"
+            icon={Puzzle}
+            iconColor="text-cyan-500"
+            items={otherStrategiesOOROOB}
+            renderItem={(os, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-sm">
+                <span className="font-medium">{os.ticker}</span>
+                <span className="text-xs text-muted-foreground truncate">{os.strategyName}</span>
+                <Badge 
+                  variant="outline"
+                  className="text-xs text-red-500 border-red-500"
+                >
+                  {os.status}
                 </Badge>
               </div>
             )}
