@@ -13,7 +13,7 @@ export interface LongPutPosition {
   option: Position;
   underlying: Position | null;
   contracts: number;
-  isPartial: boolean; // True if net exposure > 0 (protezione parziale)
+  isPartial: boolean; // True if shares/100 - Long PUT contracts > 0
 }
 
 export interface StrategyPosition {
@@ -151,33 +151,24 @@ export function categorizeDerivatives(
           let isPartial = false;
           
           if (linkedStock && linkedStock.quantity > 0) {
-            // Calculate net exposure for this underlying
+            // Calculate if this is a partial protection
+            // Simple formula: shares/100 - Long PUT contracts > 0
             const stockContracts = Math.floor(linkedStock.quantity / 100);
-            const optionContracts = position.quantity;
+            const longPutContracts = position.quantity; // This is the current Long PUT
             
-            // Find other PUT positions on the same underlying
+            // Find other Long PUT positions on the same underlying (only bought, not sold)
             const underlyingKey = normalizeForMatching(position.underlying || position.description);
-            const otherPuts = derivatives.filter(d => 
+            const otherLongPuts = derivatives.filter(d => 
               d.id !== position.id &&
               d.option_type === 'put' &&
+              d.quantity > 0 && // Only bought PUTs
               normalizeForMatching(d.underlying || d.description) === underlyingKey
             );
             
-            const otherBoughtContracts = otherPuts
-              .filter(p => p.quantity > 0)
-              .reduce((sum, p) => sum + p.quantity, 0);
-            const otherSoldContracts = otherPuts
-              .filter(p => p.quantity < 0)
-              .reduce((sum, p) => sum + Math.abs(p.quantity), 0);
+            const totalLongPutContracts = longPutContracts + otherLongPuts.reduce((sum, p) => sum + p.quantity, 0);
             
-            // Total bought contracts including this position
-            const totalBoughtContracts = optionContracts + otherBoughtContracts;
-            const totalSoldContracts = otherSoldContracts;
-            
-            // Net exposure = stock contracts - (bought - sold)
-            const netExposure = stockContracts - (totalBoughtContracts - totalSoldContracts);
-            
-            isPartial = netExposure > 0;
+            // Partial if shares/100 - total Long PUT contracts > 0
+            isPartial = stockContracts - totalLongPutContracts > 0;
           }
           
           longPuts.push({
@@ -306,13 +297,13 @@ export function categorizeDerivatives(
     if (!group.stock || group.stock.quantity <= 0) continue;
     
     const stockContracts = Math.floor(group.stock.quantity / 100);
-    const boughtContracts = group.bought.reduce((sum, p) => sum + p.quantity, 0);
-    const soldContracts = group.sold.reduce((sum, p) => sum + Math.abs(p.quantity), 0);
+    // Only count bought PUT contracts (Long PUT), ignore sold PUTs
+    const longPutContracts = group.bought.reduce((sum, p) => sum + p.quantity, 0);
     
-    // Esposizione netta = Titoli/100 - (PUT comprate - PUT vendute)
-    const netExposure = stockContracts - (boughtContracts - soldContracts);
+    // Partial protection: shares/100 - Long PUT contracts > 0
+    const isPartialProtection = stockContracts - longPutContracts > 0;
     
-    if (netExposure <= 0) {
+    if (!isPartialProtection) {
       // Protezione totale: tutte le PUT comprate sono protezioni complete
       for (const put of group.bought) {
         longPuts.push({
@@ -324,7 +315,8 @@ export function categorizeDerivatives(
         usedDerivatives.add(put.id);
       }
     } else {
-      // Esposizione netta > 0: le PUT comprate potrebbero essere protezioni parziali
+      // Protezione parziale: shares/100 - Long PUT contracts > 0
+      // Le PUT comprate potrebbero essere protezioni parziali
       // Ma solo se rimangono single-leg (non associate ad altre strategie)
       partialProtectionCandidates.set(underlyingKey, { puts: group.bought, stock: group.stock });
     }
