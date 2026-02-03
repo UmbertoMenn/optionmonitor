@@ -547,16 +547,8 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
           {/* Col 3: Descrizione */}
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
-          {/* Col 4: ITM/OTM */}
-          <Badge 
-            variant="outline"
-            className={`text-xs ${isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
-          >
-            {isITM ? 'ITM' : 'OTM'}
-          </Badge>
-          
-          {/* Col 5: Badges (P!, Override) */}
-          <div className="flex items-center gap-1">
+          {/* Col 4: Badges (P!, Override) - larghezza fissa per allineamento */}
+          <div className="flex items-center gap-1 w-12 justify-end">
             {isPartialCoverage && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -571,6 +563,14 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
             )}
             {hasOverride && <OverrideBadge />}
           </div>
+          
+          {/* Col 5: ITM/OTM */}
+          <Badge 
+            variant="outline"
+            className={`text-xs ${isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+          >
+            {isITM ? 'ITM' : 'OTM'}
+          </Badge>
           
           {/* Col 6: Menu */}
           <MoveOptionMenu 
@@ -684,16 +684,8 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
           {/* Col 3: Descrizione */}
           <span className="font-medium truncate">{formatOptionDescription(option)}</span>
           
-          {/* Col 4: ITM/OTM */}
-          <Badge 
-            variant="outline"
-            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
-          >
-            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-          </Badge>
-          
-          {/* Col 5: Badges (P!, Override) */}
-          <div className="flex items-center gap-1">
+          {/* Col 4: Badges (P!, Override) - larghezza fissa per allineamento */}
+          <div className="flex items-center gap-1 w-12 justify-end">
             {isPartial && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -708,6 +700,14 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
             )}
             {hasOverride && <OverrideBadge />}
           </div>
+          
+          {/* Col 5: ITM/OTM */}
+          <Badge 
+            variant="outline"
+            className={`text-xs ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
+          >
+            {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+          </Badge>
           
           {/* Col 6: Menu */}
           <MoveOptionMenu 
