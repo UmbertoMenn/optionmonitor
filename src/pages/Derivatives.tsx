@@ -59,10 +59,29 @@ export function Derivatives() {
     [positions]
   );
 
-  const categories = useMemo(() => 
-    categorizeDerivatives(derivatives, positions, overrides),
-    [derivatives, positions, overrides]
-  );
+  const categories = useMemo(() => {
+    const raw = categorizeDerivatives(derivatives, positions, overrides);
+    
+    // Sort functions for different types
+    // For types where underlying is a Position object, use option.underlying field
+    const sortByOptionUnderlying = <T extends { option: Position }>(arr: T[]): T[] =>
+      [...arr].sort((a, b) => (a.option.underlying || '').localeCompare(b.option.underlying || ''));
+    
+    // For types where underlying is a string
+    const sortByUnderlyingString = <T extends { underlying: string }>(arr: T[]): T[] =>
+      [...arr].sort((a, b) => a.underlying.localeCompare(b.underlying));
+    
+    return {
+      ...raw,
+      coveredCalls: sortByOptionUnderlying(raw.coveredCalls),
+      longPuts: sortByOptionUnderlying(raw.longPuts),
+      ironCondors: sortByUnderlyingString(raw.ironCondors),
+      doubleDiagonals: sortByUnderlyingString(raw.doubleDiagonals),
+      nakedPuts: sortByOptionUnderlying(raw.nakedPuts),
+      leapCalls: sortByOptionUnderlying(raw.leapCalls),
+      groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
+    };
+  }, [derivatives, positions, overrides]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;
