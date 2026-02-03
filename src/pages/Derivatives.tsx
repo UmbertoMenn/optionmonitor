@@ -538,7 +538,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant="outline"
-              className={`text-xs shrink-0 ${isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
+              className={`text-xs shrink-0 ${isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
             >
               {isITM ? 'ITM' : 'OTM'}
             </Badge>
@@ -658,7 +658,7 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant="outline"
-              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
+              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
@@ -1313,7 +1313,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
         <span className="text-xs text-muted-foreground">{formatExpiryMMY(option.expiry_date)}</span>
         <Badge 
           variant="outline"
-          className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
+          className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
         >
           {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
         </Badge>
@@ -1488,7 +1488,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant="outline"
-              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
+              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
@@ -1591,7 +1591,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
               variant="outline"
-              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
+              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-primary border-primary'}`}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
