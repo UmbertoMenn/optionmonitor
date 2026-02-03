@@ -1,97 +1,110 @@
 
-
-# Piano: Ordinamento e Semplificazione Legenda Composizione Portafoglio
+# Piano: Aggiornamento Holdings Consolidate
 
 ## Obiettivo
-1. Ordinare il grafico a ciambella e la legenda per importo in ordine decrescente
-2. Rimuovere i valori di profitto/perdita dalla legenda, mantenendo solo la percentuale
+Aggiungere il Max Loss delle strategie alle Holdings Consolidate, mostrare il prezzo di mercato (invece del PMC) nelle Leap Call nel dialog di dettaglio, e sostituire la descrizione testuale con un tooltip informativo.
 
 ---
 
-## Modifiche Tecniche
+## Modifiche Pianificate
 
-### File 1: `src/components/dashboard/PortfolioDonutChart.tsx`
+### 1. Aggiungere Max Loss Strategie alle Holdings Consolidate
 
-#### Ordinare i dati per valore decrescente
+**File: `src/lib/sectorExposure.ts`**
 
-```typescript
-// Da (linea 11-16):
-const data = summary.byAssetType.map(item => ({
-  name: ASSET_TYPE_LABELS[item.type],
-  value: item.value,
-  percentage: item.percentage,
-  color: ASSET_TYPE_COLORS[item.type],
-}));
+- Estendere l'interfaccia `ConsolidatedHoldingWithDetails`:
+  - Aggiungere campo `strategyRisk: number` per il rischio Max Loss delle strategie
+  - Aggiungere array `strategyDetails` con i dettagli delle strategie (nome, maxLoss, etc.)
+  
+- Nella funzione `calculateConsolidatedTopHoldings`:
+  - Aggiungere un loop per processare `analysis.strategyDetails`
+  - Per ogni strategia, aggregare il `maxLossEUR` all'holding corrispondente
+  - Includere il `strategyRisk` nel calcolo del `totalExposure`
 
-// A:
-const data = [...summary.byAssetType]
-  .sort((a, b) => b.value - a.value)
-  .map(item => ({
-    name: ASSET_TYPE_LABELS[item.type],
-    value: item.value,
-    percentage: item.percentage,
-    color: ASSET_TYPE_COLORS[item.type],
-  }));
-```
+### 2. Aggiornare la UI per mostrare il badge Strategie
 
----
+**File: `src/components/risk/EquityExposureView.tsx`**
 
-### File 2: `src/components/dashboard/AssetAllocationLegend.tsx`
+- Nella sezione Holdings Consolidate:
+  - Rimuovere il paragrafo descrittivo sotto il titolo
+  - Aggiungere un tooltip accanto al titolo "Holdings Consolidate" con la spiegazione dell'aggregazione
+  - Aggiungere un nuovo badge viola per "Strategie" (simile agli altri badge)
+  - Aggiornare la logica di sorting per includere `strategyRisk`
 
-#### 1. Ordinare la lista per valore decrescente
+### 3. Aggiornare il dialog di dettaglio
 
-```typescript
-// Da (linea 11):
-{summary.byAssetType.map((item) => (
+**File: `src/components/risk/HoldingBreakdownDialog.tsx`**
 
-// A:
-{[...summary.byAssetType].sort((a, b) => b.value - a.value).map((item) => (
-```
-
-#### 2. Rimuovere il profitto/perdita dalla legenda
-
-```typescript
-// Da (linee 25-31):
-<div className="flex items-center gap-2 text-xs text-muted-foreground">
-  <span>{item.percentage.toFixed(1)}%</span>
-  {item.profitLoss !== 0 && (
-    <span className={item.profitLoss >= 0 ? 'text-profit' : 'text-loss'}>
-      {formatProfitLoss(item.profitLoss)}
-    </span>
-  )}
-</div>
-
-// A:
-<span className="text-xs text-muted-foreground">
-  {item.percentage.toFixed(1)}%
-</span>
-```
-
-#### 3. Rimuovere l'import non più necessario
-
-```typescript
-// Da (linea 2):
-import { formatCurrency, formatProfitLoss } from '@/lib/formatters';
-
-// A:
-import { formatCurrency } from '@/lib/formatters';
-```
+- Aggiungere sezione per visualizzare i dettagli delle strategie (Max Loss)
+- Modificare la descrizione delle Leap Call: mostrare `Prezzo Mkt` invece di `PMC`
+- Aggiungere badge viola nel footer per le strategie
 
 ---
 
-## Riepilogo Modifiche
+## Dettagli Tecnici
 
-| File | Modifica |
-|------|----------|
-| `PortfolioDonutChart.tsx` | Ordinamento dati per valore decrescente |
-| `AssetAllocationLegend.tsx` | Ordinamento lista per valore decrescente |
-| `AssetAllocationLegend.tsx` | Rimozione profitto/perdita, solo percentuale |
-| `AssetAllocationLegend.tsx` | Rimozione import `formatProfitLoss` |
+### Nuova struttura `ConsolidatedHoldingWithDetails`
+
+```typescript
+export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
+  // ... campi esistenti ...
+  strategyRisk: number;  // NUOVO: Max Loss totale strategie
+  strategyDetails: Array<{  // NUOVO
+    strategyName: string;
+    maxLossEUR: number;
+    hasUnlimitedRisk: boolean;
+  }>;
+}
+```
+
+### Logica di aggregazione strategie
+
+```typescript
+// Nella funzione calculateConsolidatedTopHoldings
+for (const strat of analysis.strategyDetails) {
+  const holding = getOrCreateHolding(strat.underlying);
+  
+  holding.strategyRisk += strat.maxLossEUR;
+  holding.sources.push({
+    type: 'strategy',
+    name: strat.strategyName,
+    exposure: strat.maxLossEUR,
+  });
+  holding.strategyDetails.push({
+    strategyName: strat.strategyName,
+    maxLossEUR: strat.maxLossEUR,
+    hasUnlimitedRisk: strat.hasUnlimitedRisk,
+  });
+}
+
+// Aggiornare il calcolo totalExposure
+holding.totalExposure = stockPart + holding.nakedPutRisk + holding.leapCallRisk + holding.strategyRisk;
+```
+
+### Tooltip per Holdings Consolidate
+
+Testo tooltip: "Aggregazione dell'esposizione per sottostante: Stock diretti, Naked PUT (strike × contratti × 100), Leap Call (prezzo di mercato × contratti × 100) e Max Loss delle strategie complesse."
+
+### Descrizione Leap Call nel dialog
+
+**Prima:** `{lc.contracts} ctr × PMC {formatNumber(lc.avgCost, 2)}`
+
+**Dopo:** `{lc.contracts} ctr × Mkt {formatNumber(lc.marketPrice, 2)}`
 
 ---
 
 ## File Modificati
 
-- `src/components/dashboard/PortfolioDonutChart.tsx`
-- `src/components/dashboard/AssetAllocationLegend.tsx`
+| File | Tipo Modifica |
+|------|---------------|
+| `src/lib/sectorExposure.ts` | Estensione interface + logica aggregazione |
+| `src/components/risk/EquityExposureView.tsx` | UI: rimuovi descrizione, aggiungi tooltip, badge viola |
+| `src/components/risk/HoldingBreakdownDialog.tsx` | UI: sezione strategie, descrizione Leap Call |
 
+---
+
+## Note Implementative
+
+- Il badge viola per le strategie seguirà lo stesso stile degli altri badge esistenti (PUT rosso, LEAP ambra)
+- La logica di matching per le strategie utilizzerà la stessa funzione `getOrCreateHolding` già usata per gli altri tipi
+- Il tooltip utilizzerà l'icona `HelpCircle` come standard uniforme del progetto
