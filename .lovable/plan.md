@@ -1,151 +1,136 @@
 
-# Piano: Correzione Visualizzazione Prezzi Sottostante
+# Piano: Miglioramenti Visualizzazione Strategie Derivati
 
-## Problema Identificato
-
-I prezzi per JPMorgan, Lululemon, Progressive e Uber vengono correttamente recuperati dall'edge function (confermato dai log), ma non vengono visualizzati nell'interfaccia.
-
-### Causa Root
-Il hook `useUnderlyingPrices` ha un problema nella gestione delle dipendenze dell'useEffect:
-
-```typescript
-useEffect(() => {
-  if (underlyings.length > 0) {
-    fetchPrices();
-  }
-}, [fetchPrices, underlyings.length]);  // ← PROBLEMA: usa .length invece dell'array
-```
-
-Questo causa:
-1. Se l'array cambia contenuto ma mantiene la stessa lunghezza, l'effect non si ri-triggera
-2. Potenziale mismatch tra i nomi richiesti e quelli nell'array attuale
+## Obiettivo
+Aggiungere indicatori di performance e copertura alle sezioni Leap Call e Covered Call nella pagina Strategie Derivati.
 
 ---
 
-## Soluzione
+## Modifiche Richieste
 
-### File: `src/hooks/useUnderlyingPrices.ts`
+### 1. Leap Call - Variazione % Prezzo vs PMC
 
-1. **Creare una chiave stabile** basata sul contenuto dell'array, non sulla lunghezza
-2. **Usare la chiave come dipendenza** dell'useEffect invece di `underlyings.length`
-3. **Rimuovere la dipendenza circolare** di `fetchPrices` dall'useCallback
+**Logica**: Per opzioni comprate (long), il profitto si realizza quando il prezzo sale rispetto al PMC.
+- **Verde**: variazione positiva (prezzo > PMC = guadagno)
+- **Rosso**: variazione negativa (prezzo < PMC = perdita)
 
-### Codice Corretto
+**Formula**: `((prezzo_corrente - pmc) / pmc) * 100`
+
+**Posizione**: A fianco del prezzo corrente, come badge colorato
+
+---
+
+### 2. Covered Call - Variazione % Prezzo vs PMC
+
+**Logica**: Per opzioni vendute (short), il profitto si realizza quando il prezzo scende rispetto al PMC (puoi ricomprare a meno).
+- **Verde**: variazione negativa (prezzo < PMC = guadagno)
+- **Rosso**: variazione positiva (prezzo > PMC = perdita)
+
+**Formula**: `((prezzo_corrente - pmc) / pmc) * 100`
+
+**Posizione**: A fianco del prezzo corrente, come badge colorato
+
+---
+
+### 3. Covered Call - Badge "P!" (Protezione Parziale)
+
+**Logica**: Mostrare il badge "P!" quando le call vendute non coprono tutte le azioni possedute.
+
+**Formula**: 
+```
+azioni_scoperte = (azioni_possedute / 100) - contratti_call_venduti
+mostra_badge = azioni_scoperte >= 1
+```
+
+**Esempio**:
+- 500 azioni possedute, 3 call vendute → 5 - 3 = 2 azioni scoperte → mostra "P!"
+- 300 azioni possedute, 3 call vendute → 3 - 3 = 0 → NON mostra "P!"
+
+**Stile**: Identico al badge "P!" presente nelle Protezioni (Long Put)
+
+---
+
+## Modifiche File
+
+### File: `src/pages/Derivatives.tsx`
+
+#### A) Funzione `LeapCallRow` (righe 1425-1525)
+
+Aggiungere calcolo e visualizzazione della variazione percentuale:
 
 ```typescript
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+// Calcolo variazione % prezzo vs PMC
+const currentPrice = option.current_price || 0;
+const avgCost = option.avg_cost || 0;
+const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
 
-export interface UnderlyingPrice {
-  price: number;
-  currency: string;
-  ticker?: string;
-}
+// Nel JSX, dopo il prezzo corrente:
+{priceChangePct !== null && (
+  <span className={`text-xs font-medium ${priceChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+    {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+  </span>
+)}
+```
 
-export interface UseUnderlyingPricesResult {
-  prices: Record<string, UnderlyingPrice>;
-  isLoading: boolean;
-  error: string | null;
-  refetch: () => void;
-}
+#### B) Funzione `CoveredCallRow` (righe 469-573)
 
-export function useUnderlyingPrices(underlyings: string[]): UseUnderlyingPricesResult {
-  const [prices, setPrices] = useState<Record<string, UnderlyingPrice>>({});
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const hasFetchedRef = useRef(false);
-  const lastKeyRef = useRef<string>('');
+**B.1** Aggiungere calcolo variazione % (colori invertiti per opzioni vendute):
 
-  // Create a stable key from the underlyings array
-  const underlyingsKey = useMemo(() => {
-    const unique = [...new Set(underlyings.filter(u => u && typeof u === 'string'))];
-    return unique.sort().join('|');
-  }, [underlyings]);
+```typescript
+// Calcolo variazione % prezzo vs PMC
+const currentPrice = option.current_price || 0;
+const avgCost = option.avg_cost || 0;
+const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
 
-  useEffect(() => {
-    const fetchPrices = async () => {
-      const uniqueUnderlyings = [...new Set(underlyings.filter(u => u && typeof u === 'string'))];
-      
-      if (uniqueUnderlyings.length === 0) {
-        return;
-      }
+// Nel JSX, dopo il prezzo corrente:
+// Per opzioni vendute: verde se negativo (guadagno), rosso se positivo (perdita)
+{priceChangePct !== null && (
+  <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+    {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+  </span>
+)}
+```
 
-      // Don't refetch if we already have the same underlyings
-      if (hasFetchedRef.current && lastKeyRef.current === underlyingsKey) {
-        return;
-      }
+**B.2** Aggiungere logica badge "P!" (copertura parziale):
 
-      setIsLoading(true);
-      setError(null);
+```typescript
+// Calcolo copertura parziale
+// contractsCovered = numero di call vendute su questo sottostante
+// underlying.quantity = azioni possedute
+const sharesOwned = underlying.quantity || 0;
+const potentialContracts = Math.floor(sharesOwned / 100);
+const uncoveredContracts = potentialContracts - contractsCovered;
+const isPartialCoverage = uncoveredContracts >= 1;
 
-      try {
-        console.log(`Fetching prices for ${uniqueUnderlyings.length} underlyings:`, uniqueUnderlyings);
-        
-        const { data, error: fetchError } = await supabase.functions.invoke('fetch-underlying-prices', {
-          body: { underlyings: uniqueUnderlyings }
-        });
-
-        if (fetchError) {
-          throw new Error(fetchError.message || 'Failed to fetch underlying prices');
-        }
-
-        if (data?.prices) {
-          setPrices(data.prices);
-          console.log(`Received ${Object.keys(data.prices).length} underlying prices:`, Object.keys(data.prices));
-        }
-
-        hasFetchedRef.current = true;
-        lastKeyRef.current = underlyingsKey;
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Unknown error fetching prices';
-        console.error('Error fetching underlying prices:', errorMessage);
-        setError(errorMessage);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    if (underlyings.length > 0) {
-      fetchPrices();
-    }
-  }, [underlyings, underlyingsKey]);
-
-  const refetch = useCallback(() => {
-    hasFetchedRef.current = false;
-    lastKeyRef.current = '';
-    // Force re-run of effect by triggering a state change
-    setPrices({});
-  }, []);
-
-  return { prices, isLoading, error, refetch };
-}
+// Nel JSX, dopo il badge ITM/OTM:
+{isPartialCoverage && (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help shrink-0">
+        P!
+      </span>
+    </TooltipTrigger>
+    <TooltipContent>
+      <p>Copertura parziale: {uncoveredContracts} contratti scoperti</p>
+    </TooltipContent>
+  </Tooltip>
+)}
 ```
 
 ---
 
-## Modifiche Chiave
+## Riepilogo Modifiche
 
-| Aspetto | Prima | Dopo |
-|---------|-------|------|
-| Dipendenza useEffect | `underlyings.length` | `underlyingsKey` (hash del contenuto) |
-| fetchPrices | useCallback con dipendenza circolare | Funzione inline nell'useEffect |
-| Debug logging | Minimo | Aggiunto log degli underlyings richiesti |
-| Refetch | Resettava solo `hasFetchedRef` | Resetta anche `lastKeyRef` e `prices` |
-
----
-
-## File Modificati
-
-| File | Modifica |
-|------|----------|
-| `src/hooks/useUnderlyingPrices.ts` | Refactoring dipendenze e logica fetch |
+| Componente | Modifica | Colore |
+|------------|----------|--------|
+| LeapCallRow | Variazione % prezzo vs PMC | Verde se +, Rosso se - |
+| CoveredCallRow | Variazione % prezzo vs PMC | Verde se -, Rosso se + |
+| CoveredCallRow | Badge "P!" copertura parziale | Giallo/nero (stile esistente) |
 
 ---
 
-## Verifica
+## Note Tecniche
 
-Dopo la modifica:
-1. Aprire la pagina Strategie Derivati (`/derivatives`)
-2. Verificare nella console i log: "Fetching prices for X underlyings: [...]"
-3. Verificare che JPMorgan, Lululemon, Progressive, Uber mostrino "PS: $XXX"
-4. Aprire una Naked PUT e verificare il badge ITM/OTM corretto
+- La logica di colorazione invertita per le Covered Call riflette la natura delle opzioni vendute: il venditore guadagna quando il prezzo dell'opzione scende
+- Il badge "P!" per le Covered Call segue la stessa logica delle Protezioni ma con significato inverso: indica che NON tutte le azioni sono coperte da call vendute
+- Il tooltip del badge "P!" mostra quanti contratti aggiuntivi potrebbero essere venduti
