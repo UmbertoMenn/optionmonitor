@@ -63,35 +63,40 @@ function CompactSection({
 
   return (
     <div className="py-2 border-b border-border/50 last:border-b-0">
-      {/* Clickable header row */}
-      <button 
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 w-full text-left hover:bg-muted/30 rounded px-1 -mx-1 transition-colors"
-      >
-        <Icon className={`w-4 h-4 ${iconColor} shrink-0`} />
-        <span className="text-sm font-bold text-foreground">{title}</span>
+      {/* Header row - div container with button + tooltip separated */}
+      <div className="flex items-center gap-2 w-full hover:bg-muted/30 rounded px-1 -mx-1 transition-colors">
+        {/* Clickable button for expansion (icon, title, count, arrow) */}
+        <button 
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center gap-2 flex-1 text-left"
+        >
+          <Icon className={`w-4 h-4 ${iconColor} shrink-0`} />
+          <span className="text-sm font-bold text-foreground">{title}</span>
+          <span className="text-xs text-muted-foreground">
+            ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
+          </span>
+          <span className="text-xs text-muted-foreground ml-auto">
+            {isExpanded ? '▲' : '▼'}
+          </span>
+        </button>
+        
+        {/* Badge with tooltip OUTSIDE the button */}
         {statusBadge && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Badge 
-                variant="outline" 
-                className={`text-[10px] px-1.5 py-0 h-4 cursor-help ${statusBadge.colorClass}`}
+              <span 
+                className={`inline-flex items-center rounded-full border text-[10px] px-1.5 py-0 h-4 cursor-help ${statusBadge.colorClass}`}
+                onClick={(e) => e.stopPropagation()}
               >
                 {statusBadge.label}
-              </Badge>
+              </span>
             </TooltipTrigger>
             <TooltipContent>
               <p>{BADGE_TOOLTIPS[statusBadge.label] || statusBadge.label}</p>
             </TooltipContent>
           </Tooltip>
         )}
-        <span className="text-xs text-muted-foreground">
-          ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
-        </span>
-        <span className="text-xs text-muted-foreground ml-auto">
-          {isExpanded ? '▲' : '▼'}
-        </span>
-      </button>
+      </div>
       
       {/* Expandable items */}
       {isExpanded && (
