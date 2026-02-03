@@ -534,11 +534,11 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, t
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
-            <Badge className="text-xs shrink-0 bg-green-500 text-white hover:bg-green-600">V</Badge>
+            <Badge variant="outline" className="text-xs shrink-0 text-green-500 border-green-500">V</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
-              variant={isITM ? "destructive" : "default"} 
-              className="text-xs shrink-0"
+              variant="outline"
+              className={`text-xs shrink-0 ${isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
             >
               {isITM ? 'ITM' : 'OTM'}
             </Badge>
@@ -654,11 +654,11 @@ function LongPutRow({ longPut, stockPositions, getOverrideForPosition }: { longP
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
-            <Badge className="text-xs shrink-0 bg-red-500 text-white hover:bg-red-600">A</Badge>
+            <Badge variant="outline" className="text-xs shrink-0 text-red-500 border-red-500">A</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
-              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
-              className="text-xs shrink-0"
+              variant="outline"
+              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
@@ -795,9 +795,10 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
+                    variant="outline"
                     className={`text-xs shrink-0 ${isInRange 
-                      ? 'bg-green-500 text-white hover:bg-green-600' 
-                      : 'bg-red-500 text-white hover:bg-red-600'}`}
+                      ? 'text-green-500 border-green-500' 
+                      : 'text-red-500 border-red-500'}`}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -882,7 +883,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                  <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${soldPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -894,7 +895,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                  <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${boughtPut.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -913,7 +914,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                  <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${soldCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -925,7 +926,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               </div>
               <div className="p-2 rounded bg-background/50 border border-border/30">
                 <div className="flex justify-between items-center">
-                  <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                  <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
                   <Badge variant="outline" className="text-xs">Strike ${boughtCall.strike_price}</Badge>
                 </div>
                 <div className="flex justify-between mt-1">
@@ -994,16 +995,14 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
             <span className="font-medium truncate">{underlying}</span>
-            <Badge variant="outline" className="text-xs shrink-0 text-purple-500 border-purple-500/50">
-              DD
-            </Badge>
             {hasUnderlyingPrice && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
+                    variant="outline"
                     className={`text-xs shrink-0 ${isInRange 
-                      ? 'bg-green-500 text-white hover:bg-green-600' 
-                      : 'bg-red-500 text-white hover:bg-red-600'}`}
+                      ? 'text-green-500 border-green-500' 
+                      : 'text-red-500 border-red-500'}`}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -1091,7 +1090,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                 {/* Sold Put - on top */}
                 <div className="p-2 rounded bg-background/50 border border-border/30">
                   <div className="flex justify-between items-center">
-                    <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                    <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
                     <Badge variant="outline" className="text-xs">{soldPut.strike_price} {formatExpiryMMY(soldPut.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
@@ -1104,7 +1103,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                 {/* Bought Put - on bottom */}
                 <div className="p-2 rounded bg-background/50 border border-border/30">
                   <div className="flex justify-between items-center">
-                    <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                    <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
                     <Badge variant="outline" className="text-xs">{boughtPut.strike_price} {formatExpiryMMY(boughtPut.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
@@ -1124,7 +1123,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                 {/* Sold Call - on top */}
                 <div className="p-2 rounded bg-background/50 border border-border/30">
                   <div className="flex justify-between items-center">
-                    <Badge className="text-xs bg-green-500 text-white hover:bg-green-600">V</Badge>
+                    <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
                     <Badge variant="outline" className="text-xs">{soldCall.strike_price} {formatExpiryMMY(soldCall.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
@@ -1137,7 +1136,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices }: { doubleDiagona
                 {/* Bought Call - on bottom */}
                 <div className="p-2 rounded bg-background/50 border border-border/30">
                   <div className="flex justify-between items-center">
-                    <Badge className="text-xs bg-red-500 text-white hover:bg-red-600">A</Badge>
+                    <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
                     <Badge variant="outline" className="text-xs">{boughtCall.strike_price} {formatExpiryMMY(boughtCall.expiry_date)}</Badge>
                   </div>
                   <div className="flex justify-between mt-1">
@@ -1216,9 +1215,10 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Badge 
+                    variant="outline"
                     className={`text-xs shrink-0 ${isInRange 
-                      ? 'bg-green-500 text-white hover:bg-green-600' 
-                      : 'bg-red-500 text-white hover:bg-red-600'}`}
+                      ? 'text-green-500 border-green-500' 
+                      : 'text-red-500 border-red-500'}`}
                   >
                     {isInRange ? 'IR' : 'OOR'}
                   </Badge>
@@ -1303,7 +1303,8 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
     <div className="flex items-center justify-between p-2 rounded-lg border border-border/50 bg-muted/30">
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <Badge 
-          className={`text-xs shrink-0 w-5 justify-center ${isBought ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-white hover:bg-green-600'}`}
+          variant="outline"
+          className={`text-xs shrink-0 w-5 justify-center ${isBought ? 'text-red-500 border-red-500' : 'text-green-500 border-green-500'}`}
         >
           {isBought ? 'A' : 'V'}
         </Badge>
@@ -1311,8 +1312,8 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
         <span className="font-medium text-sm">${option.strike_price}</span>
         <span className="text-xs text-muted-foreground">{formatExpiryMMY(option.expiry_date)}</span>
         <Badge 
-          variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
-          className="text-xs shrink-0"
+          variant="outline"
+          className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
         >
           {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
         </Badge>
@@ -1483,11 +1484,11 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
-            <Badge className="text-xs shrink-0 bg-green-500 text-white hover:bg-green-600">V</Badge>
+            <Badge variant="outline" className="text-xs shrink-0 text-green-500 border-green-500">V</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
-              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
-              className="text-xs shrink-0"
+              variant="outline"
+              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
@@ -1586,11 +1587,11 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             ) : (
               <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
             )}
-            <Badge className="text-xs shrink-0 bg-red-500 text-white hover:bg-red-600">A</Badge>
+            <Badge variant="outline" className="text-xs shrink-0 text-red-500 border-red-500">A</Badge>
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             <Badge 
-              variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
-              className="text-xs shrink-0"
+              variant="outline"
+              className={`text-xs shrink-0 ${!hasUnderlyingPrice ? 'text-muted-foreground border-muted-foreground' : isITM ? 'text-red-500 border-red-500' : 'text-muted-foreground border-muted-foreground'}`}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
             </Badge>
