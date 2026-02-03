@@ -116,8 +116,9 @@ export function EquityExposureView({
     [etfDetails]
   );
 
+  // Sort by gross value (stockValue/exchangeRate) to keep order stable regardless of toggle
   const sortedPureStockDetails = useMemo(() => 
-    [...pureStockDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [...pureStockDetails].sort((a, b) => (b.stockValue / b.exchangeRate) - (a.stockValue / a.exchangeRate)),
     [pureStockDetails]
   );
 
@@ -141,8 +142,14 @@ export function EquityExposureView({
     [strategyDetails]
   );
 
+  // Sort by gross stock exposure (without protections) to keep order stable
   const sortedConsolidatedHoldings = useMemo(() => 
-    [...consolidatedHoldings].sort((a, b) => b.totalExposure - a.totalExposure),
+    [...consolidatedHoldings].sort((a, b) => {
+      // Use gross values for sorting: stockRisk (not with protection) + other components
+      const grossA = a.stockRisk + a.nakedPutRisk + a.leapCallRisk;
+      const grossB = b.stockRisk + b.nakedPutRisk + b.leapCallRisk;
+      return grossB - grossA;
+    }),
     [consolidatedHoldings]
   );
 
@@ -150,6 +157,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio ETF Azionari', 
       value: totalETFRisk, 
+      sortValue: totalETFRisk, // Fixed sort value
       percentage: getPercentage(totalETFRisk),
       color: 'bg-cyan-500',
       icon: TrendingUp,
@@ -160,6 +168,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio Stocks', 
       value: displayedStockRisk, 
+      sortValue: grossPureStockRisk, // Always sort by gross value
       percentage: getPercentage(displayedStockRisk),
       color: 'bg-blue-500',
       icon: TrendingUp,
@@ -172,6 +181,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio Commodities', 
       value: totalCommodityRisk, 
+      sortValue: totalCommodityRisk,
       percentage: getPercentage(totalCommodityRisk),
       color: 'bg-orange-500',
       icon: BarChart3,
@@ -182,6 +192,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio Naked PUT', 
       value: totalNakedPutRisk, 
+      sortValue: totalNakedPutRisk,
       percentage: getPercentage(totalNakedPutRisk),
       color: 'bg-red-500',
       icon: TrendingDown,
@@ -192,6 +203,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio Leap Call', 
       value: totalLeapCallRisk, 
+      sortValue: totalLeapCallRisk,
       percentage: getPercentage(totalLeapCallRisk),
       color: 'bg-amber-500',
       icon: DollarSign,
@@ -202,6 +214,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio Strategie', 
       value: totalStrategyRisk, 
+      sortValue: totalStrategyRisk,
       percentage: getPercentage(totalStrategyRisk),
       color: 'bg-purple-500',
       icon: BarChart3,
@@ -275,7 +288,7 @@ export function EquityExposureView({
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.value - a.value)}
+                      data={[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.sortValue - a.sortValue)}
                       cx="50%"
                       cy="50%"
                       innerRadius={35}
@@ -283,7 +296,7 @@ export function EquityExposureView({
                       paddingAngle={2}
                       dataKey="value"
                     >
-                      {[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.value - a.value).map((entry, index) => (
+                      {[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.sortValue - a.sortValue).map((entry, index) => (
                         <Cell 
                           key={`cell-${index}`} 
                           fill={entry.color.replace('bg-', '').replace('-500', '')}
@@ -303,7 +316,7 @@ export function EquityExposureView({
                 </ResponsiveContainer>
               </div>
               <div className="flex-1 space-y-1.5">
-                {[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.value - a.value).map((cat, index) => (
+                {[...riskCategories].filter(c => c.value > 0).sort((a, b) => b.sortValue - a.sortValue).map((cat, index) => (
                   <div key={index} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <div 
@@ -334,7 +347,7 @@ export function EquityExposureView({
           <CardTitle className="text-lg">Distribuzione del Rischio</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          {[...riskCategories].sort((a, b) => b.value - a.value).map((cat, index) => (
+          {[...riskCategories].sort((a, b) => b.sortValue - a.sortValue).map((cat, index) => (
             <div key={index} className="space-y-1.5">
               <div className="flex justify-between items-start">
                 <div>
