@@ -72,7 +72,31 @@ export function EquityExposureView({
     return calculateConsolidatedTopHoldings(analysis, etfAllocations, { includeProtections });
   }, [analysis, etfAllocations, includeProtections]);
 
-  const getPercentage = (value: number) => grandTotal > 0 ? (value / grandTotal) * 100 : 0;
+  // Calculate gross stock risk and protection savings
+  const { grossPureStockRisk, protectionSavings } = useMemo(() => {
+    const pureStocks = stockDetails.filter(s => !s.isETF);
+    
+    // Gross = stock value without considering protections
+    const gross = pureStocks.reduce((sum, s) => 
+      sum + (s.stockValue / s.exchangeRate), 0
+    );
+    
+    // Net = current risk (already net of protections)
+    const net = pureStocks.reduce((sum, s) => sum + s.riskEUR, 0);
+    
+    return {
+      grossPureStockRisk: gross,
+      protectionSavings: gross - net
+    };
+  }, [stockDetails]);
+
+  // Dynamic grand total based on toggle
+  const dynamicGrandTotal = useMemo(() => {
+    const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
+    return totalETFRisk + stockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
+  }, [includeProtections, totalETFRisk, totalPureStockRisk, grossPureStockRisk, totalCommodityRisk, totalNakedPutRisk, totalLeapCallRisk, totalStrategyRisk]);
+
+  const getPercentage = (value: number) => dynamicGrandTotal > 0 ? (value / dynamicGrandTotal) * 100 : 0;
   
   // Percentuale rischio Naked PUT rispetto ai Bond
   const nakedPutVsBondPct = totalBondRisk > 0 
@@ -83,6 +107,9 @@ export function EquityExposureView({
   const etfDetails = stockDetails.filter(s => s.isETF);
   const pureStockDetails = stockDetails.filter(s => !s.isETF);
 
+  // Dynamic stock risk value based on toggle
+  const displayedStockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
+
   const riskCategories = [
     { 
       label: 'Rischio ETF Azionari', 
@@ -90,15 +117,21 @@ export function EquityExposureView({
       percentage: getPercentage(totalETFRisk),
       color: 'bg-cyan-500',
       icon: TrendingUp,
-      description: 'ETF azionari'
+      description: 'ETF azionari',
+      protectionSavings: 0,
+      showProtectionSavings: false
     },
     { 
       label: 'Rischio Stocks', 
-      value: totalPureStockRisk, 
-      percentage: getPercentage(totalPureStockRisk),
+      value: displayedStockRisk, 
+      percentage: getPercentage(displayedStockRisk),
       color: 'bg-blue-500',
       icon: TrendingUp,
-      description: 'Azioni individuali (al netto di protezioni PUT)'
+      description: includeProtections 
+        ? 'Azioni individuali (al netto di protezioni PUT)' 
+        : 'Azioni individuali (al lordo di protezioni PUT)',
+      protectionSavings: includeProtections ? protectionSavings : 0,
+      showProtectionSavings: includeProtections && protectionSavings > 0
     },
     { 
       label: 'Rischio Commodities', 
@@ -106,7 +139,9 @@ export function EquityExposureView({
       percentage: getPercentage(totalCommodityRisk),
       color: 'bg-orange-500',
       icon: BarChart3,
-      description: 'Materie prime'
+      description: 'Materie prime',
+      protectionSavings: 0,
+      showProtectionSavings: false
     },
     { 
       label: 'Rischio Naked PUT', 
@@ -114,7 +149,9 @@ export function EquityExposureView({
       percentage: getPercentage(totalNakedPutRisk),
       color: 'bg-red-500',
       icon: TrendingDown,
-      description: 'Strike × Contratti × 100'
+      description: 'Strike × Contratti × 100',
+      protectionSavings: 0,
+      showProtectionSavings: false
     },
     { 
       label: 'Rischio Leap Call', 
@@ -122,7 +159,9 @@ export function EquityExposureView({
       percentage: getPercentage(totalLeapCallRisk),
       color: 'bg-amber-500',
       icon: DollarSign,
-      description: 'Premio pagato (PMC × Contratti × 100)'
+      description: 'Premio pagato (PMC × Contratti × 100)',
+      protectionSavings: 0,
+      showProtectionSavings: false
     },
     { 
       label: 'Rischio Strategie', 
@@ -130,7 +169,9 @@ export function EquityExposureView({
       percentage: getPercentage(totalStrategyRisk),
       color: 'bg-purple-500',
       icon: BarChart3,
-      description: 'Max Loss delle strategie'
+      description: 'Max Loss delle strategie',
+      protectionSavings: 0,
+      showProtectionSavings: false
     },
   ];
 
@@ -156,25 +197,35 @@ export function EquityExposureView({
               <div className="p-1.5 rounded bg-primary/20">
                 <ShieldAlert className="w-4 h-4 text-primary" />
               </div>
-              <span className="text-sm font-medium text-primary">Esposizione Totale in Equity e Commodities</span>
+              <span className="text-sm font-medium text-primary">Esposizione in Equity e Commodities</span>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-sm">
-                    <p>Le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).</p>
+                    <p>Se toggle "Protezioni" attivo, le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </div>
-            <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+            <div className="text-3xl font-bold text-primary">{formatEUR(dynamicGrandTotal)}</div>
             <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
             {portfolioTotalValue && portfolioTotalValue > 0 && (
               <div className="text-xs text-muted-foreground mt-0.5">
-                ({((grandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
+                ({((dynamicGrandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
               </div>
             )}
+            <div className="flex items-center gap-2 mt-4">
+              <Switch 
+                id="protections-toggle"
+                checked={includeProtections}
+                onCheckedChange={setIncludeProtections}
+              />
+              <Label htmlFor="protections-toggle" className="text-sm">
+                Protezioni
+              </Label>
+            </div>
           </CardContent>
         </Card>
 
@@ -257,22 +308,29 @@ export function EquityExposureView({
                   </div>
                   <span className="text-xs text-muted-foreground ml-6">{cat.description}</span>
                 </div>
-                <div className="text-right flex items-center gap-1">
-                  <span className="font-semibold">{formatEUR(cat.value)}</span>
-                  <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
-                  {cat.label === 'Rischio Naked PUT' && nakedPutVsBondPct !== null && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="text-xs text-red-400 ml-1 cursor-help">
-                            [{nakedPutVsBondPct.toFixed(0)}% vs Bond]
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs text-sm">
-                          <p>Percentuale del rischio Naked PUT rispetto al valore totale delle obbligazioni in portafoglio.</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                <div className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <span className="font-semibold">{formatEUR(cat.value)}</span>
+                    <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
+                    {cat.label === 'Rischio Naked PUT' && nakedPutVsBondPct !== null && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="text-xs text-red-400 ml-1 cursor-help">
+                              [{nakedPutVsBondPct.toFixed(0)}% vs Bond]
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs text-sm">
+                            <p>Percentuale del rischio Naked PUT rispetto al valore totale delle obbligazioni in portafoglio.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                  </div>
+                  {cat.showProtectionSavings && (
+                    <div className="text-xs text-green-500">
+                      Protezioni: -{formatEUR(cat.protectionSavings)}
+                    </div>
                   )}
                 </div>
               </div>
