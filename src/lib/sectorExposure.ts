@@ -262,9 +262,17 @@ export function calculateSectorExposure(
     return bySector.get(normalizedSector)!;
   };
   
+  // Helper to check for EUROFOREX instruments (excluded from sector analysis)
+  const isEuroforex = (name: string) => name?.toUpperCase().includes('EUROFOREX') || false;
+  
   // Process stocks (including ETFs)
   // NOTE: For sector analysis, stocks are ALWAYS valued at gross value (before protections)
   for (const stock of analysis.stockDetails) {
+    // Skip EUROFOREX instruments
+    if (isEuroforex(stock.underlying)) {
+      continue;
+    }
+    
     const isETF = isETFByName(stock.underlying);
     // Use gross value (stockValue / exchangeRate) instead of riskEUR (which is net of protections)
     const grossValueEUR = stock.stockValue / stock.exchangeRate;
@@ -277,6 +285,7 @@ export function calculateSectorExposure(
       const totalSectorPercentage = Object.values(sectorData).reduce((a, b) => a + b, 0);
       
       if (totalSectorPercentage > 0) {
+        // ETF with sector data - decompose by sector
         for (const [sector, percentage] of Object.entries(sectorData)) {
           if (percentage > 0) {
             const sectorExposure = getOrCreateSector(sector);
@@ -295,6 +304,8 @@ export function calculateSectorExposure(
             });
           }
         }
+        continue; // FIX: Exit after decomposition to avoid duplication
+      } else {
         // ETF without sector data - assign to "Other"
         const sectorExposure = getOrCreateSector('Other');
         sectorExposure.totalRisk += grossValueEUR;
@@ -306,7 +317,9 @@ export function calculateSectorExposure(
           isFromETFDecomposition: false,
           category: 'stocks',
         });
+        continue; // FIX: Exit after assignment to Other
       }
+    } else if (isETF) {
       // ETF without allocation data - assign to "Other"
       const sectorExposure = getOrCreateSector('Other');
       sectorExposure.totalRisk += grossValueEUR;
@@ -343,10 +356,13 @@ export function calculateSectorExposure(
     }
   }
   
-  // Process derivatives if enabled - NOW USES DYNAMIC MAPPINGS
+  // Process derivatives if enabled - NOW USES DYNAMIC MAPPINGS + EUROFOREX FILTER
   if (includeDerivatives) {
     // Naked PUTs - assign by underlying sector using dynamic mappings
     for (const np of analysis.nakedPutDetails) {
+      // Skip EUROFOREX instruments
+      if (isEuroforex(np.underlying)) continue;
+      
       const sector = getStockSectorWithMapping(np.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += np.riskEUR;
@@ -362,6 +378,9 @@ export function calculateSectorExposure(
     
     // Leap CALLs - assign by underlying sector using dynamic mappings
     for (const lc of analysis.leapCallDetails) {
+      // Skip EUROFOREX instruments
+      if (isEuroforex(lc.underlying)) continue;
+      
       const sector = getStockSectorWithMapping(lc.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += lc.riskEUR;
@@ -377,6 +396,9 @@ export function calculateSectorExposure(
     
     // Strategies - assign by underlying sector using dynamic mappings
     for (const strat of analysis.strategyDetails) {
+      // Skip EUROFOREX instruments
+      if (isEuroforex(strat.underlying)) continue;
+      
       const sector = getStockSectorWithMapping(strat.underlying, sectorMappings);
       const sectorExposure = getOrCreateSector(sector);
       sectorExposure.totalRisk += strat.maxLossEUR;

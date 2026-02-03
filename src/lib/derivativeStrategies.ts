@@ -97,6 +97,12 @@ export function categorizeDerivatives(
   allPositions: Position[],
   overrides: DerivativeOverride[] = []
 ): DerivativeCategories {
+  // Filter out EUROFOREX instruments from derivatives (currency options, not equity-related)
+  const filteredDerivatives = derivatives.filter(d => {
+    const name = (d.underlying || d.description || '').toUpperCase();
+    return !name.includes('EUROFOREX');
+  });
+  
   const coveredCalls: CoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
   const ironCondors: IronCondorPosition[] = [];
@@ -115,7 +121,7 @@ export function categorizeDerivatives(
   for (const override of singleOverrides) {
     if (!override.position_id || !override.target_category) continue;
     
-    const position = derivatives.find(d => d.id === override.position_id);
+    const position = filteredDerivatives.find(d => d.id === override.position_id);
     if (!position) continue;
     
     // Find linked stock if specified
@@ -217,7 +223,7 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 1: Find Covered Calls ============
-  const soldCalls = derivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
+  const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0);
   
   console.log('[CoveredCall] Sold CALLs found:', soldCalls.map(c => ({ 
     desc: c.description, 
@@ -269,7 +275,7 @@ export function categorizeDerivatives(
   // Raggruppa le PUT per sottostante
   const putsByUnderlying = new Map<string, { bought: Position[], sold: Position[], stock: Position | null }>();
   
-  for (const d of derivatives) {
+  for (const d of filteredDerivatives) {
     if (d.option_type === 'put' && !usedDerivatives.has(d.id)) {
       const underlyingKey = normalizeForMatching(d.underlying || d.description);
       const underlyingStock = findUnderlyingStock(d, stockPositions);
@@ -326,7 +332,7 @@ export function categorizeDerivatives(
   
   // ============ STEP 3 & 4: Find Iron Condor and Double Diagonal ============
   // Group remaining derivatives by underlying
-  const remainingDerivatives = derivatives.filter(d => !usedDerivatives.has(d.id));
+  const remainingDerivatives = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
   const groupedByUnderlying = new Map<string, Position[]>();
   
   for (const d of remainingDerivatives) {
@@ -387,7 +393,7 @@ export function categorizeDerivatives(
   
   // ============ STEP 5: Altre Strategie (più di 1 gamba per sottostante) ============
   // Re-group remaining derivatives
-  const afterFourLegRemaining = derivatives.filter(d => !usedDerivatives.has(d.id));
+  const afterFourLegRemaining = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
   const regrouped = new Map<string, Position[]>();
   
   for (const d of afterFourLegRemaining) {
@@ -461,7 +467,7 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 6: Singole gambe ============
-  const singleLegs = derivatives.filter(d => !usedDerivatives.has(d.id));
+  const singleLegs = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
   
   for (const option of singleLegs) {
     const underlyingStock = findUnderlyingStock(option, stockPositions);
