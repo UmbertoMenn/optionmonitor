@@ -1,162 +1,100 @@
 
 
-# Piano: Correzione Recupero Prezzi Sottostanti (Case-Insensitive)
+## Obiettivo
 
-## Problema Identificato
+Aggiungere il badge **IB** (In Breakeven - verde) e **OOB** (Out Of Breakeven - rosso) per le strategie diverse da "Short Strangle" e "Alternative Double Diagonal" nella sezione "Altre Strategie".
 
-Il sistema non recupera il prezzo di AppLovin perché:
+## Logica
 
-1. **Query case-sensitive**: Il database ha la mappatura "APPLOVIN CORP" → "APP" (corretta, inserita manualmente), ma la ricerca usa `eq('underlying', 'AppLovin Corp')` che non trova match perché il case è diverso
+- Utilizzare le funzioni esistenti in `optionCalculator.ts` per calcolare i breakeven:
+  - `getPriceRangeForPositions()` - determina il range di prezzo da analizzare
+  - `calculateOptionPayoff()` - calcola il payoff per ogni punto di prezzo
+  - `findBreakevenPoints()` - trova i punti dove il payoff attraversa lo zero
+- Se il prezzo del sottostante è **tra** i breakeven (min e max), mostrare **IB** (verde)
+- Se il prezzo del sottostante è **fuori** dai breakeven, mostrare **OOB** (rosso)
+- Per strategie con un solo breakeven o nessun breakeven, non mostrare il badge
 
-2. **Ticker AI errato**: Quando il cache miss avviene, l'AI inferisce "APPW" (ticker errato) invece di "APP"
+## Modifiche
 
-3. **Mappature duplicate**: Nel database esistono ora:
-   - "APPLOVIN CORP" → "APP" ✅ (manuale)
-   - "APPLOVIN" → "APP" ✅ (manuale)
-   - "AppLovin Corp" → "APPW" ❌ (AI errato)
+### File: `src/pages/Derivatives.tsx`
 
----
-
-## Soluzione Dinamica
-
-### Strategia
-1. Modificare la ricerca nel database per essere **case-insensitive** usando `ilike`
-2. Normalizzare sempre l'underlying prima di salvarlo nel cache
-3. Aggiungere validazione del ticker via Yahoo Finance prima di salvarlo
-
----
-
-## Modifiche File
-
-### File: `supabase/functions/fetch-underlying-prices/index.ts`
-
-#### 1. Modificare `checkUnderlyingMappingsCache` per ricerca case-insensitive
-
+**1. Import delle funzioni di calcolo:**
 ```typescript
-async function checkUnderlyingMappingsCache(
-  supabase: any,
-  underlying: string
-): Promise<string | null> {
-  try {
-    // Try exact match first
-    let { data, error } = await supabase
-      .from('underlying_mappings')
-      .select('ticker')
-      .eq('underlying', underlying)
-      .single();
-    
-    if (data?.ticker) {
-      console.log(`Cache hit (exact) for "${underlying}": ${data.ticker}`);
-      return data.ticker;
-    }
-    
-    // Try case-insensitive match
-    const normalized = normalizeName(underlying);
-    const { data: iData } = await supabase
-      .from('underlying_mappings')
-      .select('ticker, underlying')
-      .ilike('underlying', `%${normalized.split(' ')[0]}%`)
-      .limit(5);
-    
-    if (iData && iData.length > 0) {
-      // Find best match using normalized comparison
-      for (const row of iData) {
-        if (normalizeName(row.underlying) === normalized) {
-          console.log(`Cache hit (normalized) for "${underlying}": ${row.ticker}`);
-          return row.ticker;
-        }
-      }
-    }
-  } catch {
-    // No cached mapping
-  }
-  return null;
-}
+import { 
+  calculateOptionPayoff, 
+  findBreakevenPoints, 
+  getPriceRangeForPositions 
+} from '@/lib/optionCalculator';
 ```
 
-#### 2. Aggiungere validazione ticker Yahoo Finance
+**2. Nel componente `GroupedOtherStrategyRow`:**
 
-Prima di salvare un ticker inferito dall'AI, verificare che sia valido:
-
-```typescript
-// Validate ticker before saving (check it returns a valid price)
-async function validateTicker(ticker: string): Promise<boolean> {
-  const priceResult = await fetchYahooPrice(ticker);
-  return priceResult !== null && priceResult.price > 0;
-}
-```
-
-#### 3. Modificare il flusso principale per validare prima di salvare
+Dopo la logica esistente per IR/OOR (Short Strangle e Alternative Double Diagonal), aggiungere il calcolo dei breakeven per le altre strategie:
 
 ```typescript
-// Step 3: Try AI inference
-if (!ticker) {
-  const aiTicker = await inferTickerWithAI(underlying);
+// Logica per badge IB/OOB (strategie diverse da IR/OOR)
+const showBreakevenBadge = !showRangeBadge && hasUnderlyingPrice;
+let isInBreakeven = false;
+let breakevens: number[] = [];
+
+if (showBreakevenBadge) {
+  // Converte le opzioni in DerivativePosition per usare le funzioni esistenti
+  const derivativePositions = options.map(o => ({
+    ...o.option,
+    strike_price: o.option.strike_price || 0,
+    option_type: o.option.option_type as OptionType,
+  })) as DerivativePosition[];
   
-  // Validate AI-inferred ticker before accepting it
-  if (aiTicker) {
-    const isValid = await validateTicker(aiTicker);
-    if (isValid) {
-      ticker = aiTicker;
-      console.log(`AI ticker "${aiTicker}" validated successfully for "${underlying}"`);
-    } else {
-      console.log(`AI ticker "${aiTicker}" failed validation for "${underlying}"`);
-    }
+  // Calcola il payoff e trova i breakeven
+  const priceRange = getPriceRangeForPositions(derivativePositions);
+  const payoffPoints = calculateOptionPayoff(derivativePositions, underlyingPrice, priceRange);
+  breakevens = findBreakevenPoints(payoffPoints);
+  
+  // Se ci sono almeno 2 breakeven, verifica se il prezzo è nel range
+  if (breakevens.length >= 2) {
+    const minBE = Math.min(...breakevens);
+    const maxBE = Math.max(...breakevens);
+    isInBreakeven = underlyingPrice >= minBE && underlyingPrice <= maxBE;
+  } else if (breakevens.length === 1) {
+    // Con un solo breakeven, mostra IB se siamo in profitto a quel prezzo
+    // (il payoff al prezzo corrente è positivo)
+    const currentPayoff = payoffPoints.find(p => Math.abs(p.price - underlyingPrice) < (priceRange.max - priceRange.min) / 100);
+    isInBreakeven = currentPayoff ? currentPayoff.payoff >= 0 : false;
   }
 }
 ```
 
-#### 4. Salvare con underlying normalizzato
+**3. Badge UI:**
+
+Aggiungere dopo il badge IR/OOR esistente:
 
 ```typescript
-// Save to cache using NORMALIZED underlying for consistency
-if (ticker) {
-  const normalizedUnderlying = normalizeName(underlying);
-  await saveToUnderlyingMappingsCache(supabase, normalizedUnderlying, ticker);
-}
+{showBreakevenBadge && breakevens.length > 0 && (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Badge 
+        variant="outline"
+        className={`text-xs shrink-0 ${isInBreakeven 
+          ? 'text-green-500 border-green-500' 
+          : 'text-red-500 border-red-500'}`}
+      >
+        {isInBreakeven ? 'IB' : 'OOB'}
+      </Badge>
+    </TooltipTrigger>
+    <TooltipContent>
+      <p>{isInBreakeven 
+        ? `In Breakeven: prezzo tra ${breakevens.map(b => b.toFixed(2)).join(' e ')}` 
+        : `Out of Breakeven: prezzo fuori dal range ${breakevens.map(b => b.toFixed(2)).join('-')}`}</p>
+    </TooltipContent>
+  </Tooltip>
+)}
 ```
 
----
+## Riepilogo Badge per Strategie
 
-## Pulizia Database
-
-Dopo il deploy, pulire il mapping errato:
-
-```sql
-DELETE FROM underlying_mappings 
-WHERE underlying = 'AppLovin Corp' AND ticker = 'APPW';
-```
-
----
-
-## Flusso Corretto Post-Fix
-
-1. Frontend invia "AppLovin Corp"
-2. Query esatta: no match
-3. Query normalizzata: trova "APPLOVIN CORP" → "APP" ✅
-4. Fetch Yahoo Finance con ticker "APP"
-5. Ritorna prezzo corretto
-
----
-
-## Benefici della Soluzione
-
-| Aspetto | Prima | Dopo |
-|---------|-------|------|
-| Case sensitivity | ❌ "AppLovin Corp" ≠ "APPLOVIN CORP" | ✅ Match normalizzato |
-| Ticker errati | ❌ Salvati senza validazione | ✅ Validati via Yahoo prima del salvataggio |
-| Duplicati | ❌ Mappature multiple per stesso underlying | ✅ Underlying normalizzato |
-| Robustezza | ❌ Dipende dal case esatto | ✅ Dinamico e case-insensitive |
-
----
-
-## Riepilogo Modifiche
-
-| Componente | Modifica |
-|------------|----------|
-| `checkUnderlyingMappingsCache` | Aggiunta ricerca case-insensitive con `ilike` e confronto normalizzato |
-| Nuovo `validateTicker` | Funzione per validare ticker via Yahoo Finance |
-| Flusso principale | Validazione ticker AI prima del salvataggio |
-| Salvataggio cache | Usa underlying normalizzato per coerenza |
-| Database | Pulizia mapping errato "AppLovin Corp" → "APPW" |
+| Strategia | Badge | Colore Verde | Colore Rosso |
+|-----------|-------|--------------|--------------|
+| Short Strangle | IR / OOR | In Range | Out Of Range |
+| Alternative Double Diagonal | IR / OOR | In Range | Out Of Range |
+| Altre Strategie | IB / OOB | In Breakeven | Out Of Breakeven |
 
