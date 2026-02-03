@@ -1,119 +1,137 @@
 
-
 ## Obiettivo
 
-Applicare la logica del badge **IR/OOR** (basata sugli strike) anche alle strategie:
-- Put Spread
-- Call Spread  
-- Diagonal Put Spread
-- Diagonal Call Spread
+Uniformare il layout di tutte le sezioni derivati utilizzando un sistema a griglia coerente, basandosi sul modello già implementato in `GroupedOtherStrategyRow`.
 
-Invece di calcolare i breakeven matematici (che per le diagonali spesso falliscono), useremo una logica semplice basata sugli strike.
+## Analisi Layout Attuale
 
-## Logica Proposta
+| Componente | Layout Attuale | Colonne Dati |
+|------------|----------------|--------------|
+| CoveredCallRow | flex | V/A, Descrizione, ITM/OTM, P!, Menu, PS, Contratti, PMC, Prezzo |
+| LongPutRow | flex | A, Descrizione, ITM/OTM, P!, Menu, PS, Contratti, PMC, Prezzo |
+| IronCondorRow | flex | Underlying, IR/OOR, Scadenza, PUT spread, CALL spread, Contratti, GP, ML |
+| DoubleDiagonalRow | flex | Underlying, IR/OOR, Scadenze, PUT spread, CALL spread, Contratti, GP, ML |
+| NakedPutRow | flex | V, Descrizione, ITM/OTM, Menu, PS, Contratti, PMC, Prezzo |
+| LeapCallRow | flex | A, Descrizione, ITM/OTM, Menu, PS, Contratti, PMC, Prezzo |
+| GroupedOtherStrategyRow | **grid** (modello) | Chevron, Underlying, Badge Strategia, IR/OOR, Range, Gambe, Call/Put, PS, P/L |
 
-Per le strategie SPREAD (verticali o diagonali):
+## Strategia di Implementazione
 
-| Strategia | Logica IR/OOR |
-|-----------|---------------|
-| **Put Spread** (Bull Put Spread) | IR se prezzo >= strike PUT venduta |
-| **Call Spread** (Bear Call Spread) | IR se prezzo <= strike CALL venduta |
-| **Diagonal Put Spread** | IR se prezzo >= strike PUT venduta |
-| **Diagonal Call Spread** | IR se prezzo <= strike CALL venduta |
+Data la diversa struttura dei dati tra le sezioni, creeremo **due tipi di grid layout**:
 
-Per gli spread, il range mostrato sarà lo strike venduto (non un range min-max).
+### Layout A: Opzioni Singole (Covered Call, Long Put, Naked Put, Leap Call)
+
+Colonne uniformi per strategie con singola opzione:
+
+```text
+| Chevron | V/A | Descrizione | ITM/OTM | Badges | Menu | PS | Contratti | PMC | Prezzo+% |
+```
+
+Grid: `grid-cols-[auto_auto_1fr_auto_auto_auto_6rem_5rem_5.5rem_6rem]`
+
+### Layout B: Strategie Multi-Gamba (Iron Condor, Double Diagonal)
+
+Colonne uniformi per strategie a 4 gambe:
+
+```text
+| Chevron | Underlying | IR/OOR | Scadenza | PUT spread | CALL spread | Contratti | GP | ML |
+```
+
+Grid: `grid-cols-[auto_minmax(8rem,1fr)_auto_auto_7rem_7rem_5rem_6rem_6rem]`
 
 ## Modifiche Tecniche
 
 ### File: `src/pages/Derivatives.tsx`
 
-**1. Aggiornare la lista delle strategie che usano la logica "Range" (linee ~1183-1185):**
+**1. CoveredCallRow (linee ~536-605)**
 
-```typescript
-// Strategie che usano la logica IR/OOR basata sugli strike
-const isAltDoubleDiagonal = strategyName === 'Alternative Double Diagonal';
-const isShortStrangle = strategyName === 'Short Strangle';
-const isPutSpread = strategyName === 'Put Spread' || strategyName === 'Diagonal Put Spread';
-const isCallSpread = strategyName === 'Call Spread' || strategyName === 'Diagonal Call Spread';
-const showRangeBadge = isAltDoubleDiagonal || isShortStrangle || isPutSpread || isCallSpread;
+Da:
+```tsx
+<div className="flex items-center justify-between p-3 ...">
+  <div className="flex items-center gap-3 flex-1 min-w-0">
+    ...
+  </div>
+  <div className="flex items-center gap-4 shrink-0">
+    ...
+  </div>
+</div>
 ```
 
-**2. Modificare la logica di calcolo IR/OOR (linee ~1187-1201):**
-
-```typescript
-let isInRange = false;
-let soldPutStrike = 0;
-let soldCallStrike = 0;
-let rangeDisplay = '';
-
-if (showRangeBadge && hasUnderlyingPrice) {
-  if (isAltDoubleDiagonal || isShortStrangle) {
-    // Logica esistente: range tra PUT venduta e CALL venduta
-    const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
-    const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
-    
-    if (soldPut && soldCall) {
-      soldPutStrike = soldPut.option.strike_price || 0;
-      soldCallStrike = soldCall.option.strike_price || 0;
-      isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
-      rangeDisplay = `${soldPutStrike} - ${soldCallStrike}`;
-    }
-  } else if (isPutSpread) {
-    // Put Spread: IR se prezzo >= strike PUT venduta
-    const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
-    if (soldPut) {
-      soldPutStrike = soldPut.option.strike_price || 0;
-      isInRange = underlyingPrice >= soldPutStrike;
-      rangeDisplay = `≥ ${soldPutStrike}`;
-    }
-  } else if (isCallSpread) {
-    // Call Spread: IR se prezzo <= strike CALL venduta
-    const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
-    if (soldCall) {
-      soldCallStrike = soldCall.option.strike_price || 0;
-      isInRange = underlyingPrice <= soldCallStrike;
-      rangeDisplay = `≤ ${soldCallStrike}`;
-    }
-  }
-}
+A:
+```tsx
+<div className="grid grid-cols-[auto_auto_minmax(10rem,1fr)_auto_auto_auto_6rem_5rem_5.5rem_6rem] gap-3 items-center p-3 ...">
+  {/* Col 1: Chevron */}
+  {/* Col 2: V/A Badge */}
+  {/* Col 3: Descrizione */}
+  {/* Col 4: ITM/OTM */}
+  {/* Col 5: Badges (P!, Override) */}
+  {/* Col 6: Menu */}
+  {/* Col 7: PS */}
+  {/* Col 8: Contratti */}
+  {/* Col 9: PMC */}
+  {/* Col 10: Prezzo+% */}
+</div>
 ```
 
-**3. Aggiornare la condizione del badge (linea ~1268):**
+**2. LongPutRow (linee ~656-719)**
 
-```typescript
-// Cambiare la condizione da:
-{showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 ? (
+Stesso layout di CoveredCallRow.
 
-// A:
-{showRangeBadge && hasUnderlyingPrice && rangeDisplay ? (
+**3. NakedPutRow (linee ~1609-1661)**
+
+Stesso layout di CoveredCallRow.
+
+**4. LeapCallRow (linee ~1712-1778)**
+
+Stesso layout di CoveredCallRow.
+
+**5. IronCondorRow (linee ~788-857)**
+
+Da flex a grid con colonne specifiche per strategie multi-gamba:
+```tsx
+<div className="grid grid-cols-[auto_minmax(8rem,1fr)_auto_7rem_7rem_7rem_5rem_6rem_6rem] gap-3 items-center p-3 ...">
+  {/* Col 1: Chevron */}
+  {/* Col 2: Underlying */}
+  {/* Col 3: IR/OOR Badge */}
+  {/* Col 4: Scadenza */}
+  {/* Col 5: PUT spread */}
+  {/* Col 6: CALL spread */}
+  {/* Col 7: Contratti */}
+  {/* Col 8: GP */}
+  {/* Col 9: ML */}
+</div>
 ```
 
-**4. Aggiornare la visualizzazione del range (linea ~1317-1320):**
+**6. DoubleDiagonalRow (linee ~996-1086)**
 
-```typescript
-) : showRangeBadge && hasUnderlyingPrice && rangeDisplay ? (
-  <span className="text-xs text-muted-foreground">
-    {rangeDisplay}
-  </span>
-)
+Simile a IronCondorRow, con adattamenti per le due scadenze:
+```tsx
+<div className="grid grid-cols-[auto_minmax(8rem,1fr)_auto_auto_7rem_7rem_5rem_6rem_6rem] gap-3 items-center p-3 ...">
+  {/* Col 1: Chevron */}
+  {/* Col 2: Underlying */}
+  {/* Col 3: IR/OOR Badge */}
+  {/* Col 4: Scadenze (sold-bought) */}
+  {/* Col 5: PUT spread */}
+  {/* Col 6: CALL spread */}
+  {/* Col 7: Contratti */}
+  {/* Col 8: GP */}
+  {/* Col 9: ML */}
+</div>
 ```
 
-**5. Aggiornare i tooltip (linea ~1281-1283):**
+## Gestione Responsività
 
-```typescript
-<TooltipContent>
-  <p>{isInRange 
-    ? `In Range: prezzo ${rangeDisplay}` 
-    : `Out of Range: prezzo non ${rangeDisplay}`}</p>
-</TooltipContent>
-```
+Per schermi ridotti, utilizzeremo:
+
+1. **`minmax()` per colonne flessibili**: La colonna del nome/descrizione si restringe per prima
+2. **Larghezze minime ridotte**: Le colonne numeriche avranno min-width ragionevoli (5-6rem)
+3. **Overflow handling**: `truncate` e `text-ellipsis` per testi lunghi
+4. **Gap ridotto su mobile**: Considerare `gap-2` invece di `gap-3` se necessario
 
 ## Risultato Atteso
 
-| Strategia | Prezzo | Strike Venduto | Badge | Display |
-|-----------|--------|----------------|-------|---------|
-| Diagonal Put Spread TSLA | 280 | PUT 250 | IR | ≥ 250 |
-| Diagonal Put Spread TSLA | 240 | PUT 250 | OOR | ≥ 250 |
-| Call Spread AAPL | 180 | CALL 200 | IR | ≤ 200 |
-| Call Spread AAPL | 210 | CALL 200 | OOR | ≤ 200 |
-
+Tutte le sezioni derivati avranno colonne allineate verticalmente:
+- I badge (V/A, ITM/OTM, IR/OOR) saranno sempre nella stessa posizione
+- I valori numerici (PS, PMC, Prezzo) saranno allineati a destra
+- I menu e le azioni saranno in posizione fissa
+- Il layout si adatterà a schermi ridotti senza sovrapposizioni
