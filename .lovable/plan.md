@@ -1,102 +1,160 @@
 
 
-## Piano: Modifiche alla Card "Azioni Necessarie"
+## Piano: Ottimizzazione Layout Card "Azioni Necessarie"
 
-### Obiettivo
-Modificare la card riepilogativa "Azioni Necessarie" secondo le seguenti specifiche:
-1. Sostituire "Protezioni Attive" con "Call da rivendere"
-2. Garantire che la card Iron Condor OOR sia sempre visibile (anche se vuota)
-3. Cambiare l'icona della sezione Leap Call nel dettaglio con il razzo (Rocket)
+### Analisi dei Problemi Attuali
+1. **Disparità contenuto**: Card con 1 elemento vs card con 10+ elementi creano altezze diverse
+2. **Numero dispari**: Se alcune card sono vuote, la griglia risulta sbilanciata
+3. **Titoli poco evidenti**: Font piccolo (`text-sm`) e colore neutro
+4. **Larghezza eccessiva**: Card troppo larghe con spazio vuoto a destra
 
 ---
 
-### Modifiche Dettagliate
+### Soluzione Proposta: Layout "Masonry" con Tag Flow
 
-#### 1. File: `src/components/derivatives/DerivativesSummaryCard.tsx`
+Invece di 8 card separate, creo un **layout unificato a flusso continuo** dove:
+- Ogni categoria è una **riga compatta** con titolo colorato + badge/ticker inline
+- Gli elementi sono visualizzati come **tag compatti** in flusso orizzontale
+- La card Iron Condor è sempre visibile (anche vuota)
+- Il layout si adatta automaticamente al contenuto
 
-**Rimuovere**:
-- La sezione "Protezioni Attive" (Long Put ITM)
-- Il relativo calcolo `activeProtections` (righe 340-360)
-- La sezione UI corrispondente (righe 564-583)
-
-**Aggiungere**:
-- Nuova sezione "Call da rivendere" che calcola i ticker con azioni disponibili per nuove Covered Call
-- Formula: `floor(azioni possedute / 100) - contratti CC vendute su stesso sottostante >= 1`
-
-**Logica Call da rivendere**:
-```typescript
-const availableCallsToSell = useMemo(() => {
-  const result: { ticker: string; availableShares: number }[] = [];
-  
-  stockPositions.forEach(stock => {
-    const normalizedKey = normalizeForMatching(stock.description || '');
-    const potentialContracts = Math.floor(stock.quantity / 100);
-    
-    // Count total sold call contracts for this underlying
-    let soldCallContracts = 0;
-    
-    // From Covered Calls
-    categories.coveredCalls.forEach(cc => {
-      const ccKey = normalizeForMatching(cc.underlying.description || cc.option.underlying || '');
-      if (ccKey === normalizedKey) {
-        soldCallContracts += cc.contractsCovered;
-      }
-    });
-    
-    const available = potentialContracts - soldCallContracts;
-    if (available >= 1) {
-      result.push({
-        ticker: stock.ticker || stock.description?.split(' ')[0] || 'N/A',
-        availableShares: available * 100
-      });
-    }
-  });
-  
-  return result.sort((a, b) => b.availableShares - a.availableShares);
-}, [stockPositions, categories.coveredCalls]);
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ ⚠️ AZIONI NECESSARIE                                        │
+├─────────────────────────────────────────────────────────────┤
+│ 🔴 Call non coperte:  [AAPL:2NC] [MSFT:1NC] [+3]            │
+│ 🟡 Covered Call ITM:  [GOOGL $150 ×2]                       │
+│ 🟣 Double Diagonal OOR:  [TSLA OOR] [NVDA OOR]              │
+│ 🟡 Iron Condor OOR:  Nessun elemento                        │
+│ 🟠 Naked Put ITM:  [AMD $120 ×1]                            │
+│ 🚀 Leap Call in Gain:  [AMZN $200 ×1 G]                     │
+│ 🟢 Call da rivendere:  [AAPL 200az] [MSFT 100az]            │
+│ 🔵 Altre Strategie:  [SPY Put Spread OOB]                   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Icona per Call da rivendere**: `TrendingUp` (verde) - coerente con le Call
+---
 
-**Garantire Iron Condor sempre visibile**:
-- La card Iron Condor OOR utilizza già `alwaysVisible={categories.ironCondors.length > 0}`
-- Questo va mantenuto per mostrare la sezione anche quando vuota
+### Modifiche Tecniche
 
-**Aggiornare `hasContent`**:
-- Rimuovere `activeProtections.length > 0`
-- Aggiungere `availableCallsToSell.length > 0`
+#### File: `src/components/derivatives/DerivativesSummaryCard.tsx`
+
+**1) Nuovo componente `CompactSection` (sostituisce `ExpandableSection`)**
+```typescript
+function CompactSection({ 
+  title, 
+  icon: Icon,
+  iconColor,
+  titleColor,  // Nuovo: colore del titolo stesso
+  items, 
+  renderItem,
+  alwaysVisible = false,
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const INITIAL_SHOW = 8;  // Mostra 8 tag inline
+  const hasMore = items.length > INITIAL_SHOW;
+  const displayItems = isExpanded ? items : items.slice(0, INITIAL_SHOW);
+  
+  if (items.length === 0 && !alwaysVisible) return null;
+  
+  return (
+    <div className="flex flex-wrap items-center gap-2 py-2 border-b border-border/50 last:border-b-0">
+      {/* Titolo colorato con icona */}
+      <div className="flex items-center gap-1.5 min-w-[180px]">
+        <Icon className={`w-4 h-4 ${iconColor}`} />
+        <span className={`text-sm font-bold ${titleColor}`}>{title}:</span>
+        <span className="text-xs text-muted-foreground">({items.length})</span>
+      </div>
+      
+      {/* Items come tag inline */}
+      {items.length === 0 ? (
+        <span className="text-xs text-muted-foreground italic">Nessun elemento</span>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {displayItems.map((item, idx) => renderItem(item, idx))}
+          {hasMore && !isExpanded && (
+            <button 
+              onClick={() => setIsExpanded(true)}
+              className="text-xs text-primary hover:underline"
+            >
+              +{items.length - INITIAL_SHOW} altri
+            </button>
+          )}
+          {hasMore && isExpanded && (
+            <button 
+              onClick={() => setIsExpanded(false)}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              mostra meno
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+**2) Render items come badge/tag compatti**
+```typescript
+// Esempio per Covered Call ITM
+renderItem={(cc, idx) => (
+  <Badge 
+    key={idx}
+    variant="outline" 
+    className="text-xs bg-amber-500/10 border-amber-500/30 text-foreground"
+  >
+    <AlertTriangle className="w-2.5 h-2.5 text-amber-500 mr-1" />
+    {cc.ticker} ${cc.strike} ×{cc.contracts}
+  </Badge>
+)}
+```
+
+**3) Layout principale a lista verticale**
+```tsx
+<CardContent className="pt-0 space-y-0">
+  {/* Ogni categoria su una riga, layout verticale */}
+  <CompactSection title="Call non coperte" ... alwaysVisible={uncoveredCalls.length > 0} />
+  <CompactSection title="Covered Call ITM" ... />
+  <CompactSection title="Double Diagonal OOR" ... />
+  <CompactSection title="Iron Condor OOR" ... alwaysVisible={true} />  {/* SEMPRE visibile */}
+  <CompactSection title="Naked Put ITM" ... />
+  <CompactSection title="Leap Call in Gain" ... />
+  <CompactSection title="Call da rivendere" ... />
+  <CompactSection title="Altre Strategie" ... />
+</CardContent>
+```
+
+**4) Colori titoli (matching icone)**
+
+| Sezione | Icona | Colore Titolo |
+|---------|-------|---------------|
+| Call non coperte | ShieldAlert | `text-red-500` |
+| Covered Call ITM | ShieldAlert | `text-amber-500` |
+| Double Diagonal OOR | Layers | `text-purple-500` |
+| Iron Condor OOR | Target | `text-amber-500` |
+| Naked Put ITM | CircleDollarSign | `text-orange-500` |
+| Leap Call in Gain | Rocket | `text-blue-500` |
+| Call da rivendere | TrendingUp | `text-green-500` |
+| Altre Strategie | Puzzle | `text-cyan-500` |
 
 ---
 
-#### 2. File: `src/pages/Derivatives.tsx`
+### Vantaggi della Nuova Struttura
 
-**Cambiare icona sezione Leap Call** (riga 420):
-- Da: `<TrendingUp className="w-5 h-5 text-green-500" />`
-- A: `<Rocket className="w-5 h-5 text-blue-500" />`
-
-**Importare Rocket** nell'import delle icone lucide-react (riga 10)
-
----
-
-### Layout Finale delle 8 Card
-
-| N° | Sezione | Icona | Colore | Criterio |
-|----|---------|-------|--------|----------|
-| 1 | Call non coperte | ShieldAlert | Rosso | net sold > covered |
-| 2 | Call da rivendere | TrendingUp | Verde | shares available >= 100 |
-| 3 | Covered Call ITM | ShieldAlert | Ambra | strike < price |
-| 4 | Double Diagonal OOR | Layers | Viola | fuori range |
-| 5 | Iron Condor OOR | Target | Ambra | fuori range (sempre visibile) |
-| 6 | Naked Put ITM | CircleDollarSign | Arancione | ITM |
-| 7 | Leap Call in Gain | Rocket | Blu | price > PMC |
-| 8 | Altre Strategie OOR/OOB | Puzzle | Ciano | fuori range/breakeven |
+| Problema | Soluzione |
+|----------|-----------|
+| Card con altezze diverse | Ogni categoria è una riga singola, altezza uniforme |
+| Numero dispari di card | Layout verticale, non c'è più la griglia 3 colonne |
+| Titoli poco visibili | Font bold + colore matching icona |
+| Card troppo larghe | Tag inline che occupano solo lo spazio necessario |
+| Iron Condor non visibile | `alwaysVisible={true}` hardcoded |
 
 ---
 
-### Riepilogo File Modificati
+### File Modificati
 
-| File | Modifica |
-|------|----------|
-| `src/components/derivatives/DerivativesSummaryCard.tsx` | Sostituzione "Protezioni Attive" → "Call da rivendere", importazione TrendingUp |
-| `src/pages/Derivatives.tsx` | Cambiare icona Leap Call da TrendingUp a Rocket |
+| File | Modifiche |
+|------|-----------|
+| `src/components/derivatives/DerivativesSummaryCard.tsx` | Sostituzione layout da griglia a lista verticale con tag inline |
 
