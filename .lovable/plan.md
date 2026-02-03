@@ -1,13 +1,135 @@
 
 
-# Piano: Toggle Protezioni nella vista Equity Exposure
+# Piano: Ordinamento Decrescente per Importo nella Equity Exposure
 
 ## Obiettivo
-1. Rimuovere "Totale" dal titolo della card principale
-2. Aggiungere toggle "Protezioni" per mostrare rischio stocks al netto/lordo delle protezioni
-3. Aggiornare dinamicamente la descrizione del rischio stocks nel grafico a barre
-4. Mostrare il valore ridotto dalle protezioni (quando toggle attivo)
-5. Impostare il tooltip con testo fisso (non dinamico)
+Ordinare sempre tutti i grafici, tabelle e liste nella vista Equity Exposure per importo (rischio) in ordine decrescente.
+
+---
+
+## Elementi da Ordinare
+
+### 1. Grafico a Barre - `riskCategories` (linee 113-176)
+
+L'array `riskCategories` viene usato per:
+- Il grafico a ciambella (Donut Chart) - linee 241-265
+- La legenda del grafico - linee 270-288
+- Il grafico a barre orizzontale - linee 301-352
+
+**Soluzione**: Aggiungere `.sort((a, b) => b.value - a.value)` dove l'array viene utilizzato.
+
+```typescript
+// Prima del rendering, ordinare per valore decrescente
+const sortedRiskCategories = useMemo(() => 
+  [...riskCategories].filter(c => c.value > 0).sort((a, b) => b.value - a.value),
+  [riskCategories]
+);
+```
+
+---
+
+### 2. Dettaglio ETF Azionari (linee 374-456)
+
+Attualmente gli ETF vengono mostrati nell'ordine originale di `etfDetails`.
+
+**Soluzione**: Ordinare `etfDetails` per `riskEUR` decrescente.
+
+```typescript
+const sortedETFDetails = useMemo(() => 
+  [...etfDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [etfDetails]
+);
+```
+
+---
+
+### 3. Dettaglio Stocks (linee 477-559)
+
+Attualmente gli stocks vengono mostrati nell'ordine originale di `pureStockDetails`.
+
+**Soluzione**: Ordinare `pureStockDetails` per `riskEUR` decrescente.
+
+```typescript
+const sortedPureStockDetails = useMemo(() => 
+  [...pureStockDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [pureStockDetails]
+);
+```
+
+---
+
+### 4. Dettaglio Commodities (linee 580-600)
+
+Attualmente le commodities vengono mostrate nell'ordine originale.
+
+**Soluzione**: Ordinare `commodityDetails` per `riskEUR` decrescente.
+
+```typescript
+const sortedCommodityDetails = useMemo(() => 
+  [...commodityDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [commodityDetails]
+);
+```
+
+---
+
+### 5. Dettaglio Naked PUT (linee 621-640)
+
+Attualmente le Naked PUT vengono mostrate nell'ordine originale.
+
+**Soluzione**: Ordinare `nakedPutDetails` per `riskEUR` decrescente.
+
+```typescript
+const sortedNakedPutDetails = useMemo(() => 
+  [...nakedPutDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [nakedPutDetails]
+);
+```
+
+---
+
+### 6. Dettaglio Leap Call (linee 662-681)
+
+Attualmente le Leap Call vengono mostrate nell'ordine originale.
+
+**Soluzione**: Ordinare `leapCallDetails` per `riskEUR` decrescente.
+
+```typescript
+const sortedLeapCallDetails = useMemo(() => 
+  [...leapCallDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [leapCallDetails]
+);
+```
+
+---
+
+### 7. Dettaglio Strategie (linee 703-752)
+
+Attualmente le strategie vengono mostrate nell'ordine originale.
+
+**Soluzione**: Ordinare `strategyDetails` per `maxLossEUR` decrescente.
+
+```typescript
+const sortedStrategyDetails = useMemo(() => 
+  [...strategyDetails].sort((a, b) => b.maxLossEUR - a.maxLossEUR),
+  [strategyDetails]
+);
+```
+
+---
+
+### 8. Holdings Consolidate (linee 803-864)
+
+Le Holdings Consolidate sono già calcolate dal hook `calculateConsolidatedTopHoldings`.
+
+**Verifica**: Controllare se sono già ordinate per `totalExposure`. In caso contrario, aggiungere ordinamento.
+
+```typescript
+const sortedConsolidatedHoldings = useMemo(() => 
+  [...consolidatedHoldings].sort((a, b) => b.totalExposure - a.totalExposure),
+  [consolidatedHoldings]
+);
+```
 
 ---
 
@@ -15,144 +137,78 @@
 
 ### File: `src/components/risk/EquityExposureView.tsx`
 
-#### 1. Titolo Card
-
-```
-// Da:
-"Esposizione Totale in Equity e Commodities"
-
-// A:
-"Esposizione in Equity e Commodities"
-```
-
-#### 2. Aggiungere Toggle "Protezioni" nella Card principale
-
-Nella sezione della card con l'esposizione totale, aggiungere un toggle:
+#### Nuovi `useMemo` per gli array ordinati (dopo linea 110)
 
 ```typescript
-<div className="flex items-center gap-2 mt-4">
-  <Switch 
-    id="protections-toggle"
-    checked={includeProtections}
-    onCheckedChange={setIncludeProtections}
-  />
-  <Label htmlFor="protections-toggle" className="text-sm">
-    Protezioni
-  </Label>
-</div>
+// Sorted arrays for consistent descending order display
+const sortedRiskCategories = useMemo(() => 
+  riskCategories.filter(c => c.value > 0).sort((a, b) => b.value - a.value),
+  [riskCategories]
+);
+
+const sortedETFDetails = useMemo(() => 
+  [...etfDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [etfDetails]
+);
+
+const sortedPureStockDetails = useMemo(() => 
+  [...pureStockDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [pureStockDetails]
+);
+
+const sortedCommodityDetails = useMemo(() => 
+  [...commodityDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [commodityDetails]
+);
+
+const sortedNakedPutDetails = useMemo(() => 
+  [...nakedPutDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [nakedPutDetails]
+);
+
+const sortedLeapCallDetails = useMemo(() => 
+  [...leapCallDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+  [leapCallDetails]
+);
+
+const sortedStrategyDetails = useMemo(() => 
+  [...strategyDetails].sort((a, b) => b.maxLossEUR - a.maxLossEUR),
+  [strategyDetails]
+);
+
+const sortedConsolidatedHoldings = useMemo(() => 
+  [...consolidatedHoldings].sort((a, b) => b.totalExposure - a.totalExposure),
+  [consolidatedHoldings]
+);
 ```
 
-Nota: lo stato `includeProtections` esiste già nel componente.
+#### Sostituzioni nei render
 
-#### 3. Calcolare valori lordo/netto per gli Stocks
-
-Aggiungere un `useMemo` per calcolare:
-- **Gross Stock Risk**: Somma di (stockValue / exchangeRate) per tutti gli stocks puri (non ETF)
-- **Protection Savings**: Gross - Net (valore ridotto dalle protezioni)
-
-```typescript
-const { grossPureStockRisk, protectionSavings } = useMemo(() => {
-  const pureStocks = stockDetails.filter(s => !s.isETF);
-  
-  // Gross = valore lordo senza considerare protezioni
-  const gross = pureStocks.reduce((sum, s) => 
-    sum + (s.stockValue / s.exchangeRate), 0
-  );
-  
-  // Net = rischio attuale (già al netto delle protezioni)
-  const net = pureStocks.reduce((sum, s) => sum + s.riskEUR, 0);
-  
-  return {
-    grossPureStockRisk: gross,
-    protectionSavings: gross - net
-  };
-}, [stockDetails]);
-```
-
-#### 4. Dinamica del rischio Stocks nel grafico a barre
-
-L'array `riskCategories` deve usare valori dinamici in base al toggle:
-
-```typescript
-{ 
-  label: 'Rischio Stocks', 
-  // Se protezioni attive: usa valore netto, altrimenti lordo
-  value: includeProtections ? totalPureStockRisk : grossPureStockRisk, 
-  percentage: getPercentage(includeProtections ? totalPureStockRisk : grossPureStockRisk),
-  color: 'bg-blue-500',
-  icon: TrendingUp,
-  // Descrizione dinamica
-  description: includeProtections 
-    ? 'Azioni individuali (al netto di protezioni PUT)' 
-    : 'Azioni individuali (al lordo di protezioni PUT)',
-  // Dati extra per mostrare il risparmio protezioni
-  protectionSavings: includeProtections ? protectionSavings : 0,
-  showProtectionSavings: includeProtections && protectionSavings > 0
-}
-```
-
-#### 5. Mostrare il valore ridotto dalle protezioni
-
-Nel rendering del grafico a barre, dopo il valore principale, mostrare il risparmio protezioni:
-
-```typescript
-<div className="text-right">
-  <span className="font-semibold">{formatEUR(cat.value)}</span>
-  <span className="text-muted-foreground text-sm ml-2">({cat.percentage.toFixed(1)}%)</span>
-  {/* Nuova riga per mostrare risparmio protezioni */}
-  {cat.showProtectionSavings && (
-    <div className="text-xs text-green-500">
-      Protezioni: -{formatEUR(cat.protectionSavings)}
-    </div>
-  )}
-</div>
-```
-
-#### 6. Aggiornare il Grand Total dinamicamente
-
-Il grandTotal deve riflettere il toggle:
-
-```typescript
-const dynamicGrandTotal = useMemo(() => {
-  const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
-  return totalETFRisk + stockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
-}, [includeProtections, ...]);
-```
-
-#### 7. Tooltip FISSO (non dinamico)
-
-Il tooltip avrà sempre lo stesso testo:
-
-```typescript
-<TooltipContent className="max-w-xs text-sm">
-  <p>
-    Se toggle "Protezioni" attivo, le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).
-  </p>
-</TooltipContent>
-```
+| Linea | Da | A |
+|-------|----|----|
+| 242, 250, 270, 301 | `riskCategories.filter(c => c.value > 0)` | `sortedRiskCategories` |
+| 376 | `etfDetails.map(...)` | `sortedETFDetails.map(...)` |
+| 479 | `pureStockDetails.map(...)` | `sortedPureStockDetails.map(...)` |
+| 582 | `commodityDetails.map(...)` | `sortedCommodityDetails.map(...)` |
+| 623 | `nakedPutDetails.map(...)` | `sortedNakedPutDetails.map(...)` |
+| 664 | `leapCallDetails.map(...)` | `sortedLeapCallDetails.map(...)` |
+| 705 | `strategyDetails.map(...)` | `sortedStrategyDetails.map(...)` |
+| 804 | `consolidatedHoldings.map(...)` | `sortedConsolidatedHoldings.map(...)` |
 
 ---
 
-## Riepilogo Modifiche
+## Riepilogo
 
-| Elemento | Prima | Dopo |
-|----------|-------|------|
-| Titolo card | "Esposizione Totale in Equity e Commodities" | "Esposizione in Equity e Commodities" |
-| Toggle Protezioni | Non presente nella card | Toggle con label "Protezioni" |
-| Descrizione Rischio Stocks (ON) | - | "Azioni individuali (al netto di protezioni PUT)" |
-| Descrizione Rischio Stocks (OFF) | - | "Azioni individuali (al lordo di protezioni PUT)" |
-| Valore protezioni (ON) | Non mostrato | Riga "Protezioni: -XXX €" in verde sotto il valore |
-| Grand Total | Fisso (netto) | Dinamico in base al toggle |
-| Tooltip | Dinamico | **FISSO** con testo specificato |
-
----
-
-## Dettagli UI
-
-- **Posizione Toggle**: All'interno della card principale, sotto le informazioni percentuali
-- **Stile Toggle**: Usa componenti esistenti `Switch` e `Label`
-- **Valore Protezioni**: Testo verde (`text-green-500`), font normale (non bold), prefisso "Protezioni: -"
-- **Descrizione**: Testo piccolo sotto il nome della categoria nel grafico a barre
+| Sezione | Criterio Ordinamento | Campo |
+|---------|---------------------|-------|
+| Risk Categories (grafico) | Decrescente | `value` |
+| ETF Azionari | Decrescente | `riskEUR` |
+| Stocks | Decrescente | `riskEUR` |
+| Commodities | Decrescente | `riskEUR` |
+| Naked PUT | Decrescente | `riskEUR` |
+| Leap Call | Decrescente | `riskEUR` |
+| Strategie | Decrescente | `maxLossEUR` |
+| Holdings Consolidate | Decrescente | `totalExposure` |
 
 ---
 
