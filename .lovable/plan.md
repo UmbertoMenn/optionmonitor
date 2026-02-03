@@ -2,79 +2,118 @@
 
 ## Obiettivo
 
-Riorganizzare la visualizzazione delle "Altre Strategie" con un layout a colonne allineate per una migliore leggibilità.
+Applicare la logica del badge **IR/OOR** (basata sugli strike) anche alle strategie:
+- Put Spread
+- Call Spread  
+- Diagonal Put Spread
+- Diagonal Call Spread
 
-## Problema Attuale
+Invece di calcolare i breakeven matematici (che per le diagonali spesso falliscono), useremo una logica semplice basata sugli strike.
 
-Attualmente tutti gli elementi sono disposti in un unico flex container con gap variabile:
-- Chevron + Underlying + Badge Strategia (blu) + Badge IB/OOB + BE values + Badge gambe + conteggio Call/Put
+## Logica Proposta
 
-Questo crea un layout "fluido" dove ogni riga ha posizioni diverse a seconda della lunghezza dei dati.
+Per le strategie SPREAD (verticali o diagonali):
 
-## Soluzione Proposta
+| Strategia | Logica IR/OOR |
+|-----------|---------------|
+| **Put Spread** (Bull Put Spread) | IR se prezzo >= strike PUT venduta |
+| **Call Spread** (Bear Call Spread) | IR se prezzo <= strike CALL venduta |
+| **Diagonal Put Spread** | IR se prezzo >= strike PUT venduta |
+| **Diagonal Call Spread** | IR se prezzo <= strike CALL venduta |
 
-Creare un layout a griglia/colonne fisse partendo dal badge blu della strategia:
-
-```text
-| Chevron | Underlying | Badge Strategia | Badge IB/OOB | BE Range    | Gambe | Call/Put | PS        | P/L     |
-|---------|------------|-----------------|--------------|-------------|-------|----------|-----------|---------|
-| >       | AAPL       | Naked Put       | IB           | BE: 150.00  | 2     | 1C • 1P  | PS: 175€  | +120€   |
-| >       | MSFT       | Bull Spread     | OOB          | BE: 300-350 | 3     | 2C       | PS: 280€  | -50€    |
-```
+Per gli spread, il range mostrato sarà lo strike venduto (non un range min-max).
 
 ## Modifiche Tecniche
 
 ### File: `src/pages/Derivatives.tsx`
 
-Nel componente `GroupedOtherStrategyRow` (linee 1244-1328), ristrutturare il layout con CSS Grid o flex con larghezze fisse:
+**1. Aggiornare la lista delle strategie che usano la logica "Range" (linee ~1183-1185):**
 
-**1. Container principale con grid:**
-```tsx
-<div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 items-center p-3 ...">
+```typescript
+// Strategie che usano la logica IR/OOR basata sugli strike
+const isAltDoubleDiagonal = strategyName === 'Alternative Double Diagonal';
+const isShortStrangle = strategyName === 'Short Strangle';
+const isPutSpread = strategyName === 'Put Spread' || strategyName === 'Diagonal Put Spread';
+const isCallSpread = strategyName === 'Call Spread' || strategyName === 'Diagonal Call Spread';
+const showRangeBadge = isAltDoubleDiagonal || isShortStrangle || isPutSpread || isCallSpread;
 ```
 
-**2. Struttura colonne:**
-- Colonna 1 (auto): Chevron
-- Colonna 2 (1fr): Underlying (nome ticker, espandibile)  
-- Colonna 3 (auto): Badge Strategia (blu) - larghezza fissa ~140px
-- Colonna 4 (auto): Badge IB/OOB o IR/OOR - larghezza fissa ~50px
-- Colonna 5 (auto): Breakeven range - larghezza fissa ~120px
-- Colonna 6 (auto): Badge gambe - larghezza fissa ~60px
-- Colonna 7 (auto): Conteggio Call/Put - larghezza fissa ~100px
-- Colonna 8 (auto): Prezzo Sottostante (PS) - larghezza fissa ~100px
-- Colonna 9 (auto): P/L - larghezza fissa ~80px
+**2. Modificare la logica di calcolo IR/OOR (linee ~1187-1201):**
 
-**3. Applicare larghezze minime per allineamento:**
-```tsx
-// Badge strategia con larghezza minima
-<div className="w-36">
-  {strategyName && (
-    <Badge variant="outline" className="...">
-      {strategyName}
-    </Badge>
-  )}
-</div>
+```typescript
+let isInRange = false;
+let soldPutStrike = 0;
+let soldCallStrike = 0;
+let rangeDisplay = '';
 
-// Badge IB/OOB con larghezza fissa
-<div className="w-12 flex justify-center">
-  {showBreakevenBadge && breakevens.length > 0 && (
-    <Badge ...>...</Badge>
-  )}
-</div>
-
-// BE range con larghezza fissa
-<div className="w-28">
-  {showBreakevenBadge && breakevens.length > 0 && (
-    <span className="text-xs text-muted-foreground">BE: ...</span>
-  )}
-</div>
+if (showRangeBadge && hasUnderlyingPrice) {
+  if (isAltDoubleDiagonal || isShortStrangle) {
+    // Logica esistente: range tra PUT venduta e CALL venduta
+    const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+    const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+    
+    if (soldPut && soldCall) {
+      soldPutStrike = soldPut.option.strike_price || 0;
+      soldCallStrike = soldCall.option.strike_price || 0;
+      isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+      rangeDisplay = `${soldPutStrike} - ${soldCallStrike}`;
+    }
+  } else if (isPutSpread) {
+    // Put Spread: IR se prezzo >= strike PUT venduta
+    const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+    if (soldPut) {
+      soldPutStrike = soldPut.option.strike_price || 0;
+      isInRange = underlyingPrice >= soldPutStrike;
+      rangeDisplay = `≥ ${soldPutStrike}`;
+    }
+  } else if (isCallSpread) {
+    // Call Spread: IR se prezzo <= strike CALL venduta
+    const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+    if (soldCall) {
+      soldCallStrike = soldCall.option.strike_price || 0;
+      isInRange = underlyingPrice <= soldCallStrike;
+      rangeDisplay = `≤ ${soldCallStrike}`;
+    }
+  }
+}
 ```
 
-## Layout Finale
+**3. Aggiornare la condizione del badge (linea ~1268):**
 
-La nuova struttura garantirà che:
-- Ogni colonna abbia una larghezza fissa o minima consistente
-- Gli elementi siano sempre allineati verticalmente tra le righe
-- Il badge blu della strategia sia sempre nella stessa posizione
-- I dati numerici (BE, PS, P/L) siano allineati a destra per facile confronto
+```typescript
+// Cambiare la condizione da:
+{showRangeBadge && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 ? (
+
+// A:
+{showRangeBadge && hasUnderlyingPrice && rangeDisplay ? (
+```
+
+**4. Aggiornare la visualizzazione del range (linea ~1317-1320):**
+
+```typescript
+) : showRangeBadge && hasUnderlyingPrice && rangeDisplay ? (
+  <span className="text-xs text-muted-foreground">
+    {rangeDisplay}
+  </span>
+)
+```
+
+**5. Aggiornare i tooltip (linea ~1281-1283):**
+
+```typescript
+<TooltipContent>
+  <p>{isInRange 
+    ? `In Range: prezzo ${rangeDisplay}` 
+    : `Out of Range: prezzo non ${rangeDisplay}`}</p>
+</TooltipContent>
+```
+
+## Risultato Atteso
+
+| Strategia | Prezzo | Strike Venduto | Badge | Display |
+|-----------|--------|----------------|-------|---------|
+| Diagonal Put Spread TSLA | 280 | PUT 250 | IR | ≥ 250 |
+| Diagonal Put Spread TSLA | 240 | PUT 250 | OOR | ≥ 250 |
+| Call Spread AAPL | 180 | CALL 200 | IR | ≤ 200 |
+| Call Spread AAPL | 210 | CALL 200 | OOR | ≤ 200 |
 
