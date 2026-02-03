@@ -442,12 +442,12 @@ export function DerivativesSummaryCard({
   return (
     <div className="grid grid-cols-2 gap-4">
       <Card className="border-border bg-card">
-        <CardHeader className="pb-2">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-            <CardTitle className="text-xl">Azioni Necessarie</CardTitle>
-          </div>
-        </CardHeader>
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5 text-amber-500" />
+          <CardTitle className="text-xl font-bold tracking-tight">Posizioni da monitorare</CardTitle>
+        </div>
+      </CardHeader>
         <CardContent className="pt-0">
           {/* 1. Call non coperte */}
           <CompactSection
