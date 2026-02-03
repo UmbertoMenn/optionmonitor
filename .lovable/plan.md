@@ -1,211 +1,102 @@
 
-## Piano: Card Riepilogativa Strategie Derivati
+
+## Piano: Modifiche alla Card "Azioni Necessarie"
 
 ### Obiettivo
-Aggiungere una card principale in alto nella pagina Derivati che riassuma lo stato di tutte le strategie e le potenziali azioni da intraprendere.
+Modificare la card riepilogativa "Azioni Necessarie" secondo le seguenti specifiche:
+1. Sostituire "Protezioni Attive" con "Call da rivendere"
+2. Garantire che la card Iron Condor OOR sia sempre visibile (anche se vuota)
+3. Cambiare l'icona della sezione Leap Call nel dettaglio con il razzo (Rocket)
 
 ---
 
-### Struttura della Card
+### Modifiche Dettagliate
 
-La card sarà suddivisa in **6 sezioni** con informazioni visualizzate in modo compatto:
+#### 1. File: `src/components/derivatives/DerivativesSummaryCard.tsx`
 
-| Sezione | Contenuto | Stile |
-|---------|-----------|-------|
-| 1. Covered Call da vendere | Ticker × azioni scoperte | Neutro |
-| 2. Call non coperte | Ticker + strategia | Rosso + triangolo |
-| 3. Covered Call ITM | Ticker + strike + contratti | Giallo/Arancio |
-| 4. Iron Condor IR/OOR | Lista ticker con badge | Verde/Rosso |
-| 5. Double Diagonal IR/OOR | Lista ticker con badge (inclusi Alternative) | Verde/Rosso |
-| 6. Altre Strategie IB/OOB/IR/OOR | Ticker + tipo badge | Verde/Rosso |
+**Rimuovere**:
+- La sezione "Protezioni Attive" (Long Put ITM)
+- Il relativo calcolo `activeProtections` (righe 340-360)
+- La sezione UI corrispondente (righe 564-583)
 
----
+**Aggiungere**:
+- Nuova sezione "Call da rivendere" che calcola i ticker con azioni disponibili per nuove Covered Call
+- Formula: `floor(azioni possedute / 100) - contratti CC vendute su stesso sottostante >= 1`
 
-### Logica di Calcolo per Ogni Sezione
-
-#### 1. Covered Call da vendere
-**Formula**: Per ogni sottostante con azioni in portafoglio:
-```
-Contratti vendibili = floor(azioni possedute / 100) - contratti CALL vendute sullo stesso sottostante
-```
-Mostra solo se `Contratti vendibili >= 1`
-
-**Output**: `AAPL: 100 azioni` (significa 1 contratto vendibile)
-
----
-
-#### 2. Call vendute non coperte (Naked Call)
-**Formula**:
-```
-Bilancio = floor(azioni possedute / 100) - (call vendute - call comprate)
-```
-Se `Bilancio < 0` → **Allarme**
-
-**Scenari**:
-- Azioni: 700 (7 contratti coperti)
-- Call vendute: 8
-- Call comprate: 0
-- Bilancio: 7 - 8 = -1 → **NAKED CALL** (1 contratto scoperto)
-
-**Output**: `AAPL: 1 NC (Covered Call)` con triangolo rosso
-
----
-
-#### 3. Covered Call ITM
-**Criterio**: `strike_price < prezzo_sottostante`
-
-**Output**: `AAPL $180 ×2` (2 contratti ITM)
-
----
-
-#### 4. Iron Condor IR/OOR
-**Criterio**: Prezzo sottostante tra sold PUT strike e sold CALL strike
-
-**Output**:
-- `AMZN` con badge `IR` verde
-- `GOOGL` con badge `OOR` rosso
-
----
-
-#### 5. Double Diagonal IR/OOR
-Include sia Double Diagonal che Alternative Double Diagonal (da `groupedOtherStrategies`)
-
-**Output**: Come Iron Condor
-
----
-
-#### 6. Altre Strategie IB/OOB/IR/OOR
-Per ogni strategia in `groupedOtherStrategies`:
-- Short Strangle, Put Spread, Call Spread → IR/OOR
-- Altre strategie → IB/OOB
-
-**Output**: `BABA Put BWB` con badge `IB` verde
-
----
-
-### Modifiche Tecniche
-
-**File: `src/pages/Derivatives.tsx`**
-
-1. **Nuovo componente**: `DerivativesSummaryCard`
-   - Riceve: `categories`, `stockPositions`, `underlyingPrices`
-   - Calcola tutti i dati riepilogativi
-
-2. **Posizionamento**: Subito dopo l'header, prima delle sezioni collapsibili
-
-3. **Layout**: Card con griglia 2×3 o lista verticale compatta
-
----
-
-### Dettagli Implementativi
-
-**Calcolo Call non coperte**:
+**Logica Call da rivendere**:
 ```typescript
-// Per ogni sottostante, calcola il bilancio
-const underlyingCallBalance = new Map<string, {
-  owned: number,       // azioni possedute
-  soldCalls: number,   // contratti call venduti
-  boughtCalls: number, // contratti call comprati
-  strategies: string[] // nomi strategie coinvolte
-}>();
-
-// Itera su Covered Call
-categories.coveredCalls.forEach(cc => {
-  const key = normalizeKey(cc.underlying.description);
-  // Aggiungi sold calls...
-});
-
-// Itera su Iron Condor (hanno sold call + bought call)
-categories.ironCondors.forEach(ic => {
-  const key = normalizeKey(ic.underlying);
-  // Aggiungi sold call e bought call...
-});
-
-// Itera su Double Diagonal
-// Itera su groupedOtherStrategies
-// ...
-
-// Verifica bilancio
-for (const [key, data] of underlyingCallBalance) {
-  const coveredContracts = Math.floor(data.owned / 100);
-  const netSoldCalls = data.soldCalls - data.boughtCalls;
-  if (netSoldCalls > coveredContracts) {
-    // Naked Call trovata!
-  }
-}
-```
-
-**Covered Call da vendere**:
-```typescript
-const availableForSale: { ticker: string, shares: number }[] = [];
-
-// Trova tutti i sottostanti con stock
-stockPositions.forEach(stock => {
-  const potentialContracts = Math.floor(stock.quantity / 100);
-  const soldContracts = totalCoveredCallContractsByUnderlying[stock.description] || 0;
-  const available = potentialContracts - soldContracts;
+const availableCallsToSell = useMemo(() => {
+  const result: { ticker: string; availableShares: number }[] = [];
   
-  if (available >= 1) {
-    availableForSale.push({
-      ticker: stock.ticker || stock.description,
-      shares: available * 100
+  stockPositions.forEach(stock => {
+    const normalizedKey = normalizeForMatching(stock.description || '');
+    const potentialContracts = Math.floor(stock.quantity / 100);
+    
+    // Count total sold call contracts for this underlying
+    let soldCallContracts = 0;
+    
+    // From Covered Calls
+    categories.coveredCalls.forEach(cc => {
+      const ccKey = normalizeForMatching(cc.underlying.description || cc.option.underlying || '');
+      if (ccKey === normalizedKey) {
+        soldCallContracts += cc.contractsCovered;
+      }
     });
-  }
-});
+    
+    const available = potentialContracts - soldCallContracts;
+    if (available >= 1) {
+      result.push({
+        ticker: stock.ticker || stock.description?.split(' ')[0] || 'N/A',
+        availableShares: available * 100
+      });
+    }
+  });
+  
+  return result.sort((a, b) => b.availableShares - a.availableShares);
+}, [stockPositions, categories.coveredCalls]);
 ```
 
----
+**Icona per Call da rivendere**: `TrendingUp` (verde) - coerente con le Call
 
-### UI della Card
+**Garantire Iron Condor sempre visibile**:
+- La card Iron Condor OOR utilizza già `alwaysVisible={categories.ironCondors.length > 0}`
+- Questo va mantenuto per mostrare la sezione anche quando vuota
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│  📊 Riepilogo Strategie                                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ⚠️ CALL NON COPERTE                     ✅ CALL VENDIBILI      │
-│  • AAPL: 1 NC (Covered Call) ▲           • MSFT: 200 azioni    │
-│                                          • GOOGL: 100 azioni   │
-│                                                                 │
-│  🔴 COVERED CALL ITM                     📊 IRON CONDOR         │
-│  • NVDA $900 ×2                          • AMZN [IR]           │
-│  • TSLA $250 ×1                          • SPY [OOR]           │
-│                                                                 │
-│  📈 DOUBLE DIAGONAL                      🎯 ALTRE STRATEGIE     │
-│  • META [IR]                             • BABA Put BWB [IB]   │
-│  • NFLX Alt.DD [OOR]                     • ORCL Short Str [IR] │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+**Aggiornare `hasContent`**:
+- Rimuovere `activeProtections.length > 0`
+- Aggiungere `availableCallsToSell.length > 0`
 
 ---
 
-### Stili
+#### 2. File: `src/pages/Derivatives.tsx`
 
-| Elemento | Stile |
-|----------|-------|
-| Sezione "Call non coperte" | Background rosso/10, bordo rosso |
-| Badge IR/IB | Verde outline |
-| Badge OOR/OOB | Rosso outline |
-| Triangolo allarme | ▲ rosso (lucide AlertTriangle) |
-| Ticker ITM | Testo ambra/giallo |
+**Cambiare icona sezione Leap Call** (riga 420):
+- Da: `<TrendingUp className="w-5 h-5 text-green-500" />`
+- A: `<Rocket className="w-5 h-5 text-blue-500" />`
+
+**Importare Rocket** nell'import delle icone lucide-react (riga 10)
 
 ---
 
-### File Modificato
+### Layout Finale delle 8 Card
+
+| N° | Sezione | Icona | Colore | Criterio |
+|----|---------|-------|--------|----------|
+| 1 | Call non coperte | ShieldAlert | Rosso | net sold > covered |
+| 2 | Call da rivendere | TrendingUp | Verde | shares available >= 100 |
+| 3 | Covered Call ITM | ShieldAlert | Ambra | strike < price |
+| 4 | Double Diagonal OOR | Layers | Viola | fuori range |
+| 5 | Iron Condor OOR | Target | Ambra | fuori range (sempre visibile) |
+| 6 | Naked Put ITM | CircleDollarSign | Arancione | ITM |
+| 7 | Leap Call in Gain | Rocket | Blu | price > PMC |
+| 8 | Altre Strategie OOR/OOB | Puzzle | Ciano | fuori range/breakeven |
+
+---
+
+### Riepilogo File Modificati
 
 | File | Modifica |
 |------|----------|
-| `src/pages/Derivatives.tsx` | +1 nuovo componente `DerivativesSummaryCard`, inserito dopo header |
+| `src/components/derivatives/DerivativesSummaryCard.tsx` | Sostituzione "Protezioni Attive" → "Call da rivendere", importazione TrendingUp |
+| `src/pages/Derivatives.tsx` | Cambiare icona Leap Call da TrendingUp a Rocket |
 
----
-
-### Considerazioni Aggiuntive
-
-1. **Performance**: I calcoli sono memoizzati con `useMemo` per evitare ricalcoli ad ogni render
-
-2. **Responsività**: Layout a griglia che si adatta a mobile (1 colonna) e desktop (2-3 colonne)
-
-3. **Interattività**: I ticker sono cliccabili e scrollano alla sezione corrispondente (opzionale)
-
-4. **Visibilità condizionale**: Ogni sezione appare solo se ha almeno un elemento da mostrare
