@@ -1,31 +1,26 @@
 
-# Piano: Correzione Badge "P!" Covered Call
+# Piano: Badge IR/OOR per Strategie a Range
 
-## Problema Identificato
-
-Il badge "P!" (copertura parziale) viene mostrato erroneamente per ogni singola riga di Covered Call, considerando solo i contratti di quella specifica riga anziché la somma di **tutte** le call vendute per lo stesso sottostante.
-
-### Esempio del bug attuale:
-- Google: 500 azioni possedute (= 5 contratti potenziali)
-- Covered Call 1: strike $200, 3 contratti
-- Covered Call 2: strike $210, 2 contratti
-
-**Comportamento attuale (errato)**:
-- Riga 1: vede 3 contratti vs 5 potenziali → mostra P! (2 scoperti)
-- Riga 2: vede 2 contratti vs 5 potenziali → mostra P! (3 scoperti)
-
-**Comportamento corretto**:
-- Totale contratti venduti = 3 + 2 = 5
-- 5 contratti venduti = 5 potenziali → **NESSUN P!**
+## Obiettivo
+Aggiungere un badge visivo che indica se il prezzo del sottostante si trova all'interno del "range profittevole" (tra i due strike venduti) per le strategie:
+- Iron Condor
+- Double Diagonal  
+- Alternative Double Diagonal
 
 ---
 
-## Soluzione
+## Logica del Badge
 
-### Strategia
-1. Calcolare un aggregato per sottostante con il **totale dei contratti Covered Call venduti**
-2. Passare questo aggregato come prop a `CoveredCallRow`
-3. Usare il totale aggregato per calcolare la copertura parziale
+| Badge | Colore | Condizione |
+|-------|--------|------------|
+| **IR** | Verde | Prezzo sottostante >= Strike PUT venduto AND <= Strike CALL venduto |
+| **OOR** | Rosso | Prezzo sottostante < Strike PUT venduto OR > Strike CALL venduto |
+
+### Formula
+```typescript
+const isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+// IR = In Range (verde), OOR = Out Of Range (rosso)
+```
 
 ---
 
@@ -33,105 +28,139 @@ Il badge "P!" (copertura parziale) viene mostrato erroneamente per ogni singola 
 
 ### File: `src/pages/Derivatives.tsx`
 
-#### 1. Aggiungere calcolo totale contratti per sottostante
+---
 
-Dopo il calcolo delle categorie, aggiungere:
+### 1. Iron Condor - `IronCondorRow` (righe 747-928)
+
+Aggiungere dopo `hasUnderlyingPrice`:
 
 ```typescript
-// Calculate total covered call contracts per underlying
-const totalCoveredCallContractsByUnderlying = useMemo(() => {
-  const totals: Record<string, number> = {};
-  categories.coveredCalls.forEach(cc => {
-    const underlyingName = cc.underlying.description || cc.option.underlying || '';
-    if (underlyingName) {
-      totals[underlyingName] = (totals[underlyingName] || 0) + cc.contractsCovered;
-    }
-  });
-  return totals;
-}, [categories.coveredCalls]);
+// Calculate if underlying price is In Range (between sold strikes)
+const soldPutStrike = soldPut.strike_price || 0;
+const soldCallStrike = soldCall.strike_price || 0;
+const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
 ```
 
-#### 2. Aggiornare interfaccia RowProps
+Nel JSX, dopo il badge "IC", aggiungere:
 
 ```typescript
-interface CoveredCallRowProps extends RowProps {
-  coveredCall: CoveredCallPosition;
-  totalContractsForUnderlying: number;
-}
-```
-
-#### 3. Modificare chiamata CoveredCallRow
-
-```typescript
-{categories.coveredCalls.map((cc, index) => (
-  <CoveredCallRow 
-    key={index} 
-    coveredCall={cc} 
-    stockPositions={stockPositions} 
-    getOverrideForPosition={getOverrideForPosition}
-    totalContractsForUnderlying={
-      totalCoveredCallContractsByUnderlying[
-        cc.underlying.description || cc.option.underlying || ''
-      ] || cc.contractsCovered
-    }
-  />
-))}
-```
-
-#### 4. Aggiornare logica badge in CoveredCallRow
-
-```typescript
-function CoveredCallRow({ 
-  coveredCall, 
-  stockPositions, 
-  getOverrideForPosition,
-  totalContractsForUnderlying 
-}: CoveredCallRowProps) {
-  // ...existing code...
-  
-  // Calculate partial coverage using TOTAL contracts for this underlying
-  const sharesOwned = underlying.quantity || 0;
-  const potentialContracts = Math.floor(sharesOwned / 100);
-  const uncoveredContracts = potentialContracts - totalContractsForUnderlying;
-  const isPartialCoverage = uncoveredContracts >= 1;
-  
-  // ...rest of component...
-}
+{hasUnderlyingPrice && (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Badge 
+        className={`text-xs shrink-0 ${isInRange 
+          ? 'bg-green-500 text-white hover:bg-green-600' 
+          : 'bg-red-500 text-white hover:bg-red-600'}`}
+      >
+        {isInRange ? 'IR' : 'OOR'}
+      </Badge>
+    </TooltipTrigger>
+    <TooltipContent>
+      <p>{isInRange 
+        ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
+        : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
+    </TooltipContent>
+  </Tooltip>
+)}
 ```
 
 ---
 
-## Esempio Post-Correzione
+### 2. Double Diagonal - `DoubleDiagonalRow` (righe 931-1118)
 
-### Google con 500 azioni e 5 contratti totali venduti:
+Stessa logica dell'Iron Condor. Aggiungere dopo `hasUnderlyingPrice`:
 
-| Riga | Strike | Contratti Riga | Totale Sottostante | Potenziali | Scoperti | Badge P! |
-|------|--------|----------------|---------------------|------------|----------|----------|
-| 1 | $200 | 3 | 5 | 5 | 0 | ❌ No |
-| 2 | $210 | 2 | 5 | 5 | 0 | ❌ No |
+```typescript
+// Calculate if underlying price is In Range (between sold strikes)
+const soldPutStrike = soldPut.strike_price || 0;
+const soldCallStrike = soldCall.strike_price || 0;
+const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+```
 
-### Apple con 400 azioni e 3 contratti totali venduti:
+Nel JSX, dopo il badge "DD", aggiungere lo stesso badge IR/OOR.
 
-| Riga | Strike | Contratti Riga | Totale Sottostante | Potenziali | Scoperti | Badge P! |
-|------|--------|----------------|---------------------|------------|----------|----------|
-| 1 | $180 | 2 | 3 | 4 | 1 | ✅ Sì |
-| 2 | $190 | 1 | 3 | 4 | 1 | ✅ Sì |
+---
+
+### 3. Alternative Double Diagonal - `GroupedOtherStrategyRow` (righe 1121-1193)
+
+Per questa strategia, devo estrarre gli strike venduti dalle opzioni:
+
+```typescript
+// Calculate IR/OOR for Alternative Double Diagonal
+const isAltDoubleDiagonal = strategyName === 'Alternative Double Diagonal';
+let isInRange = false;
+let soldPutStrike = 0;
+let soldCallStrike = 0;
+
+if (isAltDoubleDiagonal && hasUnderlyingPrice) {
+  // Find sold PUT and CALL strikes
+  const soldPut = options.find(o => o.option.option_type === 'put' && o.option.quantity < 0);
+  const soldCall = options.find(o => o.option.option_type === 'call' && o.option.quantity < 0);
+  
+  if (soldPut && soldCall) {
+    soldPutStrike = soldPut.option.strike_price || 0;
+    soldCallStrike = soldCall.option.strike_price || 0;
+    isInRange = underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
+  }
+}
+```
+
+Nel JSX, dopo il badge del nome strategia, aggiungere:
+
+```typescript
+{isAltDoubleDiagonal && hasUnderlyingPrice && soldPutStrike > 0 && soldCallStrike > 0 && (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <Badge 
+        className={`text-xs shrink-0 ${isInRange 
+          ? 'bg-green-500 text-white hover:bg-green-600' 
+          : 'bg-red-500 text-white hover:bg-red-600'}`}
+      >
+        {isInRange ? 'IR' : 'OOR'}
+      </Badge>
+    </TooltipTrigger>
+    <TooltipContent>
+      <p>{isInRange 
+        ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
+        : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
+    </TooltipContent>
+  </Tooltip>
+)}
+```
 
 ---
 
 ## Riepilogo Modifiche
 
-| Sezione | Modifica |
-|---------|----------|
-| useMemo nuovo | Calcola `totalCoveredCallContractsByUnderlying` |
-| Interfaccia | Aggiungi prop `totalContractsForUnderlying` |
-| Chiamata CoveredCallRow | Passa il totale aggregato |
-| Logica badge | Usa `totalContractsForUnderlying` invece di `contractsCovered` |
+| Componente | Posizione Badge | Dati Utilizzati |
+|------------|-----------------|-----------------|
+| IronCondorRow | Dopo badge "IC" | `soldPut.strike_price`, `soldCall.strike_price`, `underlyingPrice` |
+| DoubleDiagonalRow | Dopo badge "DD" | `soldPut.strike_price`, `soldCall.strike_price`, `underlyingPrice` |
+| GroupedOtherStrategyRow | Dopo badge nome strategia | Estratti da `options` array (sold PUT/CALL) |
+
+---
+
+## Esempi Visivi
+
+### Iron Condor con prezzo in range:
+```
+NVIDIA  [IC] [IR]  GEN/26  PUT 100/110  CALL 130/140  ...
+         ↑    ↑
+       tipo  verde (prezzo tra 110 e 130)
+```
+
+### Double Diagonal con prezzo out of range:
+```
+APPLE  [DD] [OOR]  DIC/25 - MAR/26  PUT 170/180  CALL 200/210  ...
+        ↑    ↑
+      tipo  rosso (prezzo sotto 180 o sopra 200)
+```
 
 ---
 
 ## Note
 
-- La chiave per l'aggregazione usa `underlying.description` (nome titolo in portafoglio) come identificativo primario
-- Il tooltip continua a mostrare il numero di contratti scoperti rispetto al totale delle azioni possedute
-- Questa logica è coerente con come funziona `isPartial` per le Long Put in `derivativeStrategies.ts`
+- Il badge viene mostrato solo se il prezzo del sottostante e disponibile (`hasUnderlyingPrice`)
+- Per Alternative Double Diagonal, verifica anche che gli strike venduti siano stati trovati
+- Il tooltip spiega il range numerico per chiarezza
+- Lo stile del badge e coerente con gli altri badge ITM/OTM esistenti
