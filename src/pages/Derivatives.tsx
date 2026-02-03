@@ -24,6 +24,12 @@ import {
   GroupedOtherStrategy
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage } from '@/lib/formatters';
+import { 
+  calculateOptionPayoff, 
+  findBreakevenPoints, 
+  getPriceRangeForPositions 
+} from '@/lib/optionCalculator';
+import { DerivativePosition, OptionType } from '@/types/portfolio';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
@@ -1194,6 +1200,40 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
     }
   }
   
+  // IB/OOB logic for strategies other than Short Strangle and Alternative Double Diagonal
+  const showBreakevenBadge = !showRangeBadge && hasUnderlyingPrice;
+  let isInBreakeven = false;
+  let breakevens: number[] = [];
+  
+  if (showBreakevenBadge) {
+    // Convert options to DerivativePosition for using existing functions
+    const derivativePositions: DerivativePosition[] = options.map(o => ({
+      ...o.option,
+      asset_type: 'derivative' as const,
+      strike_price: o.option.strike_price || 0,
+      expiry_date: o.option.expiry_date || '',
+      underlying: o.option.underlying || underlying,
+      option_type: o.option.option_type as OptionType,
+    }));
+    
+    // Calculate payoff and find breakevens
+    const priceRange = getPriceRangeForPositions(derivativePositions);
+    const payoffPoints = calculateOptionPayoff(derivativePositions, underlyingPrice, priceRange);
+    breakevens = findBreakevenPoints(payoffPoints);
+    
+    // If there are at least 2 breakevens, check if price is in range
+    if (breakevens.length >= 2) {
+      const minBE = Math.min(...breakevens);
+      const maxBE = Math.max(...breakevens);
+      isInBreakeven = underlyingPrice >= minBE && underlyingPrice <= maxBE;
+    } else if (breakevens.length === 1) {
+      // With a single breakeven, show IB if we are in profit at current price
+      const stepSize = (priceRange.max - priceRange.min) / 100;
+      const currentPayoff = payoffPoints.find(p => Math.abs(p.price - underlyingPrice) < stepSize);
+      isInBreakeven = currentPayoff ? currentPayoff.payoff >= 0 : false;
+    }
+  }
+  
   // Count calls and puts
   const callCount = options.filter(o => o.option.option_type === 'call').length;
   const putCount = options.filter(o => o.option.option_type === 'put').length;
@@ -1230,6 +1270,25 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                   <p>{isInRange 
                     ? `In Range: prezzo tra ${soldPutStrike} e ${soldCallStrike}` 
                     : `Out of Range: prezzo fuori da ${soldPutStrike}-${soldCallStrike}`}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {showBreakevenBadge && breakevens.length > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge 
+                    variant="outline"
+                    className={`text-xs shrink-0 ${isInBreakeven 
+                      ? 'text-green-500 border-green-500' 
+                      : 'text-red-500 border-red-500'}`}
+                  >
+                    {isInBreakeven ? 'IB' : 'OOB'}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{isInBreakeven 
+                    ? `In Breakeven: prezzo tra ${breakevens.map(b => b.toFixed(2)).join(' e ')}` 
+                    : `Out of Breakeven: prezzo fuori dal range ${breakevens.map(b => b.toFixed(2)).join('-')}`}</p>
                 </TooltipContent>
               </Tooltip>
             )}
