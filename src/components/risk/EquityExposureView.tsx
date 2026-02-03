@@ -146,8 +146,8 @@ export function EquityExposureView({
   const sortedConsolidatedHoldings = useMemo(() => 
     [...consolidatedHoldings].sort((a, b) => {
       // Use gross values for sorting: stockRisk (not with protection) + other components
-      const grossA = a.stockRisk + a.nakedPutRisk + a.leapCallRisk;
-      const grossB = b.stockRisk + b.nakedPutRisk + b.leapCallRisk;
+      const grossA = a.stockRisk + a.nakedPutRisk + a.leapCallRisk + a.strategyRisk;
+      const grossB = b.stockRisk + b.nakedPutRisk + b.leapCallRisk + b.strategyRisk;
       return grossB - grossA;
     }),
     [consolidatedHoldings]
@@ -812,6 +812,16 @@ export function EquityExposureView({
             <CardTitle className="flex items-center gap-2 text-base">
               <Layers className="w-5 h-5 text-primary" />
               Holdings Consolidate ({consolidatedHoldings.length})
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-sm">
+                    <p>Aggregazione dell'esposizione per sottostante: Stock diretti, Naked PUT (strike × contratti × 100), Leap Call (prezzo di mercato × contratti × 100) e Max Loss delle strategie complesse.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </CardTitle>
             <div className="flex items-center gap-2">
               <Switch 
@@ -834,9 +844,6 @@ export function EquityExposureView({
               </TooltipProvider>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">
-            Aggregazione esposizione: Stock diretti + Naked PUT + Leap Call
-          </p>
         </CardHeader>
         <CardContent>
           {isLoadingETFData ? (
@@ -854,6 +861,7 @@ export function EquityExposureView({
                 const hasStock = (includeProtections ? holding.stockRiskWithProtection : holding.stockRisk) > 0;
                 const hasNakedPut = holding.nakedPutRisk > 0;
                 const hasLeapCall = holding.leapCallRisk > 0;
+                const hasStrategy = holding.strategyRisk > 0;
                 const stockValue = includeProtections ? holding.stockRiskWithProtection : holding.stockRisk;
                 
                 return (
@@ -896,6 +904,11 @@ export function EquityExposureView({
                             {hasLeapCall && (
                               <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-amber-500/10 text-amber-500 border-amber-500/30">
                                 LEAP: {formatEUR(holding.leapCallRisk)}
+                              </Badge>
+                            )}
+                            {hasStrategy && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-purple-500/10 text-purple-500 border-purple-500/30">
+                                Strategie: {formatEUR(holding.strategyRisk)}
                               </Badge>
                             )}
                           </div>
