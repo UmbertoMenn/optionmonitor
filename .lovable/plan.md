@@ -1,111 +1,100 @@
 
 
-# Piano per Ripristinare Layout Originale dei Badge con Tooltip Funzionanti
+# Piano: Rinominare e Stilizzare la Card "Posizioni da monitorare"
 
-## Problema Attuale
+## Obiettivo
 
-Ho erroneamente spostato i badge alla destra della riga, modificando l'ordine degli elementi. L'utente vuole:
-- **Ordine originale**: Icona → Titolo → Badge → Contatore → Freccia
-- **Tooltip funzionanti** sui badge
+Modificare la card "Azioni Necessarie" per:
+1. Rinominare il titolo in **"Posizioni da monitorare"**
+2. Creare un effetto visivo di **card sovrapposta** dove il titolo appare su uno sfondo più scuro in secondo piano
 
-## Soluzione
+## Soluzione Tecnica
 
-Invece di separare il badge dal button, userò un approccio diverso:
-1. **Cambiare il wrapper da `<button>` a `<div>` cliccabile** con `role="button"` e `tabIndex={0}`
-2. **Mantenere l'ordine originale** degli elementi
-3. **Il tooltip funzionerà** perché non è più annidato in un elemento `<button>`
-
-## Implementazione
-
-### Struttura Corretta
+### Struttura Proposta
 
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│ <div role="button" onClick={toggle}> (cliccabile)              │
-│   ├─ Icona                                                      │
-│   ├─ Titolo                                                     │
-│   ├─ <Tooltip>                                                  │
-│   │     └─ <span/Badge> ← tooltip funziona!                    │
-│   ├─ Conteggio elementi                                        │
-│   └─ Freccia ▲/▼                                               │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  CARD ESTERNA (sfondo più scuro, bordo)                 │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  🔺 Posizioni da monitorare                        │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│     ┌──────────────────────────────────────────────┐     │
+│     │  CARD INTERNA (sfondo più chiaro)            │     │
+│     │                                               │     │
+│     │  • Covered Call ITM                          │     │
+│     │  • Double Diagonal OOR                       │     │
+│     │  • Iron Condor OOR                          │     │
+│     │  • ...                                       │     │
+│     │                                               │     │
+│     └──────────────────────────────────────────────┘     │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Codice Modificato (CompactSection)
+### Implementazione
 
+1. **Card esterna** con sfondo `bg-background-secondary` (più scuro)
+2. **Header** con il titolo "Posizioni da monitorare" sulla card esterna
+3. **Card interna** con sfondo `bg-card` (più chiaro) contenente l'elenco delle sezioni
+
+### Codice Modificato (righe 442-451)
+
+**Prima:**
 ```typescript
-function CompactSection({ ... }) {
-  const [isExpanded, setIsExpanded] = useState(false);
+return (
+  <div className="grid grid-cols-2 gap-4">
+    <Card className="border-border bg-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5 text-amber-500" />
+          <CardTitle className="text-xl">Azioni Necessarie</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        ...
+      </CardContent>
+    </Card>
+```
 
-  if (items.length === 0) return null;
-
-  return (
-    <div className="py-2 border-b border-border/50 last:border-b-0">
-      {/* Header row - div cliccabile invece di button */}
-      <div 
-        role="button"
-        tabIndex={0}
-        onClick={() => setIsExpanded(!isExpanded)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
-        className="flex items-center gap-2 w-full text-left hover:bg-muted/30 rounded px-1 -mx-1 transition-colors cursor-pointer"
-      >
-        <Icon className={`w-4 h-4 ${iconColor} shrink-0`} />
-        <span className="text-sm font-bold text-foreground">{title}</span>
-        
-        {/* Badge con tooltip - STESSO ORDINE ORIGINALE */}
-        {statusBadge && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span 
-                className={`inline-flex items-center rounded-full border text-[10px] px-1.5 py-0 h-4 cursor-help ${statusBadge.colorClass}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {statusBadge.label}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{BADGE_TOOLTIPS[statusBadge.label] || statusBadge.label}</p>
-            </TooltipContent>
-          </Tooltip>
-        )}
-        
-        <span className="text-xs text-muted-foreground">
-          ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
-        </span>
-        <span className="text-xs text-muted-foreground ml-auto">
-          {isExpanded ? '▲' : '▼'}
-        </span>
+**Dopo:**
+```typescript
+return (
+  <div className="grid grid-cols-2 gap-4">
+    {/* Card esterna più scura - sfondo principale */}
+    <div className="rounded-lg border border-border bg-background-secondary p-4">
+      {/* Header sulla card esterna */}
+      <div className="flex items-center gap-2 mb-3">
+        <AlertTriangle className="w-5 h-5 text-amber-500" />
+        <h3 className="text-xl font-semibold text-card-foreground">Posizioni da monitorare</h3>
       </div>
       
-      {/* Expandable items */}
-      {isExpanded && (
-        <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-6">
-          {items.map((item, idx) => renderItem(item, idx))}
-        </div>
-      )}
+      {/* Card interna più chiara - contenuto */}
+      <Card className="border-border bg-card">
+        <CardContent className="pt-4">
+          ...
+        </CardContent>
+      </Card>
     </div>
-  );
-}
 ```
 
-## Perché Funziona
+## Dettagli Stilistici
 
-- **Radix Tooltip funziona** quando il trigger non è annidato in un `<button>` nativo
-- Usando `<div role="button">` al posto di `<button>`, il tooltip può ricevere correttamente gli eventi hover/focus
-- L'ordine degli elementi rimane esattamente come prima: Icona → Titolo → Badge → Contatore → Freccia
-- `e.stopPropagation()` sul badge impedisce che il click sul badge espanda/contragga la sezione
+| Elemento | Classe/Sfondo | Risultato |
+|----------|---------------|-----------|
+| Card esterna | `bg-background-secondary` | Sfondo più scuro (HSL 220 18% 10%) |
+| Card interna | `bg-card` | Sfondo più chiaro (HSL 220 18% 10%) - già presente |
+| Bordo esterno | `border-border` | Bordo visibile sulla card principale |
+| Padding | `p-4` | Spazio tra card esterna e interna |
 
 ## File da Modificare
 
-- `src/components/derivatives/DerivativesSummaryCard.tsx` - Solo il componente `CompactSection` (righe 64-108)
+- `src/components/derivatives/DerivativesSummaryCard.tsx` - Righe 442-520 circa
 
-## Risultato Atteso
+## Risultato Visivo
 
-| Elemento | Posizione | Comportamento |
-|----------|-----------|---------------|
-| Icona | Sinistra | Cliccabile per espandere |
-| Titolo | Dopo icona | Cliccabile per espandere |
-| Badge | Dopo titolo | Mostra tooltip all'hover |
-| Contatore | Dopo badge | Cliccabile per espandere |
-| Freccia | Destra | Cliccabile per espandere |
+L'effetto finale mostrerà:
+- Un contenitore più scuro con il titolo "Posizioni da monitorare" e l'icona di warning
+- Una card bianca sovrapposta contenente tutte le sezioni espandibili
+- L'impressione di profondità e gerarchia visiva
 
