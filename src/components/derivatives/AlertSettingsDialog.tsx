@@ -115,6 +115,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   
   // Local state for editing
   const [globalThresholds, setGlobalThresholds] = useState<Record<AlertType, number>>({} as Record<AlertType, number>);
+  const [distanceEnabled, setDistanceEnabled] = useState<Record<AlertType, boolean>>({} as Record<AlertType, boolean>);
   const [actionToggles, setActionToggles] = useState<Record<AlertType, boolean>>({} as Record<AlertType, boolean>);
   const [cooldownMinutes, setCooldownMinutes] = useState(DEFAULT_COOLDOWN_MINUTES);
   const [tickerOverrides, setTickerOverrides] = useState<Array<{ ticker: string; alertTypes: AlertType[]; threshold: number }>>([]);
@@ -138,13 +139,16 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
       return;
     }
     
-    // Set global thresholds
+    // Set global thresholds and enabled states for distance alerts
     const thresholds: Record<AlertType, number> = {} as Record<AlertType, number>;
+    const enabledStates: Record<AlertType, boolean> = {} as Record<AlertType, boolean>;
     DISTANCE_ALERT_TYPES.forEach(type => {
       const config = configs.find(c => c.alert_type === type && c.ticker === null);
       thresholds[type] = config?.threshold_pct ?? DEFAULT_DISTANCE_THRESHOLD_PCT;
+      enabledStates[type] = config?.enabled ?? true;
     });
     setGlobalThresholds(thresholds);
+    setDistanceEnabled(enabledStates);
     
     // Set action toggles
     const toggles: Record<AlertType, boolean> = {} as Record<AlertType, boolean>;
@@ -195,14 +199,14 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
         enabled?: boolean;
       }> = [];
       
-      // Global distance thresholds
+      // Global distance thresholds with enabled state
       DISTANCE_ALERT_TYPES.forEach(type => {
         configsToUpsert.push({
           alert_type: type,
           ticker: null,
           threshold_pct: globalThresholds[type] ?? DEFAULT_DISTANCE_THRESHOLD_PCT,
           cooldown_minutes: cooldownMinutes,
-          enabled: true,
+          enabled: distanceEnabled[type] ?? true,
         });
       });
       
@@ -379,49 +383,78 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                     Soglie globali per gli avvisi di distanza dallo strike. Valori più bassi = avvisi più tempestivi.
                   </p>
                   
-                  {GROUPED_DISTANCE_ALERTS.map(group => (
-                    <div key={group.label} className="space-y-3 p-4 border rounded-lg">
-                      <h4 className="font-medium">{group.label}</h4>
-                      
-                      {group.callType && (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label className="text-sm">Lato Call (prezzo sale)</Label>
-                            <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
-                              {globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
-                            </span>
-                          </div>
-                          <Slider
-                            value={[globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
-                            onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.callType!]: val }))}
-                            min={1}
-                            max={20}
-                            step={0.5}
-                            className="w-full"
+                  {GROUPED_DISTANCE_ALERTS.map(group => {
+                    // Determine if the whole group is enabled
+                    const groupAlertTypes = [group.callType, group.putType].filter(Boolean) as AlertType[];
+                    const isGroupEnabled = groupAlertTypes.some(type => distanceEnabled[type] ?? true);
+                    
+                    // Toggle handler for the group
+                    const handleGroupToggle = (enabled: boolean) => {
+                      setDistanceEnabled(prev => {
+                        const updated = { ...prev };
+                        groupAlertTypes.forEach(type => {
+                          updated[type] = enabled;
+                        });
+                        return updated;
+                      });
+                    };
+                    
+                    return (
+                      <div key={group.label} className={`space-y-3 p-4 border rounded-lg transition-opacity ${!isGroupEnabled ? 'opacity-50' : ''}`}>
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-medium">{group.label}</h4>
+                          <Switch
+                            checked={isGroupEnabled}
+                            onCheckedChange={handleGroupToggle}
                           />
                         </div>
-                      )}
-                      
-                      {group.putType && (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label className="text-sm">Lato Put (prezzo scende)</Label>
-                            <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
-                              {globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
-                            </span>
+                        
+                        {group.callType && (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label className={`text-sm ${!isGroupEnabled ? 'text-muted-foreground' : ''}`}>
+                                Lato Call (prezzo sale)
+                              </Label>
+                              <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                                {globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
+                              </span>
+                            </div>
+                            <Slider
+                              value={[globalThresholds[group.callType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
+                              onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.callType!]: val }))}
+                              min={0}
+                              max={20}
+                              step={0.5}
+                              className="w-full"
+                              disabled={!isGroupEnabled}
+                            />
                           </div>
-                          <Slider
-                            value={[globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
-                            onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.putType!]: val }))}
-                            min={1}
-                            max={20}
-                            step={0.5}
-                            className="w-full"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                        )}
+                        
+                        {group.putType && (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label className={`text-sm ${!isGroupEnabled ? 'text-muted-foreground' : ''}`}>
+                                Lato Put (prezzo scende)
+                              </Label>
+                              <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                                {globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT}%
+                              </span>
+                            </div>
+                            <Slider
+                              value={[globalThresholds[group.putType] ?? DEFAULT_DISTANCE_THRESHOLD_PCT]}
+                              onValueChange={([val]) => setGlobalThresholds(prev => ({ ...prev, [group.putType!]: val }))}
+                              min={0}
+                              max={20}
+                              step={0.5}
+                              className="w-full"
+                              disabled={!isGroupEnabled}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </ScrollArea>
             </TabsContent>

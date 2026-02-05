@@ -127,6 +127,16 @@ export const DEFAULT_COOLDOWN_MINUTES = 240;
 // Grouped distance alert types for UI display
 export const GROUPED_DISTANCE_ALERTS = [
   {
+    label: 'Covered Call',
+    callType: ALERT_TYPES.DISTANCE_COVERED_CALL,
+    putType: null,
+  },
+  {
+    label: 'Naked Put',
+    callType: null,
+    putType: ALERT_TYPES.DISTANCE_NAKED_PUT,
+  },
+  {
     label: 'Iron Condor',
     callType: ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL,
     putType: ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT,
@@ -140,15 +150,5 @@ export const GROUPED_DISTANCE_ALERTS = [
     label: 'Alternative DD',
     callType: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_CALL,
     putType: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_PUT,
-  },
-  {
-    label: 'Covered Call',
-    callType: ALERT_TYPES.DISTANCE_COVERED_CALL,
-    putType: null,
-  },
-  {
-    label: 'Naked Put',
-    callType: null,
-    putType: ALERT_TYPES.DISTANCE_NAKED_PUT,
   },
 ];
