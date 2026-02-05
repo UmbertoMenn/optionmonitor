@@ -1,124 +1,96 @@
 
-# Piano: Correzione Ticker Non Risolti nel Dialog Avvisi
+# Piano: Miglioramento Avvisi di Distanza
 
-## Problema Identificato
+## Modifiche Richieste
 
-Dallo screenshot l'utente vede che MSFT e NFLX sono risolti correttamente, ma AMAZON.COM.INC, Abercrombie & fitch co, e Adobe Inc sono mostrati come "ticker non risolti".
-
-### Causa Radice
-
-La logica attuale in `Derivatives.tsx` (linee 107-137) **esclude selettivamente** alcuni underlying dal fetch dei prezzi:
-
-```typescript
-const allUnderlyingNames = useMemo(() => {
-  const names = new Set<string>();
-  
-  // Iron Condors - OK
-  categories.ironCondors.forEach(ic => names.add(ic.underlying));
-  
-  // Double Diagonals - OK
-  categories.doubleDiagonals.forEach(dd => names.add(dd.underlying));
-  
-  // Naked Puts - SOLO se non hanno underlying in portafoglio!
-  categories.nakedPuts.forEach(np => {
-    if (!np.underlying?.current_price && np.option.underlying) {
-      names.add(np.option.underlying);
-    }
-  });
-  
-  // Leap Calls - SOLO se non hanno underlying in portafoglio!
-  categories.leapCalls.forEach(lc => {
-    if (!lc.underlying?.current_price && lc.option.underlying) {
-      names.add(lc.option.underlying);
-    }
-  });
-  
-  // Covered Calls - NON INCLUSE!
-  // groupedOtherStrategies - OK
-}, [categories]);
-```
-
-**Problema**: Le **Covered Calls non sono incluse** e le Naked Puts/Leap Calls con sottostante in portafoglio sono escluse. Quindi `underlyingPrices` contiene solo MSFT e NFLX (probabilmente Iron Condor/Double Diagonal), mentre AMAZON, Adobe, Abercrombie (Covered Calls o Naked Puts con sottostante) non vengono mai fetchati.
-
----
-
-## Soluzione
-
-Modificare la raccolta degli underlying in `Derivatives.tsx` per includere **TUTTI** gli underlying, indipendentemente dal fatto che abbiano già un prezzo in portafoglio. Il prezzo può essere già disponibile, ma ci serve comunque il **ticker risolto** dalla edge function.
+1. **Slider da 0%**: Permettere di impostare la soglia di distanza a partire da 0% (attualmente parte da 1%)
+2. **Disattivazione completa**: Aggiungere un toggle on/off per disattivare completamente ogni tipo di avviso di distanza
+3. **Riordinamento**: Posizionare Covered Call e Naked Put per primi nella lista
 
 ---
 
 ## Modifiche Tecniche
 
-### File: `src/pages/Derivatives.tsx`
+### File 1: `src/types/alerts.ts`
 
-Modifica alla logica `allUnderlyingNames`:
+Riordinare l'array `GROUPED_DISTANCE_ALERTS`:
 
 ```typescript
-// Extract all unique underlying names for price fetching
-const allUnderlyingNames = useMemo(() => {
-  const names = new Set<string>();
-  
-  // Iron Condors
-  categories.ironCondors.forEach(ic => names.add(ic.underlying));
-  
-  // Double Diagonals
-  categories.doubleDiagonals.forEach(dd => names.add(dd.underlying));
-  
-  // Naked Puts - TUTTI, non solo quelli senza prezzo
-  categories.nakedPuts.forEach(np => {
-    if (np.option.underlying) {
-      names.add(np.option.underlying);
-    }
-  });
-  
-  // Leap Calls - TUTTI, non solo quelli senza prezzo
-  categories.leapCalls.forEach(lc => {
-    if (lc.option.underlying) {
-      names.add(lc.option.underlying);
-    }
-  });
-  
-  // Covered Calls - AGGIUNGERE!
-  categories.coveredCalls.forEach(cc => {
-    if (cc.option.underlying) {
-      names.add(cc.option.underlying);
-    }
-  });
-  
-  // Long Puts (protezioni)
-  categories.longPuts.forEach(lp => {
-    if (lp.option.underlying) {
-      names.add(lp.option.underlying);
-    }
-  });
-  
-  // Grouped Other Strategies
-  categories.groupedOtherStrategies.forEach(group => {
-    names.add(group.underlying);
-  });
-  
-  return Array.from(names);
-}, [categories]);
+export const GROUPED_DISTANCE_ALERTS = [
+  {
+    label: 'Covered Call',
+    callType: ALERT_TYPES.DISTANCE_COVERED_CALL,
+    putType: null,
+  },
+  {
+    label: 'Naked Put',
+    callType: null,
+    putType: ALERT_TYPES.DISTANCE_NAKED_PUT,
+  },
+  {
+    label: 'Iron Condor',
+    callType: ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL,
+    putType: ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT,
+  },
+  {
+    label: 'Double Diagonal',
+    callType: ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_CALL,
+    putType: ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_PUT,
+  },
+  {
+    label: 'Alternative DD',
+    callType: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_CALL,
+    putType: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_PUT,
+  },
+];
 ```
 
+### File 2: `src/components/derivatives/AlertSettingsDialog.tsx`
+
+**Cambio 1**: Slider da 0% invece di 1%
+```typescript
+<Slider
+  min={0}  // Era min={1}
+  max={20}
+  step={0.5}
+/>
+```
+
+**Cambio 2**: Aggiungere stato per abilitazione/disabilitazione
+```typescript
+const [distanceEnabled, setDistanceEnabled] = useState<Record<AlertType, boolean>>({} as Record<AlertType, boolean>);
+```
+
+**Cambio 3**: Aggiungere Switch per ogni gruppo di avvisi
+```typescript
+<div className="flex items-center justify-between">
+  <h4 className="font-medium">{group.label}</h4>
+  <Switch
+    checked={/* stato enabled per questo gruppo */}
+    onCheckedChange={/* toggle */}
+  />
+</div>
+```
+
+**Cambio 4**: Disabilitare visivamente gli slider quando l'avviso è disattivato
+
 ---
 
-## Risultato Atteso
+## UI Risultante
 
-Dopo questa modifica:
+Per ogni strategia (es. Covered Call):
 
-1. La edge function `fetch-underlying-prices` riceverà TUTTI gli underlying (inclusi AMAZON.COM.INC, Adobe Inc, Abercrombie & fitch co)
-2. La edge function risolverà i ticker (AMZN, ADBE, ANF)
-3. L'oggetto `underlyingPrices` conterrà tutti i ticker risolti
-4. Il dialog "Gestione Avvisi" mostrerà tutti i ticker disponibili senza "non risolti"
+```text
+┌─────────────────────────────────────────┐
+│ Covered Call                        [●] │  ← Toggle on/off
+├─────────────────────────────────────────┤
+│ Lato Call (prezzo sale)            5%   │
+│ ○──────────●──────────────────────────  │  ← Slider 0-20%
+└─────────────────────────────────────────┘
+```
 
----
-
-## Sequenza Implementazione
-
-1. **Modifica `Derivatives.tsx`**: Aggiungere Covered Calls e rimuovere condizioni restrittive per Naked Puts/Leap Calls
-2. **Test**: Verificare che la edge function riceva tutti gli underlying e restituisca i ticker
+- Se disabilitato → slider in grigio, non interattivo
+- Se soglia = 0% → l'avviso scatta immediatamente quando il prezzo tocca lo strike
 
 ---
 
@@ -126,4 +98,5 @@ Dopo questa modifica:
 
 | File | Modifica |
 |------|----------|
-| `src/pages/Derivatives.tsx` | Espandere `allUnderlyingNames` per includere tutti gli underlying da tutte le categorie |
+| `src/types/alerts.ts` | Riordinare `GROUPED_DISTANCE_ALERTS` con Covered Call e Naked Put per primi |
+| `src/components/derivatives/AlertSettingsDialog.tsx` | Slider da 0%, aggiungere toggle enabled/disabled per ogni gruppo |
