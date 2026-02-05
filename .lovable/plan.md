@@ -1,102 +1,246 @@
 
-# Piano: Miglioramento Avvisi di Distanza
+# Piano: Aggiornamento Prezzi Sottostanti con Cache Centralizzata
 
-## Modifiche Richieste
-
-1. **Slider da 0%**: Permettere di impostare la soglia di distanza a partire da 0% (attualmente parte da 1%)
-2. **Disattivazione completa**: Aggiungere un toggle on/off per disattivare completamente ogni tipo di avviso di distanza
-3. **Riordinamento**: Posizionare Covered Call e Naked Put per primi nella lista
-
----
-
-## Modifiche Tecniche
-
-### File 1: `src/types/alerts.ts`
-
-Riordinare l'array `GROUPED_DISTANCE_ALERTS`:
-
-```typescript
-export const GROUPED_DISTANCE_ALERTS = [
-  {
-    label: 'Covered Call',
-    callType: ALERT_TYPES.DISTANCE_COVERED_CALL,
-    putType: null,
-  },
-  {
-    label: 'Naked Put',
-    callType: null,
-    putType: ALERT_TYPES.DISTANCE_NAKED_PUT,
-  },
-  {
-    label: 'Iron Condor',
-    callType: ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL,
-    putType: ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT,
-  },
-  {
-    label: 'Double Diagonal',
-    callType: ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_CALL,
-    putType: ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_PUT,
-  },
-  {
-    label: 'Alternative DD',
-    callType: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_CALL,
-    putType: ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_PUT,
-  },
-];
-```
-
-### File 2: `src/components/derivatives/AlertSettingsDialog.tsx`
-
-**Cambio 1**: Slider da 0% invece di 1%
-```typescript
-<Slider
-  min={0}  // Era min={1}
-  max={20}
-  step={0.5}
-/>
-```
-
-**Cambio 2**: Aggiungere stato per abilitazione/disabilitazione
-```typescript
-const [distanceEnabled, setDistanceEnabled] = useState<Record<AlertType, boolean>>({} as Record<AlertType, boolean>);
-```
-
-**Cambio 3**: Aggiungere Switch per ogni gruppo di avvisi
-```typescript
-<div className="flex items-center justify-between">
-  <h4 className="font-medium">{group.label}</h4>
-  <Switch
-    checked={/* stato enabled per questo gruppo */}
-    onCheckedChange={/* toggle */}
-  />
-</div>
-```
-
-**Cambio 4**: Disabilitare visivamente gli slider quando l'avviso è disattivato
+## Obiettivo
+Implementare un sistema di aggiornamento prezzi centralizzato per i sottostanti dei derivati, con:
+- Cron job ogni **5 minuti** durante le ore di mercato (8-22, lun-ven)
+- Cache condivisa per tutti gli utenti (evita chiamate duplicate)
+- Yahoo Finance come fonte dati (delay ~15 minuti)
 
 ---
 
-## UI Risultante
-
-Per ogni strategia (es. Covered Call):
+## Architettura
 
 ```text
-┌─────────────────────────────────────────┐
-│ Covered Call                        [●] │  ← Toggle on/off
-├─────────────────────────────────────────┤
-│ Lato Call (prezzo sale)            5%   │
-│ ○──────────●──────────────────────────  │  ← Slider 0-20%
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      CRON JOB (ogni 5 min)                      │
+│                  update-underlying-prices-cron                  │
+│                                                                 │
+│  1. Legge ticker unici da underlying_mappings                   │
+│  2. Fetch batch da Yahoo Finance                                │
+│  3. Upsert in tabella underlying_prices                         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    TABELLA underlying_prices                    │
+│  (cache centralizzata - lettura pubblica)                       │
+│                                                                 │
+│  ticker | price  | currency | updated_at                       │
+│  NVDA   | 125.50 | USD      | 2026-02-05 14:30:00              │
+│  AMZN   | 185.20 | USD      | 2026-02-05 14:30:00              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                useUnderlyingPrices (Frontend)                   │
+│                                                                 │
+│  1. Query DB → underlying_prices (istantanea)                   │
+│  2. Per ticker mancanti → edge function on-demand               │
+│  3. Return prezzi combinati                                     │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-- Se disabilitato → slider in grigio, non interattivo
-- Se soglia = 0% → l'avviso scatta immediatamente quando il prezzo tocca lo strike
 
 ---
 
-## File da Modificare
+## Modifiche da Implementare
 
-| File | Modifica |
-|------|----------|
-| `src/types/alerts.ts` | Riordinare `GROUPED_DISTANCE_ALERTS` con Covered Call e Naked Put per primi |
-| `src/components/derivatives/AlertSettingsDialog.tsx` | Slider da 0%, aggiungere toggle enabled/disabled per ogni gruppo |
+### 1. Nuova Tabella `underlying_prices`
+
+**Scopo**: Cache centralizzata dei prezzi, aggiornata dal cron e letta da tutti gli utenti.
+
+```sql
+CREATE TABLE underlying_prices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticker TEXT NOT NULL UNIQUE,
+  price DECIMAL(15, 4) NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indice per lookup veloce
+CREATE INDEX idx_underlying_prices_ticker ON underlying_prices(ticker);
+
+-- RLS: lettura pubblica (dati non sensibili - prezzi di mercato)
+ALTER TABLE underlying_prices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Anyone can read underlying prices"
+  ON underlying_prices FOR SELECT USING (true);
+```
+
+### 2. Nuova Edge Function: `update-underlying-prices-cron`
+
+**File**: `supabase/functions/update-underlying-prices-cron/index.ts`
+
+**Logica**:
+1. Legge tutti i ticker unici dalla tabella `underlying_mappings`
+2. Per ogni ticker, chiama Yahoo Finance (con rate limiting 100ms tra chiamate)
+3. Upsert dei prezzi nella tabella `underlying_prices`
+4. Log del numero di prezzi aggiornati
+
+```typescript
+// Pseudo-codice
+serve(async (req) => {
+  // 1. Leggi tutti i ticker unici
+  const { data: mappings } = await supabase
+    .from('underlying_mappings')
+    .select('ticker');
+  
+  const uniqueTickers = [...new Set(mappings.map(m => m.ticker))];
+  
+  // 2. Fetch batch da Yahoo Finance
+  for (const ticker of uniqueTickers) {
+    const price = await fetchYahooPrice(ticker);
+    if (price) {
+      await supabase
+        .from('underlying_prices')
+        .upsert({ ticker, price: price.price, currency: price.currency });
+    }
+    await delay(100); // Rate limiting
+  }
+  
+  return { updated: count };
+});
+```
+
+### 3. Attivazione Cron Job
+
+**Schedule**: `*/5 8-22 * * 1-5` (ogni 5 minuti, 8:00-22:00, lunedì-venerdì)
+
+```sql
+SELECT cron.schedule(
+  'update-underlying-prices-every-5-min',
+  '*/5 8-22 * * 1-5',
+  $$
+  SELECT net.http_post(
+    url:='https://uareyloxlpvaxmzygpgo.supabase.co/functions/v1/update-underlying-prices-cron',
+    headers:=jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+    ),
+    body:='{}'::jsonb
+  );
+  $$
+);
+```
+
+### 4. Modifica Hook `useUnderlyingPrices`
+
+**File**: `src/hooks/useUnderlyingPrices.ts`
+
+**Nuovo flusso**:
+1. Prima query sulla tabella `underlying_prices` per ottenere prezzi dalla cache
+2. Identifica ticker mancanti (non in cache o non mappati)
+3. Solo per i mancanti, chiama l'edge function `fetch-underlying-prices`
+4. Combina risultati cache + fresh
+
+```typescript
+// Nuovo flusso nel hook
+async function fetchPrices() {
+  // 1. Risolvi underlying -> ticker usando underlying_mappings
+  const { data: mappings } = await supabase
+    .from('underlying_mappings')
+    .select('underlying, ticker')
+    .in('underlying', uniqueUnderlyings);
+  
+  // 2. Leggi prezzi dalla cache
+  const tickers = mappings.map(m => m.ticker);
+  const { data: cachedPrices } = await supabase
+    .from('underlying_prices')
+    .select('*')
+    .in('ticker', tickers);
+  
+  // 3. Costruisci risultato dalla cache
+  const results = {};
+  for (const underlying of uniqueUnderlyings) {
+    const mapping = mappings.find(m => m.underlying === underlying);
+    if (mapping) {
+      const cached = cachedPrices.find(p => p.ticker === mapping.ticker);
+      if (cached) {
+        results[underlying] = { 
+          price: cached.price, 
+          currency: cached.currency, 
+          ticker: mapping.ticker 
+        };
+      }
+    }
+  }
+  
+  // 4. Per mancanti, chiama edge function
+  const missingUnderlyings = uniqueUnderlyings.filter(u => !results[u]);
+  if (missingUnderlyings.length > 0) {
+    const { data } = await supabase.functions.invoke('fetch-underlying-prices', {
+      body: { underlyings: missingUnderlyings }
+    });
+    Object.assign(results, data.prices);
+  }
+  
+  return results;
+}
+```
+
+### 5. Modifica `fetch-underlying-prices` Edge Function
+
+**File**: `supabase/functions/fetch-underlying-prices/index.ts`
+
+**Modifica**: Dopo aver recuperato il prezzo, salvarlo anche nella cache `underlying_prices`:
+
+```typescript
+// Dopo aver ottenuto il prezzo da Yahoo
+if (priceResult) {
+  // Salva nella cache underlying_prices
+  await supabase
+    .from('underlying_prices')
+    .upsert({
+      ticker,
+      price: priceResult.price,
+      currency: priceResult.currency,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'ticker' });
+  
+  results[underlying] = { ... };
+}
+```
+
+### 6. Configurazione `config.toml`
+
+Aggiungere la nuova edge function:
+
+```toml
+[functions.update-underlying-prices-cron]
+verify_jwt = false
+```
+
+---
+
+## Vantaggi della Soluzione
+
+| Aspetto | Prima | Dopo |
+|---------|-------|------|
+| Chiamate Yahoo/utente | N chiamate per utente | 0 (cache) |
+| Latenza UI | 2-5 sec (API calls) | ~100ms (query DB) |
+| Aggiornamento | On-demand | Automatico ogni 5 min |
+| Duplicazione | Chiamate duplicate per stesso ticker | Cache condivisa |
+| Fallback | - | Edge function per ticker nuovi |
+
+---
+
+## File da Creare/Modificare
+
+| File | Azione | Descrizione |
+|------|--------|-------------|
+| **Migrazione SQL** | Creare | Tabella `underlying_prices`, indici, RLS |
+| `supabase/functions/update-underlying-prices-cron/index.ts` | Creare | Edge function per cron job |
+| `supabase/config.toml` | Modificare | Aggiungere configurazione nuova function |
+| `src/hooks/useUnderlyingPrices.ts` | Modificare | Query cache prima, fallback edge function |
+| `supabase/functions/fetch-underlying-prices/index.ts` | Modificare | Salvare prezzi in cache dopo fetch |
+| **Cron SQL** | Eseguire | Attivare job schedulato |
+
+---
+
+## Note Tecniche
+
+- **Yahoo Finance delay**: I dati gratuiti hanno un ritardo di ~15 minuti
+- **Rate limiting**: 100ms delay tra chiamate per evitare blocchi
+- **Extensioni richieste**: `pg_cron` e `pg_net` (già disponibili)
+- **Ore mercato**: 8:00-22:00 CET copre sia mercati US che EU
