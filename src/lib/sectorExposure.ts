@@ -156,6 +156,19 @@ const COMPANY_NAME_TO_TICKER: Record<string, string> = {
   'COINBASE': 'COIN',
   'MICROSTRATEGY': 'MSTR',
   'COREWEAVE': 'CRWV',
+  // Additional mappings for commonly missed stocks
+  'APPLIED DIGITAL': 'APLD',
+  'APLD': 'APLD',
+  'SUPER MICRO': 'SMCI',
+  'SUPERMICRO': 'SMCI',
+  'SOUNDHOUND': 'SOUN',
+  'NUSCALE': 'SMR',
+  'RIGETTI': 'RGTI',
+  'NEBIUS': 'NBIS',
+  'HIMS': 'HIMS',
+  'PALO ALTO': 'PANW',
+  'PDD': 'PDD',
+  'ALIBABA': 'BABA',
 };
 
 // Normalize sector names to standard GICS format
