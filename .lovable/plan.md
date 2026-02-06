@@ -1,296 +1,110 @@
 
-# Piano: Sistema di Notifiche Ibrido Email + Telegram
 
-## Panoramica
+# Piano: Completamento Sistema Notifiche Ibrido Email + Telegram
 
-Implementazione di un sistema di notifiche in tempo reale che invia avvisi via Email (Resend) e Telegram quando viene creato un nuovo alert nel sistema.
+## Stato Attuale
 
-```text
-┌─────────────────┐     ┌──────────────┐     ┌────────────────────┐
-│  check-alerts   │────▶│    INSERT    │────▶│  Database Trigger  │
-│  (Edge Fn)      │     │   alerts     │     │  on_new_alert      │
-└─────────────────┘     └──────────────┘     └─────────┬──────────┘
-                                                       │
-                                                       ▼
-                                             ┌────────────────────┐
-                                             │  send-notification │
-                                             │  (Edge Function)   │
-                                             └─────────┬──────────┘
-                                                       │
-                              ┌────────────────────────┼────────────────────────┐
-                              ▼                        ▼                        ▼
-                     ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-                     │    Email     │         │   Telegram   │         │    Admin     │
-                     │  (Resend)    │         │   (Bot API)  │         │  Notifiche   │
-                     └──────────────┘         └──────────────┘         └──────────────┘
-```
+Il database e il trigger sono già configurati. Mancano le Edge Functions e l'interfaccia utente.
 
----
+## Fase 1: Configurazione Secrets
 
-## Fase 1: Aggiornamento Schema Database
+Prima di procedere con l'implementazione, sono necessarie due chiavi API:
 
-### 1.1 Estendere tabella `profiles`
+### RESEND_API_KEY
+Per inviare email professionali. Come ottenerla:
+1. Vai su https://resend.com e crea un account gratuito
+2. Vai su https://resend.com/domains e verifica il tuo dominio email
+3. Vai su https://resend.com/api-keys e crea una nuova API key
+4. Copia la chiave (inizia con `re_`)
 
-Aggiungere campi per preferenze notifiche:
-
-```sql
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS 
-  notify_email boolean DEFAULT true;
-
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS 
-  notify_telegram boolean DEFAULT false;
-
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS 
-  telegram_chat_id text;
-
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS 
-  is_admin boolean DEFAULT false;
-```
-
-### 1.2 Creare tabella `notification_logs`
-
-Per tracciare le notifiche inviate:
-
-```sql
-CREATE TABLE public.notification_logs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  alert_id uuid REFERENCES public.alerts(id) ON DELETE CASCADE,
-  user_id uuid NOT NULL,
-  channel text NOT NULL, -- 'email' | 'telegram'
-  status text NOT NULL,  -- 'sent' | 'failed'
-  error_message text,
-  created_at timestamptz DEFAULT now()
-);
-
--- RLS
-ALTER TABLE public.notification_logs ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can view own notification logs"
-  ON public.notification_logs FOR SELECT
-  TO authenticated
-  USING (auth.uid() = user_id);
-```
-
-### 1.3 Creare Database Trigger
-
-```sql
-CREATE OR REPLACE FUNCTION notify_on_new_alert()
-RETURNS TRIGGER AS $$
-BEGIN
-  PERFORM net.http_post(
-    url := 'https://uareyloxlpvaxmzygpgo.supabase.co/functions/v1/send-notification',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || current_setting('supabase.service_role_key', true)
-    ),
-    body := jsonb_build_object(
-      'alert_id', NEW.id,
-      'user_id', NEW.user_id,
-      'ticker', NEW.ticker,
-      'message', NEW.message,
-      'severity', NEW.severity,
-      'alert_type', NEW.alert_type
-    )
-  );
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-CREATE TRIGGER on_new_alert
-  AFTER INSERT ON public.alerts
-  FOR EACH ROW
-  EXECUTE FUNCTION notify_on_new_alert();
-```
+### TELEGRAM_BOT_TOKEN
+Per inviare messaggi Telegram. Come ottenerlo:
+1. Apri Telegram e cerca @BotFather
+2. Invia `/newbot` e segui le istruzioni
+3. Copia il token (formato: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
 
 ---
 
 ## Fase 2: Edge Function `send-notification`
 
-### 2.1 Struttura
+Creare `supabase/functions/send-notification/index.ts`:
 
-```text
-supabase/functions/send-notification/index.ts
-```
-
-### 2.2 Logica Principale
-
-```typescript
-// Pseudo-codice della logica
-async function handleNotification(alertData) {
-  // 1. Recupera profilo utente
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('email, full_name, notify_email, notify_telegram, telegram_chat_id')
-    .eq('user_id', alertData.user_id)
-    .single();
-  
-  // 2. Recupera admin (per notifiche admin)
-  const { data: admins } = await supabase
-    .from('profiles')
-    .select('email, telegram_chat_id, notify_email, notify_telegram')
-    .eq('is_admin', true);
-  
-  // 3. Invia Email se abilitato
-  if (profile.notify_email) {
-    await sendEmail(profile.email, alertData);
-  }
-  
-  // 4. Invia Telegram se abilitato
-  if (profile.notify_telegram && profile.telegram_chat_id) {
-    await sendTelegram(profile.telegram_chat_id, alertData);
-  }
-  
-  // 5. Notifica admin
-  for (const admin of admins) {
-    if (admin.notify_email) await sendEmail(admin.email, alertData, true);
-    if (admin.notify_telegram && admin.telegram_chat_id) {
-      await sendTelegram(admin.telegram_chat_id, alertData, true);
-    }
-  }
-}
-```
-
-### 2.3 Template Email
-
-```html
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #dc2626; color: white; padding: 16px; border-radius: 8px 8px 0 0;">
-    <h2>⚠️ Avviso Portfolio: ${ticker}</h2>
-  </div>
-  <div style="padding: 20px; background: #f9fafb; border-radius: 0 0 8px 8px;">
-    <p style="font-size: 16px; color: #111827;">${message}</p>
-    <table style="margin-top: 16px;">
-      <tr><td>Severità:</td><td><strong>${severity}</strong></td></tr>
-      <tr><td>Tipo:</td><td>${alert_type}</td></tr>
-      <tr><td>Data:</td><td>${created_at}</td></tr>
-    </table>
-    <a href="https://app.example.com/derivatives" 
-       style="display: inline-block; margin-top: 20px; padding: 12px 24px; 
-              background: #2563eb; color: white; text-decoration: none; 
-              border-radius: 6px;">
-      Visualizza Portafoglio
-    </a>
-  </div>
-</div>
-```
-
-### 2.4 Template Telegram
-
-```text
-🚨 *Avviso Portfolio*
-
-📈 *Ticker:* ${ticker}
-📝 *Messaggio:* ${message}
-⚡ *Severità:* ${severity}
-
-🔗 [Visualizza Dettagli](https://app.example.com/derivatives)
-```
+- Riceve dati alert dal trigger database
+- Recupera profilo utente e preferenze
+- Recupera admin dalla tabella `user_roles`
+- Invia Email via Resend se `notify_email = true`
+- Invia Telegram se `notify_telegram = true` e `telegram_chat_id` presente
+- Notifica anche gli admin
+- Registra risultati in `notification_logs`
 
 ---
 
-## Fase 3: Setup Telegram Bot
-
-### 3.1 Creare Bot
-
-1. Chattare con @BotFather su Telegram
-2. Comando: `/newbot`
-3. Scegliere nome: "Portfolio Alert Bot"
-4. Salvare il token API
-
-### 3.2 Edge Function per Linking
+## Fase 3: Edge Function `telegram-link`
 
 Creare `supabase/functions/telegram-link/index.ts`:
 
-- Genera codice temporaneo univoco per l'utente
-- Quando l'utente invia il codice al bot, associa il `chat_id` al profilo
+Gestisce due endpoint:
 
-```text
-Flusso Utente:
-1. Clicca "Collega Telegram" nell'app
-2. Riceve codice univoco (es: "LINK-A7F3K2")
-3. Invia codice al bot Telegram
-4. Bot verifica e salva chat_id nel profilo
-5. Conferma collegamento
+**POST /generate** - Genera codice di linking:
+- Crea codice univoco (es: LINK-A7F3K2)
+- Salva in `telegram_link_codes` con scadenza 10 minuti
+- Restituisce codice da mostrare all'utente
+
+**POST /verify** - Verifica codice dal bot:
+- Riceve `code` e `chat_id` dal webhook Telegram
+- Verifica validita e scadenza
+- Aggiorna `profiles.telegram_chat_id`
+- Marca codice come usato
+
+---
+
+## Fase 4: Frontend Components
+
+### 4.1 `src/hooks/useNotificationSettings.ts`
+Hook per gestire preferenze:
+- Fetch/update `notify_email`, `notify_telegram`
+- Generazione codice Telegram
+- Stato collegamento Telegram
+
+### 4.2 `src/components/settings/NotificationSettings.tsx`
+UI con:
+- Switch per Email notifications
+- Switch per Telegram notifications
+- Pulsante "Collega Telegram" con codice
+- Badge stato collegamento
+
+---
+
+## Fase 5: Aggiornamento Configurazione
+
+Aggiungere a `supabase/config.toml`:
+```toml
+[functions.send-notification]
+verify_jwt = false
+
+[functions.telegram-link]
+verify_jwt = false
 ```
 
 ---
 
-## Fase 4: UI per Preferenze Notifiche
+## File da Creare
 
-### 4.1 Nuovo componente: `NotificationSettings.tsx`
-
-```typescript
-// Checkbox per Email e Telegram
-// Pulsante per collegare Telegram
-// Indicatore stato collegamento
-
-<Card>
-  <CardHeader>
-    <CardTitle>Preferenze Notifiche</CardTitle>
-  </CardHeader>
-  <CardContent>
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Label>Notifiche Email</Label>
-        <Switch checked={notifyEmail} onCheckedChange={...} />
-      </div>
-      <div className="flex items-center justify-between">
-        <Label>Notifiche Telegram</Label>
-        <Switch checked={notifyTelegram} onCheckedChange={...} />
-      </div>
-      {notifyTelegram && !telegramChatId && (
-        <Button onClick={linkTelegram}>
-          <Send className="mr-2 h-4 w-4" />
-          Collega Telegram
-        </Button>
-      )}
-      {telegramChatId && (
-        <Badge variant="success">Telegram collegato ✓</Badge>
-      )}
-    </div>
-  </CardContent>
-</Card>
-```
+| File | Descrizione |
+|------|-------------|
+| `supabase/functions/send-notification/index.ts` | Invio notifiche Email e Telegram |
+| `supabase/functions/telegram-link/index.ts` | Gestione collegamento Telegram |
+| `src/hooks/useNotificationSettings.ts` | Hook gestione preferenze |
+| `src/components/settings/NotificationSettings.tsx` | UI preferenze notifiche |
 
 ---
 
-## Fase 5: Secrets Richiesti
+## Ordine Implementazione
 
-| Secret | Descrizione | Come ottenerlo |
-|--------|-------------|----------------|
-| `RESEND_API_KEY` | API key Resend | https://resend.com/api-keys |
-| `TELEGRAM_BOT_TOKEN` | Token bot Telegram | Da @BotFather |
+1. Richiesta secrets RESEND_API_KEY e TELEGRAM_BOT_TOKEN
+2. Creazione edge function `send-notification`
+3. Creazione edge function `telegram-link`
+4. Creazione hook e componente frontend
+5. Aggiornamento config.toml
+6. Deploy e test
 
----
-
-## File da Creare/Modificare
-
-| File | Azione | Descrizione |
-|------|--------|-------------|
-| Database Migration | Creare | Estensione profiles + notification_logs + trigger |
-| `supabase/functions/send-notification/index.ts` | Creare | Edge function per invio notifiche |
-| `supabase/functions/telegram-link/index.ts` | Creare | Edge function per collegamento Telegram |
-| `src/components/settings/NotificationSettings.tsx` | Creare | UI preferenze notifiche |
-| `src/hooks/useNotificationSettings.ts` | Creare | Hook per gestione preferenze |
-| `supabase/config.toml` | Modificare | Aggiungere nuove edge functions |
-
----
-
-## Ordine di Implementazione
-
-1. **Database**: Migrazione schema (profiles, notification_logs, trigger)
-2. **Secrets**: Richiedere RESEND_API_KEY e TELEGRAM_BOT_TOKEN
-3. **Edge Functions**: send-notification e telegram-link
-4. **Frontend**: NotificationSettings component e hook
-5. **Config**: Aggiornare supabase/config.toml
-6. **Testing**: Verificare flusso end-to-end
-
----
-
-## Note Tecniche
-
-- Il trigger usa `pg_net` per chiamare l'edge function in modo asincrono
-- Le notifiche admin vengono inviate in parallelo a quelle utente
-- I log delle notifiche permettono di tracciare errori e retry
-- Il collegamento Telegram usa codici con scadenza di 10 minuti
-- L'email usa Resend per alta deliverability e template HTML responsive
