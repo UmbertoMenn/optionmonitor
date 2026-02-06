@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.update-underlying-prices-cron]
 verify_jwt = false
+
+[functions.send-notification]
+verify_jwt = false
+
+[functions.telegram-link]
+verify_jwt = false
