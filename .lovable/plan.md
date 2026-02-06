@@ -1,110 +1,149 @@
 
 
-# Piano: Completamento Sistema Notifiche Ibrido Email + Telegram
+# Piano: Fix Ticker Resolution + Integrazione UI Notifiche
 
-## Stato Attuale
+## Problema 1: Ticker non trovati
 
-Il database e il trigger sono già configurati. Mancano le Edge Functions e l'interfaccia utente.
+### Causa Root
+Il frontend in `useUnderlyingPrices.ts` normalizza i nomi (rimuovendo CORP, INC, LTD) prima di fare la query:
 
-## Fase 1: Configurazione Secrets
+```typescript
+const normalizedUnderlyings = uniqueUnderlyings.map(u => normalizeName(u));
+const { data: mappings } = await supabase
+  .from('underlying_mappings')
+  .select('underlying, ticker')
+  .in('underlying', uniqueNormalized);
+```
 
-Prima di procedere con l'implementazione, sono necessarie due chiavi API:
+Ma la cache `underlying_mappings` contiene nomi NON normalizzati come "NVIDIA CORP", "ALPHABET INC".
 
-### RESEND_API_KEY
-Per inviare email professionali. Come ottenerla:
-1. Vai su https://resend.com e crea un account gratuito
-2. Vai su https://resend.com/domains e verifica il tuo dominio email
-3. Vai su https://resend.com/api-keys e crea una nuova API key
-4. Copia la chiave (inizia con `re_`)
+### Soluzione
+Modificare la logica di lookup per fare una ricerca case-insensitive con ILIKE o usare la stessa logica di matching del backend:
 
-### TELEGRAM_BOT_TOKEN
-Per inviare messaggi Telegram. Come ottenerlo:
-1. Apri Telegram e cerca @BotFather
-2. Invia `/newbot` e segui le istruzioni
-3. Copia il token (formato: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+1. **Opzione A (consigliata)**: Salvare SEMPRE i nomi normalizzati nel database durante il salvataggio nella edge function
 
----
-
-## Fase 2: Edge Function `send-notification`
-
-Creare `supabase/functions/send-notification/index.ts`:
-
-- Riceve dati alert dal trigger database
-- Recupera profilo utente e preferenze
-- Recupera admin dalla tabella `user_roles`
-- Invia Email via Resend se `notify_email = true`
-- Invia Telegram se `notify_telegram = true` e `telegram_chat_id` presente
-- Notifica anche gli admin
-- Registra risultati in `notification_logs`
+2. **Opzione B**: Modificare il frontend per fare una ricerca piu flessibile usando ILIKE su ogni underlying
 
 ---
 
-## Fase 3: Edge Function `telegram-link`
+## Problema 2: UI Notifiche Email/Telegram mancante
 
-Creare `supabase/functions/telegram-link/index.ts`:
+Il componente `NotificationSettings` esiste in `src/components/settings/NotificationSettings.tsx` ma non e integrato da nessuna parte.
 
-Gestisce due endpoint:
-
-**POST /generate** - Genera codice di linking:
-- Crea codice univoco (es: LINK-A7F3K2)
-- Salva in `telegram_link_codes` con scadenza 10 minuti
-- Restituisce codice da mostrare all'utente
-
-**POST /verify** - Verifica codice dal bot:
-- Riceve `code` e `chat_id` dal webhook Telegram
-- Verifica validita e scadenza
-- Aggiorna `profiles.telegram_chat_id`
-- Marca codice come usato
+### Soluzione
+Aggiungere un nuovo Tab "Notifiche" nel dialog `AlertSettingsDialog.tsx` che mostri il componente `NotificationSettings`.
 
 ---
 
-## Fase 4: Frontend Components
+## Modifiche Previste
 
-### 4.1 `src/hooks/useNotificationSettings.ts`
-Hook per gestire preferenze:
-- Fetch/update `notify_email`, `notify_telegram`
-- Generazione codice Telegram
-- Stato collegamento Telegram
+### File: `src/hooks/useUnderlyingPrices.ts`
+Correggere la logica di lookup per essere consistente con come i dati vengono salvati:
+- Rimuovere la normalizzazione prima della query
+- Cercare i nomi originali cosi come arrivano
+- Oppure usare una ricerca fuzzy con ILIKE
 
-### 4.2 `src/components/settings/NotificationSettings.tsx`
-UI con:
-- Switch per Email notifications
-- Switch per Telegram notifications
-- Pulsante "Collega Telegram" con codice
-- Badge stato collegamento
+### File: `supabase/functions/fetch-underlying-prices/index.ts`
+Assicurarsi che i mapping vengano salvati con chiavi normalizzate in modo consistente.
+
+### File: `src/components/derivatives/AlertSettingsDialog.tsx`
+- Aggiungere import di `NotificationSettings`
+- Aggiungere un quinto Tab "Notifiche" nella TabsList
+- Includere `NotificationSettings` nel TabsContent
 
 ---
 
-## Fase 5: Aggiornamento Configurazione
+## Schema Modifiche
 
-Aggiungere a `supabase/config.toml`:
-```toml
-[functions.send-notification]
-verify_jwt = false
-
-[functions.telegram-link]
-verify_jwt = false
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                    FIX TICKER RESOLUTION                             │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  PRIMA (BUG):                                                        │
+│  ┌────────────────┐     ┌────────────────┐     ┌──────────────────┐ │
+│  │  "NVIDIA CORP" │────▶│  normalize()   │────▶│  Query: "NVIDIA" │ │
+│  └────────────────┘     └────────────────┘     └──────────────────┘ │
+│                                                          │           │
+│                                    DB contiene:          ▼           │
+│                               "NVIDIA CORP" ≠ "NVIDIA"  ❌           │
+│                                                                      │
+│  DOPO (FIX):                                                         │
+│  ┌────────────────┐     ┌────────────────────────────────────────┐  │
+│  │  "NVIDIA CORP" │────▶│  Query originale O ricerca fuzzy       │  │
+│  └────────────────┘     └────────────────────────────────────────┘  │
+│                                                          │           │
+│                                    DB contiene:          ▼           │
+│                               "NVIDIA CORP" = Match!    ✅           │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## File da Creare
+## Ordine di Implementazione
 
-| File | Descrizione |
-|------|-------------|
-| `supabase/functions/send-notification/index.ts` | Invio notifiche Email e Telegram |
-| `supabase/functions/telegram-link/index.ts` | Gestione collegamento Telegram |
-| `src/hooks/useNotificationSettings.ts` | Hook gestione preferenze |
-| `src/components/settings/NotificationSettings.tsx` | UI preferenze notifiche |
+1. **Fix `useUnderlyingPrices.ts`**: Rimuovere normalizzazione pre-query o usare ricerca originale + normalizzata come fallback
+2. **Aggiungere Tab Notifiche in `AlertSettingsDialog.tsx`**: Importare e integrare `NotificationSettings`
+3. **Test End-to-End**: Verificare che NVIDIA e GOOGLE vengano trovati + UI notifiche visibile
 
 ---
 
-## Ordine Implementazione
+## Dettagli Tecnici - Fix Ticker Lookup
 
-1. Richiesta secrets RESEND_API_KEY e TELEGRAM_BOT_TOKEN
-2. Creazione edge function `send-notification`
-3. Creazione edge function `telegram-link`
-4. Creazione hook e componente frontend
-5. Aggiornamento config.toml
-6. Deploy e test
+Modifica in `useUnderlyingPrices.ts`:
+
+```typescript
+// PRIMA (bug)
+const normalizedUnderlyings = uniqueUnderlyings.map(u => normalizeName(u));
+const { data: mappings } = await supabase
+  .from('underlying_mappings')
+  .select('underlying, ticker')
+  .in('underlying', uniqueNormalized);
+
+// DOPO (fix)
+// Step 1: Query con nomi originali
+const { data: mappings } = await supabase
+  .from('underlying_mappings')
+  .select('underlying, ticker')
+  .in('underlying', uniqueUnderlyings);
+
+// Step 2: Per quelli non trovati, cerca con nome normalizzato
+const foundOriginals = new Set(mappings?.map(m => m.underlying) || []);
+const notFound = uniqueUnderlyings.filter(u => !foundOriginals.has(u));
+
+if (notFound.length > 0) {
+  const normalizedNotFound = notFound.map(u => normalizeName(u));
+  const { data: normalizedMappings } = await supabase
+    .from('underlying_mappings')
+    .select('underlying, ticker')
+    .in('underlying', normalizedNotFound);
+  // Merge results
+}
+```
+
+---
+
+## Dettagli Tecnici - Integrazione UI Notifiche
+
+Modifica in `AlertSettingsDialog.tsx`:
+
+```typescript
+// Aggiungere import
+import { NotificationSettings } from '@/components/settings/NotificationSettings';
+
+// Modificare TabsList da 4 a 5 colonne
+<TabsList className="grid w-full grid-cols-5">
+  <TabsTrigger value="distance">Distanza</TabsTrigger>
+  <TabsTrigger value="ticker">Per Ticker</TabsTrigger>
+  <TabsTrigger value="action">Azione</TabsTrigger>
+  <TabsTrigger value="cooldown">Cooldown</TabsTrigger>
+  <TabsTrigger value="notifications">Notifiche</TabsTrigger>
+</TabsList>
+
+// Aggiungere TabsContent
+<TabsContent value="notifications" className="mt-4">
+  <NotificationSettings />
+</TabsContent>
+```
 
