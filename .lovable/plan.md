@@ -1,126 +1,115 @@
 
-# Piano: Correzione Definitiva - ETF e Sector Allocation
-
-## Diagnosi Completa
-
-### Problema Principale Identificato
-Il codice modificato in precedenza (`RiskAnalyzer.tsx`) usa correttamente `stock.isETF`, ma i file `sectorExposure.ts` e `currencyExposure.ts` usano ancora funzioni di pattern matching che falliscono:
-
-| File | Linea | Problema |
-|------|-------|----------|
-| `sectorExposure.ts` | 342 | `isETFByName(stock.underlying)` invece di `stock.isETF` |
-| `currencyExposure.ts` | 128 | `isETFByDescription(stock.underlying)` invece di `stock.isETF` |
-
-### Perche il Pattern Matching Fallisce
-
-Esempio dal database:
-- **ETF**: "Amundi MSCI China Tech UCITS ETF EUR" - potrebbe matchare ma alcuni ETF hanno nomi abbreviati
-- **Stock**: "AZ.APPLE INC" - il prefisso "AZ." non e nel pattern e "APPLE" non corrisponde a "AAPL"
-
-La struttura `StockRiskDetail` ha gia il campo `isETF: boolean` (impostato correttamente in `riskCalculator.ts` linea 280 basandosi su `asset_type === 'etf'`), ma non viene utilizzato in `sectorExposure.ts` e `currencyExposure.ts`.
-
-### Flusso dei Dati
-
-```text
-positions (DB) --> riskCalculator.ts --> StockRiskDetail { isETF: boolean }
-                                              |
-                   +-------------------------+-------------------------+
-                   |                         |                         |
-            RiskAnalyzer.tsx          sectorExposure.ts         currencyExposure.ts
-            (usa stock.isETF)         (usa isETFByName())       (usa isETFByDescription())
-                   OK                        ERRORE                    ERRORE
-```
+Obiettivo: ripristinare in modo definitivo (e a prova di regressioni) 1) la scomposizione ETF (currency exposure + sector allocation) e 2) l’uso coerente dei mapping settoriali già presenti in ADMIN → SETTORI (es. Applied Digital = Technology) dentro il Risk Analyzer, con un approccio metodico (test, logs, fallback).
 
 ---
 
-## Modifiche Richieste
+## 1) Diagnosi (cosa sta succedendo davvero)
 
-### Modifica 1: `sectorExposure.ts` - Usare `stock.isETF`
+### 1.1 ETF “0 analizzati” non è un problema di `isETF`
+Dai tuoi screenshot il conteggio “✓ 0 ETF analizzati” appare in verde: questo succede quando:
+- `etfCount > 0` (quindi gli ETF vengono riconosciuti e gli ISIN vengono estratti),
+- ma `loadedETFCount = 0` (quindi **non arriva nessuna allocation caricata in frontend**).
 
-**Linea 342**: Sostituire pattern matching con il flag esistente:
+Questo spiega perché:
+- gli ETF restano “non scomposti” (currency/sector),
+- finiscono in “Other” lato settore quando non hanno sectorAllocations disponibili in runtime.
 
-```typescript
-// PRIMA (non funziona)
-const isETF = isETFByName(stock.underlying);
+### 1.2 Root cause trovata: due backend functions chiave risultano **non disponibili**
+Ho testato direttamente le backend functions:
+- `fetch-etf-allocation` → **404 NOT_FOUND (Requested function was not found)**
+- `update-prices-cron` → **404 NOT_FOUND**
 
-// DOPO (usa il flag dalla struttura)
-const isETF = stock.isETF;
-```
+Invece almeno un’altra function (`fetch-underlying-prices`) risponde (400 su payload errato), quindi **il sistema di backend functions è attivo, ma quelle due non sono deployate/registrate**.
 
-Questo garantisce che tutti gli 8 ETF con `asset_type = 'etf'` vengano riconosciuti correttamente, indipendentemente dal loro nome.
+Conseguenza diretta:
+- `useETFAllocations()` invoca `fetch-etf-allocation` → fallisce → `allocations` resta vuoto → `loadedETFCount` resta 0.
+- `useSectorMappings()` quando vede anche solo 1 strumento “da risolvere”, invoca `update-prices-cron` → fallisce; e in più (bug logico) rischia di **non settare nemmeno i mapping già esistenti**, lasciando `sectorMappings` vuoto/non completo.
+  - Questo spiega perfettamente il caso “ADMIN dice APLD=Technology ma RiskAnalyzer lo mette in Other”: se il mapping non viene caricato/tenuto, si va in fallback “Other”.
 
-### Modifica 2: `currencyExposure.ts` - Usare `stock.isETF`
-
-**Linea 128**: Sostituire pattern matching con il flag esistente:
-
-```typescript
-// PRIMA (non funziona)
-const isETF = isETFByDescription(stock.underlying);
-
-// DOPO (usa il flag dalla struttura)
-const isETF = stock.isETF;
-```
-
-### Modifica 3: Cleanup - Rimuovere funzioni/costanti non piu usate
-
-Dopo le modifiche, le seguenti funzioni/costanti non sono piu necessarie:
-
-| File | Elemento | Azione |
-|------|----------|--------|
-| `sectorExposure.ts` | `ETF_PATTERN` (linea 227) | Rimuovere se non usato altrove |
-| `sectorExposure.ts` | `isETFByName()` (linea 229-231) | Rimuovere |
-| `currencyExposure.ts` | `ETF_ISSUER_PATTERNS` (linee 83-96) | Rimuovere |
-| `currencyExposure.ts` | `isETFByDescription()` (linee 98-101) | Rimuovere |
-
-### Modifica 4: Aggiungere log diagnostici temporanei
-
-Per verificare il corretto funzionamento dopo le modifiche, aggiungere log in `sectorExposure.ts`:
-
-```typescript
-// In calculateSectorExposure, dopo la linea 336
-console.log('[Sector] Processing stock:', {
-  name: stock.underlying,
-  isETF: stock.isETF,
-  isin: stock.isin,
-  hasAllocation: stock.isETF && stock.isin ? !!etfAllocations[stock.isin] : 'N/A'
-});
-```
-
-E in `RiskAnalyzer.tsx`:
-
-```typescript
-// Dopo la linea 60 nel useMemo etfIsins
-console.log('[RiskAnalyzer] ETF ISINs extracted:', isins.length, isins);
-```
+### 1.3 Dati in database ci sono (quindi si può ripartire subito)
+- `isin_mappings` contiene le righe corrette per AAPL/GOOGL/APLD ecc. (es. APLD → Technology).
+- `etf_allocations` contiene già allocazioni per alcuni ETF del portfolio (es. MSCI World, S&P 500, ecc.).
+Quindi il problema principale non è “mancano i dati”: è “il frontend non riesce a caricarli perché le functions non sono disponibili”.
 
 ---
 
-## Riepilogo File da Modificare
+## 2) Strategia di risoluzione (precisa, robusta, con test)
 
-| File | Modifiche |
-|------|-----------|
-| `src/lib/sectorExposure.ts` | Linea 342: usare `stock.isETF`; rimuovere `ETF_PATTERN` e `isETFByName()` |
-| `src/lib/currencyExposure.ts` | Linea 128: usare `stock.isETF`; rimuovere `ETF_ISSUER_PATTERNS` e `isETFByDescription()` |
-| `src/pages/RiskAnalyzer.tsx` | Aggiungere log diagnostico (temporaneo) |
+### Step A — Ripristino backend functions (fix strutturale)
+1) Verificare/aggiungere configurazione in `supabase/config.toml`:
+   - aggiungere una sezione per `fetch-etf-allocation` (attualmente manca).
+   - ricontrollare che `update-prices-cron` sia correttamente dichiarata (c’è già, ma non risulta deployata).
+2) Eseguire **deploy esplicito** delle due functions:
+   - `fetch-etf-allocation`
+   - `update-prices-cron`
+3) Smoke test automatico (prima di guardare la UI):
+   - chiamare `fetch-etf-allocation` con un ISIN noto del tuo portfolio (es. `IE00B4L5Y983`) e verificare che ritorni JSON con `currencyAllocations` e `sectorAllocations`.
+   - chiamare `update-prices-cron` con un payload “light” (es. una modalità di test/resolve) e verificare che non sia più 404.
 
----
-
-## Risultato Atteso
-
-### Prima delle modifiche
-- ETF analizzati: 0
-- Sector "Other": AZ.APPLE INC, AZ.ALPHABET, ecc.
-- Currency Exposure: ETF non scomposti per valuta
-
-### Dopo le modifiche
-- ETF analizzati: 8 (tutti quelli con `asset_type = 'etf'`)
-- Sector: APPLE → Technology, NVIDIA → Technology, ecc.
-- Currency Exposure: ETF correttamente scomposti per valuta in base alle allocazioni
+Risultato atteso: le chiamate da browser non falliscono più e l’app torna a popolare `allocations` e `sectorMappings` come prima.
 
 ---
 
-## Prevenzione Future Regressioni
+### Step B — Hardening frontend: fallback + visibilità errori (anti-regressione)
+Anche con le functions deployate, vogliamo evitare che un futuro problema “silenzioso” rimetta tutto a 0.
 
-1. **Flag `isETF` centralizzato**: Tutti i moduli useranno il flag dalla struttura `StockRiskDetail` invece di pattern matching indipendenti
-2. **Eliminazione duplicazioni**: Rimuovere le funzioni `isETFByName()` e `isETFByDescription()` elimina la possibilita di disallineamenti
-3. **Test consigliato**: Dopo le modifiche, verificare in console che `etfIsins.length > 0` e che gli strumenti appaiano nei settori corretti
+4) `useETFAllocations`:
+   - Se `supabase.functions.invoke('fetch-etf-allocation')` fallisce (404 o altro), fare fallback automatico:
+     - leggere direttamente da tabella `etf_allocations` con `.in('isin', etfIsins)`,
+     - popolare comunque `allocations` con i dati cache,
+     - mostrare un toast “Dati ETF caricati da cache (backend function non disponibile)” oppure un warning dedicato.
+   - Aggiungere esposta in UI (Currency/Sector cards) una riga “Errori ETF: N” cliccabile (o tooltip) che mostra quali ISIN falliscono.
+
+5) `useSectorMappings`:
+   - Correggere la logica: **anche se la risoluzione AI fallisce**, bisogna comunque chiamare `setMappings(newMappings)` con i mapping già presenti in DB.
+   - Se `update-prices-cron` fallisce: mostrare toast “Risoluzione AI non disponibile, uso mapping esistenti”.
+
+Risultato atteso: anche se domani una function va giù, il Risk Analyzer non collassa in “Other” e gli ETF continuano a decomporsi almeno da cache.
+
+---
+
+### Step C — Fix specifici “Other” residui (precisione)
+6) Migliorare fallback statico (solo come rete di sicurezza):
+   - aggiungere mapping `APPLIED DIGITAL` → `APLD` nel dizionario `COMPANY_NAME_TO_TICKER` (e altri nomi ricorrenti che vedi spesso in “Other”).
+   - Questo non sostituisce i mapping ADMIN/DB: serve solo se per qualunque motivo i mapping dinamici non arrivano.
+
+---
+
+## 3) Piano di test (metodico, ripetibile)
+
+### Test 1 — Backend function availability
+- Verifica che `fetch-etf-allocation` risponda 200 e ritorni sector/currency allocations.
+- Verifica che `update-prices-cron` risponda 200 (non 404).
+
+### Test 2 — Risk Analyzer: Currency Exposure
+- Apri Currency Exposure:
+  - deve mostrare “✓ X ETF analizzati” con X > 0 (idealmente = numero ETF in portfolio),
+  - e le valute devono riflettere la decomposizione ETF (non tutto sull’EUR/OTHER).
+
+### Test 3 — Risk Analyzer: Sector Allocation
+- Apri Sector Allocation:
+  - “✓ X ETF analizzati” deve essere > 0,
+  - `AZ.APPLIED DIGITAL CORP` non deve stare in Other se in ADMIN è Technology (via ISIN mapping),
+  - gli ETF devono contribuire ai settori secondo `sector_allocations` (non finire “Other” salvo assenza dati).
+
+### Test 4 — Caso regressione: simulazione fallimento function
+- Forzare (in dev) un errore di invoke e confermare che:
+  - ETF vengono caricati da cache DB,
+  - mapping settori esistenti vengono comunque usati,
+  - la UI mostra un warning chiaro.
+
+---
+
+## 4) Impatto e criticità (trasparenza)
+- Il problema attuale è “grave” perché rompe la catena di dipendenze: senza quelle due functions, l’app perde la decomposizione ETF e la risoluzione/refresh dei mapping.
+- La correzione non è solo “aggiustare una regex”: va ripristinata la disponibilità delle functions e reso il frontend robusto agli errori (fallback + error surfacing), così non si ripresenta più “a sorpresa”.
+
+---
+
+## 5) Deliverable (cosa verrà cambiato)
+- Config backend functions (aggiunta entry mancante + deploy)
+- `useETFAllocations`: fallback DB + error reporting + (opzionale) batch fetch efficiente
+- `useSectorMappings`: non perdere i mapping esistenti se la risoluzione fallisce + toast warning
+- `sectorExposure`: aggiornamento dizionario fallback per nomi ricorrenti (APLD ecc.)
+- Logging diagnostico controllato (attivabile) per tracciare: `etfIsins`, errori invoke, conteggi allocations, conteggi mappings
+
