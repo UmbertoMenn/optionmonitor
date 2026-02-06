@@ -187,9 +187,9 @@ export function PerformanceEvolutionChart({
           yAxisId="left"
           type="monotone"
           dataKey="returnPct"
-          stroke="hsl(var(--primary))"
+          stroke="hsl(var(--profit))"
           strokeWidth={2}
-          dot={{ r: 3, fill: 'hsl(var(--primary))' }}
+          dot={{ r: 3, fill: 'hsl(var(--profit))' }}
           activeDot={{ r: 5 }}
           name="returnPct"
         />
