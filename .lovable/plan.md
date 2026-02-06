@@ -1,246 +1,156 @@
 
-# Piano: Aggiornamento Prezzi Sottostanti con Cache Centralizzata
+
+# Piano: Aggiornamento Prezzi Basato su Posizioni Attive
 
 ## Obiettivo
-Implementare un sistema di aggiornamento prezzi centralizzato per i sottostanti dei derivati, con:
-- Cron job ogni **5 minuti** durante le ore di mercato (8-22, lun-ven)
-- Cache condivisa per tutti gli utenti (evita chiamate duplicate)
-- Yahoo Finance come fonte dati (delay ~15 minuti)
+Modificare il cron job per aggiornare solo i ticker effettivamente presenti nei portafogli attivi di tutti gli utenti, mantenendo le tabelle di mappatura come cache permanente.
 
 ---
 
-## Architettura
+## Architettura Proposta
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                      CRON JOB (ogni 5 min)                      │
 │                  update-underlying-prices-cron                  │
 │                                                                 │
-│  1. Legge ticker unici da underlying_mappings                   │
-│  2. Fetch batch da Yahoo Finance                                │
-│  3. Upsert in tabella underlying_prices                         │
+│  NUOVO FLUSSO:                                                  │
+│  1. Query posizioni ATTIVE da TUTTI i portafogli               │
+│     - Azioni (stock) → estrai ISIN                              │
+│     - Derivati (derivative) → estrai underlying                 │
+│                                                                 │
+│  2. Risolvi ticker usando cache esistenti                       │
+│     - ISIN → isin_mappings → ticker                            │
+│     - underlying → underlying_mappings → ticker                 │
+│                                                                 │
+│  3. Consolida ticker unici (rimuovi duplicati)                  │
+│                                                                 │
+│  4. Fetch prezzi da Yahoo Finance                               │
+│                                                                 │
+│  5. Upsert in underlying_prices                                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    TABELLA underlying_prices                    │
-│  (cache centralizzata - lettura pubblica)                       │
+│             TABELLE CACHE (NON MODIFICATE - LOOKUP)             │
 │                                                                 │
-│  ticker | price  | currency | updated_at                       │
-│  NVDA   | 125.50 | USD      | 2026-02-05 14:30:00              │
-│  AMZN   | 185.20 | USD      | 2026-02-05 14:30:00              │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                useUnderlyingPrices (Frontend)                   │
+│  underlying_mappings:    isin_mappings:                         │
+│  ├─ NVIDIA CORP → NVDA   ├─ US67066G1040 → NVDA                │
+│  ├─ APPLE INC → AAPL     ├─ US0231351067 → AMZN                │
+│  └─ (288 mappings)       └─ (cache settori + ticker)           │
 │                                                                 │
-│  1. Query DB → underlying_prices (istantanea)                   │
-│  2. Per ticker mancanti → edge function on-demand               │
-│  3. Return prezzi combinati                                     │
+│  → MAI cancellate, solo aggiunte (cache permanente)             │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Dettaglio Query Posizioni Attive
+
+```sql
+-- Step 1: Ticker da AZIONI (via ISIN)
+SELECT DISTINCT im.ticker
+FROM positions pos
+JOIN isin_mappings im ON pos.isin = im.isin
+WHERE pos.asset_type = 'stock'
+  AND pos.isin IS NOT NULL
+
+UNION
+
+-- Step 2: Ticker da DERIVATI (via underlying)
+SELECT DISTINCT um.ticker  
+FROM positions pos
+JOIN underlying_mappings um ON UPPER(pos.underlying) = UPPER(um.underlying)
+WHERE pos.asset_type = 'derivative'
+  AND pos.underlying IS NOT NULL
 ```
 
 ---
 
 ## Modifiche da Implementare
 
-### 1. Nuova Tabella `underlying_prices`
+### 1. Edge Function `update-underlying-prices-cron`
 
-**Scopo**: Cache centralizzata dei prezzi, aggiornata dal cron e letta da tutti gli utenti.
-
-```sql
-CREATE TABLE underlying_prices (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  ticker TEXT NOT NULL UNIQUE,
-  price DECIMAL(15, 4) NOT NULL,
-  currency TEXT NOT NULL DEFAULT 'USD',
-  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
-
--- Indice per lookup veloce
-CREATE INDEX idx_underlying_prices_ticker ON underlying_prices(ticker);
-
--- RLS: lettura pubblica (dati non sensibili - prezzi di mercato)
-ALTER TABLE underlying_prices ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Anyone can read underlying prices"
-  ON underlying_prices FOR SELECT USING (true);
-```
-
-### 2. Nuova Edge Function: `update-underlying-prices-cron`
-
-**File**: `supabase/functions/update-underlying-prices-cron/index.ts`
-
-**Logica**:
-1. Legge tutti i ticker unici dalla tabella `underlying_mappings`
-2. Per ogni ticker, chiama Yahoo Finance (con rate limiting 100ms tra chiamate)
-3. Upsert dei prezzi nella tabella `underlying_prices`
-4. Log del numero di prezzi aggiornati
-
+La logica attuale:
 ```typescript
-// Pseudo-codice
-serve(async (req) => {
-  // 1. Leggi tutti i ticker unici
-  const { data: mappings } = await supabase
-    .from('underlying_mappings')
-    .select('ticker');
-  
-  const uniqueTickers = [...new Set(mappings.map(m => m.ticker))];
-  
-  // 2. Fetch batch da Yahoo Finance
-  for (const ticker of uniqueTickers) {
-    const price = await fetchYahooPrice(ticker);
-    if (price) {
-      await supabase
-        .from('underlying_prices')
-        .upsert({ ticker, price: price.price, currency: price.currency });
-    }
-    await delay(100); // Rate limiting
-  }
-  
-  return { updated: count };
-});
+// ATTUALE: prende TUTTI i ticker da underlying_mappings
+const { data: mappings } = await supabase
+  .from('underlying_mappings')
+  .select('ticker');
 ```
 
-### 3. Attivazione Cron Job
-
-**Schedule**: `*/5 8-22 * * 1-5` (ogni 5 minuti, 8:00-22:00, lunedì-venerdì)
-
-```sql
-SELECT cron.schedule(
-  'update-underlying-prices-every-5-min',
-  '*/5 8-22 * * 1-5',
-  $$
-  SELECT net.http_post(
-    url:='https://uareyloxlpvaxmzygpgo.supabase.co/functions/v1/update-underlying-prices-cron',
-    headers:=jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
-    ),
-    body:='{}'::jsonb
-  );
-  $$
-);
-```
-
-### 4. Modifica Hook `useUnderlyingPrices`
-
-**File**: `src/hooks/useUnderlyingPrices.ts`
-
-**Nuovo flusso**:
-1. Prima query sulla tabella `underlying_prices` per ottenere prezzi dalla cache
-2. Identifica ticker mancanti (non in cache o non mappati)
-3. Solo per i mancanti, chiama l'edge function `fetch-underlying-prices`
-4. Combina risultati cache + fresh
-
+Nuova logica:
 ```typescript
-// Nuovo flusso nel hook
-async function fetchPrices() {
-  // 1. Risolvi underlying -> ticker usando underlying_mappings
-  const { data: mappings } = await supabase
-    .from('underlying_mappings')
-    .select('underlying, ticker')
-    .in('underlying', uniqueUnderlyings);
+// NUOVO: prende solo ticker da posizioni ATTIVE
+// Step 1: Ticker da azioni (via isin_mappings)
+const { data: stockTickers } = await supabase
+  .from('positions')
+  .select('isin')
+  .eq('asset_type', 'stock')
+  .not('isin', 'is', null);
+
+const stockIsins = [...new Set(stockTickers?.map(p => p.isin).filter(Boolean))];
+
+let tickersFromStocks: string[] = [];
+if (stockIsins.length > 0) {
+  const { data: isinMappings } = await supabase
+    .from('isin_mappings')
+    .select('ticker')
+    .in('isin', stockIsins);
   
-  // 2. Leggi prezzi dalla cache
-  const tickers = mappings.map(m => m.ticker);
-  const { data: cachedPrices } = await supabase
-    .from('underlying_prices')
-    .select('*')
-    .in('ticker', tickers);
-  
-  // 3. Costruisci risultato dalla cache
-  const results = {};
-  for (const underlying of uniqueUnderlyings) {
-    const mapping = mappings.find(m => m.underlying === underlying);
-    if (mapping) {
-      const cached = cachedPrices.find(p => p.ticker === mapping.ticker);
-      if (cached) {
-        results[underlying] = { 
-          price: cached.price, 
-          currency: cached.currency, 
-          ticker: mapping.ticker 
-        };
-      }
-    }
-  }
-  
-  // 4. Per mancanti, chiama edge function
-  const missingUnderlyings = uniqueUnderlyings.filter(u => !results[u]);
-  if (missingUnderlyings.length > 0) {
-    const { data } = await supabase.functions.invoke('fetch-underlying-prices', {
-      body: { underlyings: missingUnderlyings }
-    });
-    Object.assign(results, data.prices);
-  }
-  
-  return results;
+  tickersFromStocks = isinMappings?.map(m => m.ticker).filter(Boolean) || [];
 }
-```
 
-### 5. Modifica `fetch-underlying-prices` Edge Function
+// Step 2: Ticker da derivati (via underlying_mappings)
+const { data: derivativePositions } = await supabase
+  .from('positions')
+  .select('underlying')
+  .eq('asset_type', 'derivative')
+  .not('underlying', 'is', null);
 
-**File**: `supabase/functions/fetch-underlying-prices/index.ts`
+const underlyings = [...new Set(derivativePositions?.map(p => p.underlying).filter(Boolean))];
 
-**Modifica**: Dopo aver recuperato il prezzo, salvarlo anche nella cache `underlying_prices`:
-
-```typescript
-// Dopo aver ottenuto il prezzo da Yahoo
-if (priceResult) {
-  // Salva nella cache underlying_prices
-  await supabase
-    .from('underlying_prices')
-    .upsert({
-      ticker,
-      price: priceResult.price,
-      currency: priceResult.currency,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'ticker' });
+let tickersFromDerivatives: string[] = [];
+if (underlyings.length > 0) {
+  const { data: underlyingMappings } = await supabase
+    .from('underlying_mappings')
+    .select('ticker, underlying')
+    .in('underlying', underlyings);
   
-  results[underlying] = { ... };
+  tickersFromDerivatives = underlyingMappings?.map(m => m.ticker).filter(Boolean) || [];
 }
-```
 
-### 6. Configurazione `config.toml`
-
-Aggiungere la nuova edge function:
-
-```toml
-[functions.update-underlying-prices-cron]
-verify_jwt = false
+// Step 3: Consolida e rimuovi duplicati
+const uniqueTickers = [...new Set([...tickersFromStocks, ...tickersFromDerivatives])];
+console.log(`Found ${uniqueTickers.length} unique tickers from active positions`);
 ```
 
 ---
 
-## Vantaggi della Soluzione
+## Confronto Prima/Dopo
 
 | Aspetto | Prima | Dopo |
 |---------|-------|------|
-| Chiamate Yahoo/utente | N chiamate per utente | 0 (cache) |
-| Latenza UI | 2-5 sec (API calls) | ~100ms (query DB) |
-| Aggiornamento | On-demand | Automatico ogni 5 min |
-| Duplicazione | Chiamate duplicate per stesso ticker | Cache condivisa |
-| Fallback | - | Edge function per ticker nuovi |
+| Ticker aggiornati | ~288 (tutti in underlying_mappings) | ~25-40 (solo posizioni attive) |
+| Tempo esecuzione | ~30 sec | ~5-10 sec |
+| Chiamate Yahoo | 288 | ~25-40 |
+| Copertura multi-user | Parziale | Completa |
+| Cache mappature | Usata per update | Solo lookup |
 
 ---
 
-## File da Creare/Modificare
+## File da Modificare
 
-| File | Azione | Descrizione |
-|------|--------|-------------|
-| **Migrazione SQL** | Creare | Tabella `underlying_prices`, indici, RLS |
-| `supabase/functions/update-underlying-prices-cron/index.ts` | Creare | Edge function per cron job |
-| `supabase/config.toml` | Modificare | Aggiungere configurazione nuova function |
-| `src/hooks/useUnderlyingPrices.ts` | Modificare | Query cache prima, fallback edge function |
-| `supabase/functions/fetch-underlying-prices/index.ts` | Modificare | Salvare prezzi in cache dopo fetch |
-| **Cron SQL** | Eseguire | Attivare job schedulato |
+| File | Modifica |
+|------|----------|
+| `supabase/functions/update-underlying-prices-cron/index.ts` | Riscrivere logica query ticker |
 
 ---
 
 ## Note Tecniche
 
-- **Yahoo Finance delay**: I dati gratuiti hanno un ritardo di ~15 minuti
-- **Rate limiting**: 100ms delay tra chiamate per evitare blocchi
-- **Extensioni richieste**: `pg_cron` e `pg_net` (già disponibili)
-- **Ore mercato**: 8:00-22:00 CET copre sia mercati US che EU
+- **Le tabelle `underlying_mappings` e `isin_mappings` restano intatte**: sono cache permanenti usate solo per lookup, mai cancellate
+- **Multi-user ready**: la query su `positions` non filtra per `user_id`, quindi copre tutti gli utenti
+- **Fallback edge function**: rimane invariato - se un nuovo underlying non ha mappatura, viene risolto on-demand da `fetch-underlying-prices`
+- **Scalabilità**: con 10 utenti e 50 posizioni ciascuno, i ticker unici saranno comunque molto meno di 288 grazie alla deduplicazione
+
