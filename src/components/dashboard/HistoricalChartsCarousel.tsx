@@ -37,13 +37,7 @@ const slides = [
     id: 'performance',
     title: 'Evoluzione Rendimento',
     icon: TrendingUp,
-    description: 'Rendimento % e P/L nel tempo',
-  },
-  {
-    id: 'yearly',
-    title: 'Rendimento per Anno',
-    icon: BarChart3,
-    description: 'Performance annuale',
+    description: 'Rendimento % e P/L nel tempo con confronto annuale',
   },
   {
     id: 'portfolio',
@@ -117,26 +111,26 @@ export function HistoricalChartsCarousel({
         <p className="text-xs text-muted-foreground">{slides[current].description}</p>
       </CardHeader>
       <CardContent className="pt-0">
-        <Carousel setApi={setApi} className="w-full">
+        <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
           <CarouselContent>
             <CarouselItem>
-              <div className="h-[250px]">
-                <PerformanceEvolutionChart
-                  historicalData={historicalData}
-                  viewMode={viewMode}
-                  currentValue={currentValue}
-                  currentDate={currentDate}
-                  deposits={deposits}
-                />
-              </div>
-            </CarouselItem>
-            <CarouselItem>
-              <div className="h-[250px]">
-                <YearlyReturnChart
-                  historicalData={historicalData}
-                  viewMode={viewMode}
-                  deposits={deposits}
-                />
+              <div className="h-[250px] flex gap-4">
+                <div className="flex-[2] min-w-0">
+                  <PerformanceEvolutionChart
+                    historicalData={historicalData}
+                    viewMode={viewMode}
+                    currentValue={currentValue}
+                    currentDate={currentDate}
+                    deposits={deposits}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <YearlyReturnChart
+                    historicalData={historicalData}
+                    viewMode={viewMode}
+                    deposits={deposits}
+                  />
+                </div>
               </div>
             </CarouselItem>
             <CarouselItem>
