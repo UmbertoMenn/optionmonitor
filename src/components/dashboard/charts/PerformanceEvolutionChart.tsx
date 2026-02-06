@@ -78,23 +78,21 @@ function CustomLegend({
         <span className="text-foreground">Portafoglio</span>
       </div>
       {hasBenchmarkData && (
-        <TooltipProvider>
+        <TooltipProvider delayDuration={0}>
           <UITooltip>
-            <TooltipTrigger asChild>
+            <TooltipTrigger 
+              className="flex items-center gap-1.5 cursor-help"
+              onMouseEnter={() => onBenchmarkHover(true)}
+              onMouseLeave={() => onBenchmarkHover(false)}
+            >
               <div 
-                className="flex items-center gap-1.5 cursor-help"
-                onMouseEnter={() => onBenchmarkHover(true)}
-                onMouseLeave={() => onBenchmarkHover(false)}
-              >
-                <div 
-                  className="w-3 h-0.5 rounded" 
-                  style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
-                />
-                <span className="text-foreground">Benchmark</span>
-                <HelpCircle className="w-3 h-3 text-muted-foreground" />
-              </div>
+                className="w-3 h-0.5 rounded" 
+                style={{ backgroundColor: 'hsl(30, 100%, 50%)', opacity: isHoveringBenchmark ? 1 : 0.6 }} 
+              />
+              <span className="text-foreground">Benchmark</span>
+              <HelpCircle className="w-3 h-3 text-muted-foreground" />
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-sm bg-popover text-popover-foreground border-border">
+            <TooltipContent side="top" className="max-w-sm z-50">
               <p className="text-xs whitespace-pre-line">{benchmarkDescription}</p>
             </TooltipContent>
           </UITooltip>
