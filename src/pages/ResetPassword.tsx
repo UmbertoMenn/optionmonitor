@@ -12,20 +12,65 @@ export function ResetPassword() {
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if we have a valid session from the reset link
-    const checkSession = async () => {
+    // Listen for the PASSWORD_RECOVERY event from the magic link
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth event:', event, 'Session:', !!session);
+        
+        if (event === 'PASSWORD_RECOVERY') {
+          // User clicked the recovery link and is now in recovery mode
+          setLoading(false);
+          setError(null);
+        } else if (event === 'SIGNED_IN' && session) {
+          // Check if this is a recovery session by looking at the URL hash
+          const hash = window.location.hash;
+          if (hash.includes('type=recovery')) {
+            setLoading(false);
+            setError(null);
+          } else {
+            // Already logged in normally, redirect to home
+            navigate('/');
+          }
+        }
+      }
+    );
+
+    // Also check current session - might already be in recovery mode
+    const checkInitialState = async () => {
+      const hash = window.location.hash;
+      
+      // If there's a recovery token in the URL, wait for the auth event
+      if (hash.includes('access_token') && hash.includes('type=recovery')) {
+        // The onAuthStateChange will handle this
+        return;
+      }
+      
+      // Check if already has a valid session (from recovery)
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      if (session) {
+        // Has valid session, allow password change
+        setLoading(false);
+      } else {
+        // No session and no recovery token
+        setLoading(false);
         setError('Link di reset non valido o scaduto. Richiedi un nuovo link.');
       }
     };
-    checkSession();
-  }, []);
+
+    // Small delay to allow auth state change to fire first
+    const timer = setTimeout(checkInitialState, 500);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timer);
+    };
+  }, [navigate]);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +85,7 @@ export function ResetPassword() {
       return;
     }
 
-    setLoading(true);
+    setSubmitting(true);
 
     try {
       const { error } = await supabase.auth.updateUser({
@@ -63,9 +108,21 @@ export function ResetPassword() {
     } catch (err) {
       toast.error('Errore imprevisto');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
+
+  // Show loading while checking auth state
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-muted-foreground">Verifica link in corso...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -160,9 +217,9 @@ export function ResetPassword() {
               <Button 
                 type="submit" 
                 className="w-full bg-primary hover:bg-primary-glow transition-all hover:shadow-glow-primary"
-                disabled={loading}
+                disabled={submitting}
               >
-                {loading ? 'Aggiornamento...' : 'Aggiorna Password'}
+                {submitting ? 'Aggiornamento...' : 'Aggiorna Password'}
               </Button>
             </form>
           </CardContent>
