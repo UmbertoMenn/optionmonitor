@@ -8,6 +8,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  Legend,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
@@ -15,6 +16,7 @@ import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { formatCurrency } from '@/lib/formatters';
+import { useBenchmarkData } from '@/hooks/useBenchmarkData';
 
 interface PerformanceEvolutionChartProps {
   historicalData: HistoricalDataEntry[];
@@ -31,6 +33,7 @@ interface ChartDataPoint {
   pl: number;
   returnPct: number;
   cumulativeDeposits: number;
+  benchmarkReturn?: number;
 }
 
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
@@ -55,6 +58,9 @@ export function PerformanceEvolutionChart({
   currentDate,
   deposits,
 }: PerformanceEvolutionChartProps) {
+  // Fetch benchmark data
+  const { benchmarkReturns, hasBenchmarkData } = useBenchmarkData(historicalData, viewMode);
+
   const chartData = useMemo(() => {
     if (historicalData.length === 0) return [];
 
@@ -71,6 +77,12 @@ export function PerformanceEvolutionChart({
     const sortedDeposits = [...deposits].sort(
       (a, b) => new Date(a.deposit_date).getTime() - new Date(b.deposit_date).getTime()
     );
+
+    // Create a map of benchmark returns by date
+    const benchmarkByDate: Record<string, number> = {};
+    benchmarkReturns.forEach((br) => {
+      benchmarkByDate[br.date] = br.scaledReturn;
+    });
 
     const data: ChartDataPoint[] = sorted.map((entry) => {
       const snapshotDate = new Date(entry.snapshot_date);
@@ -102,6 +114,7 @@ export function PerformanceEvolutionChart({
         pl,
         returnPct,
         cumulativeDeposits,
+        benchmarkReturn: benchmarkByDate[entry.snapshot_date],
       };
     });
 
@@ -128,12 +141,13 @@ export function PerformanceEvolutionChart({
           pl,
           returnPct,
           cumulativeDeposits,
+          benchmarkReturn: benchmarkByDate[currentDate],
         });
       }
     }
 
     return data;
-  }, [historicalData, viewMode, currentValue, currentDate, deposits]);
+  }, [historicalData, viewMode, currentValue, currentDate, deposits, benchmarkReturns]);
 
   if (chartData.length === 0) {
     return (
@@ -176,13 +190,33 @@ export function PerformanceEvolutionChart({
             borderRadius: '8px',
             fontSize: '12px',
           }}
+          labelStyle={{
+            color: 'hsl(var(--foreground))',
+            fontWeight: 500,
+          }}
+          itemStyle={{
+            color: 'hsl(var(--foreground))',
+          }}
           formatter={(value: number, name: string) => {
             if (name === 'returnPct') return [`${value.toFixed(2)}%`, 'Rendimento'];
             if (name === 'pl') return [formatCurrency(value), 'P/L'];
+            if (name === 'benchmarkReturn') return [`${value.toFixed(2)}%`, 'Benchmark'];
             return [value, name];
           }}
           labelFormatter={(label) => `Data: ${label}`}
         />
+        {hasBenchmarkData && (
+          <Legend 
+            verticalAlign="top" 
+            height={24}
+            formatter={(value) => {
+              if (value === 'returnPct') return 'Portafoglio';
+              if (value === 'benchmarkReturn') return 'Benchmark';
+              if (value === 'pl') return 'P/L';
+              return value;
+            }}
+          />
+        )}
         <Line
           yAxisId="left"
           type="monotone"
@@ -193,6 +227,19 @@ export function PerformanceEvolutionChart({
           activeDot={{ r: 5 }}
           name="returnPct"
         />
+        {hasBenchmarkData && (
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="benchmarkReturn"
+            stroke="hsl(var(--chart-4))"
+            strokeWidth={2}
+            strokeDasharray="4 4"
+            dot={{ r: 2, fill: 'hsl(var(--chart-4))' }}
+            activeDot={{ r: 4 }}
+            name="benchmarkReturn"
+          />
+        )}
         <Line
           yAxisId="right"
           type="monotone"

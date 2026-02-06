@@ -159,6 +159,30 @@ export type Database = {
           },
         ]
       }
+      benchmark_prices: {
+        Row: {
+          close_price: number
+          created_at: string
+          id: string
+          price_date: string
+          ticker: string
+        }
+        Insert: {
+          close_price: number
+          created_at?: string
+          id?: string
+          price_date: string
+          ticker: string
+        }
+        Update: {
+          close_price?: number
+          created_at?: string
+          id?: string
+          price_date?: string
+          ticker?: string
+        }
+        Relationships: []
+      }
       deposits: {
         Row: {
           amount: number
