@@ -9,6 +9,9 @@ verify_jwt = false
 [functions.fetch-underlying-prices]
 verify_jwt = false
 
+[functions.fetch-etf-allocation]
+verify_jwt = false
+
 [functions.check-alerts]
 verify_jwt = false
 

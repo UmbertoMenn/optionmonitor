@@ -85,6 +85,12 @@ export function useSectorMappings() {
       
       console.log(`Sector mappings: ${Object.keys(newMappings).length} cached, ${isinsToResolve.length} ISINs + ${derivativeNamesToResolve.length} names need resolution`);
       
+      // CRITICAL: Always set mappings with what we have from DB first
+      // This ensures existing mappings are used even if AI resolution fails
+      if (Object.keys(newMappings).length > 0) {
+        setMappings(newMappings);
+      }
+      
       // 5. If there are items needing resolution, call edge function
       if (isinsToResolve.length > 0 || derivativeNamesToResolve.length > 0) {
         const totalToResolve = isinsToResolve.length + derivativeNamesToResolve.length;
@@ -114,6 +120,8 @@ export function useSectorMappings() {
         
         if (invokeError) {
           console.error('Error invoking resolve-and-get-sectors:', invokeError);
+          // Keep using newMappings (already set above) - don't wipe them out
+          console.log(`Using ${Object.keys(newMappings).length} existing mappings despite AI resolution failure`);
         } else {
           // Re-fetch mappings after resolution
           const allIsins = [...new Set([...isins, ...isinsToResolve])];
