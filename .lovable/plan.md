@@ -1,151 +1,130 @@
 
-# Piano: Fix Tooltip nelle Strategie Derivati
+# Piano: Toggle Currency Default ON + Selettore Intervallo Temporale
 
-## Problema Identificato
+## Panoramica
 
-I tooltip all'interno delle righe delle strategie derivati non funzionano. L'analisi del codice ha rivelato due cause principali:
-
-### Causa 1: Pattern `CollapsibleTrigger asChild` in `OtherStrategyRow`
-
-La funzione `OtherStrategyRow` (linee 1777-1830) utilizza:
-```tsx
-<CollapsibleTrigger asChild>
-  <div className="...">
-    ...tooltip content...
-  </div>
-</CollapsibleTrigger>
-```
-
-Quando si usa `asChild`, Radix crea un elemento `<button>` che avvolge il contenuto. Questo elemento interattivo intercetta gli eventi hover, impedendo ai tooltip al suo interno di attivarsi.
-
-### Causa 2: Mancanza di `stopPropagation` in `GroupedOptionLegRow`
-
-I tooltip in `GroupedOptionLegRow` (linee 1709-1721) non hanno `onClick={(e) => e.stopPropagation()}` sui loro trigger, causando conflitti con gli elementi padre.
+Modifiche al grafico "Evoluzione Rendimento" nella Dashboard:
+1. Attivare il toggle Currency di default
+2. Aggiungere un selettore per l'intervallo temporale (1A, 2A, 3A, MAX)
 
 ---
 
-## Soluzione
+## 1. Toggle Currency Attivo di Default
 
-### 1. Modificare `OtherStrategyRow`
+### Modifica
 
-Applicare lo stesso pattern usato nelle altre righe (CoveredCallRow, NakedPutRow, GroupedOtherStrategyRow):
+**File**: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
 
-**Prima (linee 1776-1830)**:
+Cambiare l'inizializzazione dello stato:
+
 ```tsx
-<Collapsible open={isOpen} onOpenChange={setIsOpen}>
-  <CollapsibleTrigger asChild>
-    <div className="flex items-center...">
-      ...
-    </div>
-  </CollapsibleTrigger>
-  ...
-</Collapsible>
+// Prima (linea 215)
+const [currencyAdjusted, setCurrencyAdjusted] = useState(false);
+
+// Dopo
+const [currencyAdjusted, setCurrencyAdjusted] = useState(true);
 ```
 
-**Dopo**:
+---
+
+## 2. Selettore Intervallo Temporale
+
+### Opzioni disponibili
+
+| Opzione | Descrizione | Comportamento |
+|---------|-------------|---------------|
+| 1A | Ultimo anno | Filtra dati degli ultimi 12 mesi |
+| 2A | Ultimi 2 anni | Filtra dati degli ultimi 24 mesi |
+| 3A | Ultimi 3 anni | Filtra dati degli ultimi 36 mesi |
+| MAX | Tutto | Mostra tutti i dati disponibili |
+
+### Logica chiave
+
+Quando si cambia l'intervallo temporale:
+- I dati vengono filtrati per mostrare solo quelli nell'intervallo selezionato
+- Il rendimento % viene ricalcolato **partendo da 0** dal primo punto dell'intervallo filtrato
+- Il primo dato dell'intervallo diventa il nuovo "punto iniziale" per il calcolo del rendimento
+
+### Implementazione
+
+**File**: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+
+1. Aggiungere stato per l'intervallo temporale:
 ```tsx
-<Collapsible open={isOpen} onOpenChange={setIsOpen}>
-  <div 
-    role="button"
-    tabIndex={0}
-    onClick={() => setIsOpen(!isOpen)}
-    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-    className="flex items-center..."
-  >
-    ...
-  </div>
-  ...
-</Collapsible>
+type TimeRange = '1Y' | '2Y' | '3Y' | 'MAX';
+const [timeRange, setTimeRange] = useState<TimeRange>('MAX');
 ```
 
-E aggiungere `onClick={(e) => e.stopPropagation()}` sui tooltip trigger.
+2. Aggiungere funzione per filtrare i dati:
+```tsx
+const filteredHistoricalData = useMemo(() => {
+  if (timeRange === 'MAX') return historicalData;
+  
+  const now = new Date();
+  const years = timeRange === '1Y' ? 1 : timeRange === '2Y' ? 2 : 3;
+  const cutoffDate = new Date(now.setFullYear(now.getFullYear() - years));
+  
+  return historicalData.filter(entry => 
+    new Date(entry.snapshot_date) >= cutoffDate
+  );
+}, [historicalData, timeRange]);
+```
 
-### 2. Modificare `GroupedOptionLegRow`
+3. Usare `filteredHistoricalData` invece di `historicalData` nel calcolo di `chartData`, ricalcolando il rendimento dal primo punto filtrato
 
-Aggiungere `onClick={(e) => e.stopPropagation()}` ai tooltip trigger esistenti (linee 1709-1721 e 1733-1741).
+4. Aggiungere UI per il selettore nella legenda (accanto al toggle Currency):
+```tsx
+<div className="flex items-center gap-1 border rounded-md">
+  {(['1Y', '2Y', '3Y', 'MAX'] as const).map((range) => (
+    <button
+      key={range}
+      onClick={() => setTimeRange(range)}
+      className={cn(
+        "px-2 py-0.5 text-xs transition-colors",
+        timeRange === range 
+          ? "bg-primary text-primary-foreground" 
+          : "hover:bg-muted"
+      )}
+    >
+      {range === 'MAX' ? 'MAX' : range.replace('Y', 'A')}
+    </button>
+  ))}
+</div>
+```
+
+---
+
+## Layout UI Proposto
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│ [Portafoglio ─] [Benchmark ⓘ] [Aggiorna]     [1A|2A|3A|MAX] Currency [○] │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│                        GRAFICO                                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Il selettore dell'intervallo sarà posizionato a destra, prima del toggle Currency.
 
 ---
 
 ## File Coinvolti
 
-| File | Modifica |
-|------|----------|
-| `src/pages/Derivatives.tsx` | - Sostituire `CollapsibleTrigger asChild` con `div role="button"` in `OtherStrategyRow` |
-| | - Aggiungere `onClick={(e) => e.stopPropagation()}` ai tooltip trigger in `OtherStrategyRow` |
-| | - Aggiungere `onClick={(e) => e.stopPropagation()}` ai tooltip trigger in `GroupedOptionLegRow` |
+| File | Modifiche |
+|------|-----------|
+| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | - Cambiare default `currencyAdjusted` a `true` |
+| | - Aggiungere stato `timeRange` |
+| | - Aggiungere filtro dati storici |
+| | - Aggiungere UI selettore intervallo nella legenda |
+| | - Passare `filteredHistoricalData` a `useBenchmarkData` |
 
 ---
 
-## Dettagli Tecnici
+## Note Tecniche
 
-### Pattern corretto per tooltip in righe interattive
-
-Secondo le best practice del progetto (memoria `tech/ui/tooltip-nesting-pattern`):
-
-1. Evitare `<CollapsibleTrigger asChild>` quando ci sono tooltip all'interno
-2. Usare invece `<div role="button">` con gestione manuale del click
-3. Aggiungere sempre `onClick={(e) => e.stopPropagation()}` sui `TooltipTrigger` per evitare che il click sul tooltip attivi anche il toggle del collapsible
-
-### Modifiche specifiche
-
-**OtherStrategyRow - Riga 1777-1778**:
-```tsx
-// PRIMA
-<CollapsibleTrigger asChild>
-  <div className="flex items-center...">
-
-// DOPO
-<div 
-  role="button"
-  tabIndex={0}
-  onClick={() => setIsOpen(!isOpen)}
-  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-  className="flex items-center..."
->
-```
-
-**OtherStrategyRow - Tooltip PS (linee 1802-1805)**:
-```tsx
-// PRIMA
-<span className="text-sm text-muted-foreground cursor-help">
-
-// DOPO
-<span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-```
-
-**OtherStrategyRow - Tooltip PMC (linee 1816-1819)**:
-```tsx
-// PRIMA
-<span className="text-sm text-muted-foreground cursor-help">
-
-// DOPO
-<span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-```
-
-**GroupedOptionLegRow - Tooltip ITM/OTM (linea 1711)**:
-```tsx
-// PRIMA
-<Badge variant="outline" className="text-xs shrink-0 cursor-help ...">
-
-// DOPO
-<Badge variant="outline" className="text-xs shrink-0 cursor-help ..." onClick={(e) => e.stopPropagation()}>
-```
-
-**GroupedOptionLegRow - Tooltip PMC (linea 1735)**:
-```tsx
-// PRIMA
-<span className="text-sm text-muted-foreground cursor-help">
-
-// DOPO
-<span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-```
-
----
-
-## Risultato Atteso
-
-Dopo le modifiche:
-- I tooltip "PS: Prezzo Sottostante" funzioneranno correttamente
-- I tooltip "PMC: Prezzo Medio di Carico Opzione" funzioneranno correttamente
-- I tooltip "ITM/OTM" sui badge funzioneranno correttamente
-- Il toggle del collapsible continuerà a funzionare normalmente cliccando sulla riga
+- Il ricalcolo del rendimento dal primo punto filtrato avviene automaticamente poiche il `chartData` usa sempre il primo elemento dell'array ordinato come riferimento iniziale
+- Il benchmark viene anch'esso ricalcolato sullo stesso intervallo temporale
+- I depositi vengono filtrati coerentemente per il periodo selezionato
+- Lo stato `timeRange` e `currencyAdjusted` sono locali al componente (non persistenti)
