@@ -1,125 +1,155 @@
 
-# Piano: Upload Excel per Dati Storici Automatico
+# Piano: Calcolatrice Premi CALL per Covered Call
 
 ## Obiettivo
-Aggiungere la possibilita di caricare un file Excel nella sezione Dati Storici. Il sistema estrarra automaticamente:
-- **Data snapshot** dal file Excel (cella C4 o pattern "POSIZIONE AL")
-- **Patrimonio Totale** calcolato dalla somma dei market_value + cash
-- **Netting values** calcolati automaticamente in base alle posizioni derivate
+Aggiungere un pulsante calcolatrice su ogni riga Covered Call che permette di:
+1. Caricare un file PDF o Excel con gli ordini eseguiti
+2. Filtrare solo gli ordini "Eseguito" di tipo CALL per il sottostante specifico
+3. Calcolare i premi netti incassati
 
-Nessuna compilazione manuale richiesta - tutto viene estratto e calcolato dal file.
-
-## Come Funziona
+## Flusso Utente
 
 ```text
-Utente carica Excel in "Dati Storici"
-              |
-              v
-+----------------------------------+
-|  parsePortfolioExcel(file)       |
-|  - Estrae posizioni              |
-|  - Estrae cashValue              |
-|  - Estrae snapshotDate           |
-+----------------------------------+
-              |
-              v
-+----------------------------------+
-|  Calcola totali:                 |
-|  - totalValue = sum(market_value)|
-|                 + cashValue      |
-|  - Calcola netting dai derivati  |
-+----------------------------------+
-              |
-              v
-+----------------------------------+
-|  Salva in historical_data:       |
-|  - snapshot_date                 |
-|  - total_value                   |
-|  - netting_total                 |
-|  - netting_ex_cc                 |
-|  - netting_ex_cc_np              |
-+----------------------------------+
++---------------------------------------+
+|  COVERED CALL ROW                     |
+|  NVIDIA OPTION CALL 150 MAR/26  [🧮]  | <-- Click calcolatrice
++---------------------------------------+
+                |
+                v
++---------------------------------------+
+|  DIALOG: Calcola Premi CALL           |
+|  Sottostante: NVIDIA                  |
+|---------------------------------------|
+|  [📄 Carica file ordini (PDF/Excel)]  |
+|  Formati: .xls, .xlsx, .pdf           |
+|---------------------------------------|
+|  Costo unitario transazione:          |
+|  [10] USD                             |
+|---------------------------------------|
+|  RISULTATI (dopo upload):             |
+|  +--------------------------------+   |
+|  | Ordini trovati: 12             |   |
+|  | Vendite: 8  |  Acquisti: 4     |   |
+|  +--------------------------------+   |
+|  | Lordo Premi:      $2,450.00    |   |
+|  | Commissioni:      $120.00      |   |
+|  | Netto Comm.:      $2,330.00    |   |
+|  +--------------------------------+   |
+|  | Lordo Unitario:   $24.50       |   |
+|  | Netto Unitario:   $23.30       |   |
+|  +--------------------------------+   |
+|                                       |
+|  [Chiudi]                             |
++---------------------------------------+
 ```
+
+## Logica di Calcolo
+
+### 1. Parsing del File Ordini
+
+Dal file Excel caricato:
+- **Colonne chiave**: Operazione, Simbolo, Stato, Prz Medio, Qta Eseguita, Call/Put
+- **Filtro**: `Stato === "Eseguito"` AND `Call/Put === "CALL"`
+- **Matching sottostante**: Il simbolo contiene il ticker (es. "TSLA" in "TSLAG6C480")
+
+### 2. Calcoli
+
+| Metrica | Formula |
+|---------|---------|
+| Valore ordine | `quantita × prezzo_medio × 100` |
+| Segno | Vendita = +, Acquisto = - |
+| **Lordo Premi** | Somma valori assoluti (val. assoluto del netto) |
+| **Commissioni** | `numero_ordini × costo_unitario` |
+| **Netto Commissioni** | `Lordo - Commissioni` |
+| **Lordo Unitario** | `Lordo / (contratti_cc × 100)` |
+| **Netto Unitario** | `Netto / (contratti_cc × 100)` |
+
+Nota: I "contratti CC" sono quelli attualmente in portafoglio per quella covered call.
 
 ## Modifiche Tecniche
 
-### 1. Nuovo parser per calcolo netting stand-alone
-
-Creare `src/lib/historicalNettingCalculator.ts`:
-
-Dato che il calcolo del netting attualmente usa gli hook React, servira una versione stand-alone che lavora direttamente sulle posizioni parsate:
-
-```typescript
-// Calcola i valori di netting dalle posizioni parsate
-export function calculateNettingFromPositions(
-  positions: Position[], 
-  cashValue: number
-): {
-  totalValue: number;
-  nettingTotal: number;
-  nettingExCC: number;
-  nettingExCCNP: number;
-}
-```
-
-La logica riutilizzera quella esistente in `useDerivativeNetting.ts` ma senza dipendenze React.
-
-### 2. Modifica: `src/components/dashboard/HistoricalDataForm.tsx`
-
-Aggiungere un mini-uploader nella sezione:
-
-- Pulsante "Carica da Excel" accanto a "Aggiungi dato storico"
-- Dropzone compatta per trascinare il file
-- Al caricamento:
-  1. Parsa il file con `parsePortfolioExcel`
-  2. Calcola totali con `calculateNettingFromPositions`
-  3. Salva automaticamente con `onSave`
-  4. Mostra toast di conferma con data e valori estratti
-
-### 3. Interfaccia utente
-
-La sezione "Dati Storici" avra:
-
-```text
-+------------------------------------------+
-|  Dati Storici                    [^/v]   |
-|------------------------------------------|
-|  [+ Aggiungi manuale] [📄 Carica Excel]  |
-|                                          |
-|  --- oppure trascina un file qui ---     |
-|                                          |
-|  Dati salvati:                           |
-|  - 15 Gen 2025 | $102.500 | ...    [X]   |
-|  - 01 Gen 2025 | $100.000 | ...    [X]   |
-+------------------------------------------+
-```
-
-## File da Modificare/Creare
+### File da creare/modificare
 
 | File | Azione |
 |------|--------|
-| `src/lib/historicalNettingCalculator.ts` | **NUOVO** - Calcolo netting stand-alone |
-| `src/components/dashboard/HistoricalDataForm.tsx` | Aggiungere upload Excel |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | **NUOVO** - Dialog con upload e calcoli |
+| `src/lib/orderFileParser.ts` | **NUOVO** - Parser per file ordini |
+| `src/pages/Derivatives.tsx` | Aggiungere icona calcolatrice a CoveredCallRow |
 
-## Calcolo Netting Stand-Alone
+### 1. Parser File Ordini (`src/lib/orderFileParser.ts`)
 
-Il calcolo deve replicare la logica esistente:
+```typescript
+interface ParsedOrder {
+  operation: 'buy' | 'sell';
+  symbol: string;
+  status: string;
+  avgPrice: number;
+  quantity: number;
+  optionType: 'CALL' | 'PUT';
+}
 
-1. **Patrimonio Totale**: Somma di tutti i `market_value` + `cashValue`
-2. **Netting Totale**: Patrimonio - abs(sum derivati negativi)
-3. **Netting ex Covered Call**: Come sopra ma esclude le call corte su sottostanti posseduti
-4. **Netting ex CC e NP OTM**: Come sopra ma esclude anche le put corte OTM
+// Parsing Excel: stessa libreria xlsx gia in uso
+// Parsing PDF: richiede estrazione testo tabellare
+```
 
-Per identificare covered call e naked put OTM servira:
-- Verificare se esiste una posizione azionaria per lo stesso underlying
-- Per le put, servirebbero i prezzi correnti (non disponibili nel file storico)
+### 2. Dialog Calcolatrice (`src/components/derivatives/CallPremiumCalculatorDialog.tsx`)
 
-**Semplificazione proposta per dati storici**:
-- Il file storico non ha prezzi aggiornati, quindi per le put OTM useremo un'euristica basata sullo strike vs prezzo di carico della posizione sottostante (se presente)
+Componenti:
+- Dropzone per file (PDF/Excel)
+- Input numerico per costo transazione (default: 10 USD)
+- Tabella risultati con i 4 valori calcolati
+- Dettaglio ordini trovati (espandibile)
 
-## Vantaggi
+Props:
+```typescript
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  underlying: string;        // Nome sottostante per matching
+  ticker?: string;           // Ticker risolto (es. TSLA, NVDA)
+  contractsInPortfolio: number; // Per calcolo unitario
+}
+```
 
-- **Zero compilazione manuale**: Basta trascinare il file
-- **Consistenza**: Usa lo stesso parser del portfolio
-- **Velocita**: Importa anni di dati storici in pochi secondi
-- **Accuratezza**: Calcoli automatici basati sui dati reali del file
+### 3. Modifica CoveredCallRow
+
+Aggiungere icona `Calculator` con onClick che apre il dialog:
+
+```tsx
+<Button variant="ghost" size="icon" onClick={() => setShowCalculator(true)}>
+  <Calculator className="w-4 h-4" />
+</Button>
+
+<CallPremiumCalculatorDialog
+  open={showCalculator}
+  onOpenChange={setShowCalculator}
+  underlying={option.underlying}
+  ticker={underlyingPrices[option.underlying]?.ticker}
+  contractsInPortfolio={contractsCovered}
+/>
+```
+
+## Supporto PDF
+
+Per i PDF, il parsing e piu complesso:
+- Opzione 1: Usare `pdfjs-dist` per estrarre testo
+- Opzione 2: Richiedere solo Excel inizialmente, aggiungere PDF in seguito
+
+**Raccomandazione**: Iniziare con solo Excel (formato identico al file fornito), aggiungere PDF come miglioramento futuro.
+
+## Matching Sottostante
+
+Il simbolo nell'Excel (es. "TSLAG6C480") contiene:
+- Ticker: TSLA
+- Codice opzione: G6 (mese/anno)
+- Tipo: C (Call) o P (Put)
+- Strike: 480
+
+Per il matching, estraiamo i primi 2-4 caratteri del simbolo e confrontiamo con il ticker risolto della covered call.
+
+## Note UI
+
+- L'icona calcolatrice appare solo nelle righe Covered Call
+- Il dialog e modale e non blocca la navigazione
+- I risultati rimangono visibili finche il dialog e aperto
+- Possibilita di caricare piu file per aggiornare i calcoli
