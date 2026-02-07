@@ -685,7 +685,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             <Tooltip>
               <TooltipTrigger asChild>
                 <span 
-                  className={`text-sm text-right cursor-help font-medium ${
+                  className={`text-sm text-right cursor-help font-medium whitespace-nowrap ${
                     netPerShare !== undefined 
                       ? netPerShare >= 0 
                         ? 'text-green-500' 
@@ -696,8 +696,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 >
                   {netPerShare !== undefined 
                     ? <>
-                        UNIT: {formatNumber(netPerShare, 2)} ${' '}
-                        {underlyingPrice > 0 && (
+                        UNIT: {formatNumber(netPerShare, 2)} $ {underlyingPrice > 0 && (
                           <span className="text-muted-foreground">
                             ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
                           </span>
