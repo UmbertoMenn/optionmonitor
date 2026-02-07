@@ -140,6 +140,7 @@ function parseHtmlTable(htmlContent: string): any[][] {
       // Clean HTML tags and decode entities
       let cellValue = cellMatch[1]
         .replace(/<[^>]*>/g, '') // Remove HTML tags
+        .replace(/^'+/, '') // Remove leading apostrophes (common in Italian Excel)
         .replace(/&nbsp;/g, ' ')
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
@@ -166,7 +167,8 @@ function parseHtmlTable(htmlContent: string): any[][] {
 function parseDateIT(value: string): string | null {
   if (!value) return null;
   
-  const cleaned = value.trim();
+  // Remove leading apostrophes (common in Italian Excel exports)
+  const cleaned = value.trim().replace(/^'+/, '');
   
   // Try DD/MM/YYYY or DD-MM-YYYY
   const match = cleaned.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
@@ -428,9 +430,9 @@ export function calculatePremiumMetrics(
   // Calculate yield %
   const yieldPct = underlyingPrice > 0 ? (netPerShare / underlyingPrice) * 100 : 0;
   
-  // Calculate annualized yield
+  // Calculate annualized yield (regardless of yieldPct sign)
   let annualizedYieldPct = 0;
-  if (parseResult.firstOperationDate && yieldPct > 0) {
+  if (parseResult.firstOperationDate) {
     const firstDate = new Date(parseResult.firstOperationDate);
     const today = new Date();
     const diffTime = today.getTime() - firstDate.getTime();
