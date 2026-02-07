@@ -1,162 +1,234 @@
 
-# Piano: Fix Matching JPMorgan + Scrollbar Lista Stock
+# Piano Aggiornato: Equity Exposure Storica nel Benchmark
 
-## Problema 1: CALL JPMorgan non riconosciuta come Covered Call
+## Correzione Logica Fondamentale
 
-### Causa Radice
-La normalizzazione di `"J.P. MORGAN"` produce `"J P MORGAN"` (3 token separati), mentre `"JPMORGAN"` resta un token unico. Il token matching fallisce perché non trova abbastanza overlap.
+L'equity exposure del **punto N** determina il rendimento benchmark **dal punto N al punto N+1**.
 
-### Soluzione
-Aggiungere JPMORGAN agli alias speciali in `SPECIAL_ALIASES` e migliorare la normalizzazione per gestire abbreviazioni con punti.
-
-#### Modifiche in `src/lib/derivativeStrategies.ts`:
-
-**1. Estendere `SPECIAL_ALIASES`:**
-```typescript
-export const SPECIAL_ALIASES: Record<string, string[]> = {
-  // ... existing aliases ...
-  JPMORGAN: ['JPMORGAN', 'JP MORGAN', 'J.P. MORGAN', 'JPMORGAN CHASE', 'JP MORGAN CHASE', 'J.P. MORGAN CHASE'],
-};
+```text
+Timeline:
+────────────────────────────────────────────────────────────►
+     Punto 1          Punto 2          Punto 3         Oggi
+     (40% eq)         (60% eq)         (70% eq)
+        │                │                │              │
+        ├────────────────┤                │              │
+        │  Benchmark:    │                │              │
+        │  40% Eq + 60% Bond              │              │
+        │                │                │              │
+                         ├────────────────┤              │
+                         │  Benchmark:    │              │
+                         │  60% Eq + 40% Bond            │
+                         │                │              │
+                                          ├──────────────┤
+                                          │  Benchmark:  │
+                                          │  70% Eq + 30% Bond
 ```
 
-**2. Migliorare `normalizeForMatching()` per collassare abbreviazioni con punti:**
+---
+
+## Modifiche al Database
+
+### Nuova colonna in `historical_data`
+
+```sql
+ALTER TABLE historical_data 
+ADD COLUMN equity_exposure_pct numeric DEFAULT 0.6;
+
+COMMENT ON COLUMN historical_data.equity_exposure_pct IS 
+  'Equity exposure % (0-1) del portafoglio alla data dello snapshot. 
+   Usata per calcolare il benchmark nel periodo successivo.';
+```
+
+---
+
+## File da Modificare
+
+| File | Modifiche |
+|------|-----------|
+| `src/types/historicalData.ts` | Aggiungi `equity_exposure_pct` ai tipi |
+| `src/components/dashboard/Dashboard.tsx` | Includi equity exposure nel salvataggio snapshot |
+| `src/components/dashboard/HistoricalDataForm.tsx` | Nuovo campo input per equity exposure % |
+| `src/hooks/useHistoricalData.ts` | Gestisci il nuovo campo nell'upsert |
+| `src/hooks/useBenchmarkData.ts` | Usa equity exposure storica punto-per-punto |
+| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Aggiorna tooltip benchmark |
+
+---
+
+## Dettagli Implementazione
+
+### 1. Tipi (`src/types/historicalData.ts`)
+
 ```typescript
-export function normalizeForMatching(text: string): string {
-  return text
-    .toUpperCase()
-    .replace(/^AZ\./i, '')
-    .replace(/\([^)]*\)/g, '')
-    .replace(/([A-Z])\.([A-Z])/g, '$1$2')  // ← NUOVO: "J.P." diventa "JP"
-    .replace(/[^A-Z0-9\s]/g, ' ')
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+export interface HistoricalDataEntry {
+  id: string;
+  portfolio_id: string;
+  snapshot_date: string;
+  total_value: number;
+  netting_total: number;
+  netting_ex_cc: number;
+  netting_ex_cc_np: number;
+  deposits: number;
+  average_balance: number;
+  equity_exposure_pct: number; // NUOVO: 0-1, default 0.6
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HistoricalDataInput {
+  snapshot_date: string;
+  total_value: number;
+  netting_total: number;
+  netting_ex_cc: number;
+  netting_ex_cc_np: number;
+  deposits: number;
+  average_balance: number;
+  equity_exposure_pct: number; // NUOVO
 }
 ```
 
-Con questa modifica:
-- `"J.P. MORGAN CHASE & CO"` → `"JP MORGAN CHASE CO"`
+### 2. Dashboard - Salvataggio Snapshot
 
-Questo non basta ancora perché `"JPMORGAN"` ≠ `"JP MORGAN"`.
-
-**3. Aggiungere preprocessing in `findUnderlyingStock()` per unire token di 1-2 lettere:**
 ```typescript
-// Prima del token matching, prova a unire lettere isolate
-// "JP MORGAN" → "JPMORGAN"
-const collapseShortTokens = (text: string): string => {
-  return text.replace(/\b([A-Z]{1,2})\s+(?=[A-Z])/g, '$1');
-};
+// In Dashboard.tsx
+const { equityExposurePct } = useEquityExposurePct();
 
-const optionCollapsed = collapseShortTokens(optionNormalized);
-const stockCollapsed = collapseShortTokens(stockNormalized);
-// Usa anche questi per il matching
+// Nel onClick di "Salva Snapshot"
+upsertHistoricalData({
+  snapshot_date: portfolio.snapshot_date,
+  total_value: summary?.totalValue ?? 0,
+  netting_total: netting.nettingTotal,
+  netting_ex_cc: netting.nettingExCoveredCall,
+  netting_ex_cc_np: netting.nettingExCCAndNP,
+  deposits: 0,
+  average_balance: 0,
+  equity_exposure_pct: equityExposurePct, // NUOVO: salva exposure attuale
+});
 ```
 
----
+### 3. HistoricalDataForm - Campo manuale
 
-## Problema 2: Scrollbar invisibile nella lista stock
-
-### Causa Radice
-Il `<div className="overflow-y-auto">` usa la scrollbar nativa del browser, che su molti sistemi (macOS, Windows con overlay scrollbars) è invisibile finché non si inizia a scrollare. L'utente non sa che può scorrere.
-
-### Soluzione
-Usare il componente `ScrollArea` di Radix che mostra una scrollbar sempre visibile.
-
-#### Modifiche in `src/components/derivatives/MoveOptionMenu.tsx`:
-
-**1. Import ScrollArea:**
+Nuove props:
 ```typescript
-import { ScrollArea } from '@/components/ui/scroll-area';
+interface HistoricalDataFormProps {
+  // ... esistenti ...
+  currentEquityExposurePct: number; // Per "Usa valori attuali"
+}
 ```
 
-**2. Sostituire il div con ScrollArea:**
+Nuovo campo nel form:
+- Label: "Equity Exposure (%)"
+- Input numerico: 0-100 (visualizzazione user-friendly)
+- Conversione: input/100 per salvare come 0-1
+- Placeholder: "es. 65"
 
-Linee 245-270, da:
-```tsx
-{availableStocks.length > matchingStocks.length && (
-  <div className="mt-4">
-    <p className="text-xs text-muted-foreground mb-2">Altri titoli disponibili:</p>
-    <div className="space-y-1 max-h-40 overflow-y-auto">
-      {/* ... items ... */}
-    </div>
-  </div>
-)}
+Il bottone "Usa valori attuali" popola anche questo campo.
+
+### 4. useBenchmarkData - Logica corretta
+
+```typescript
+export function useBenchmarkData(
+  historicalData: HistoricalDataEntry[], // Include equity_exposure_pct
+  selectedPeriod: string,
+  currentEquityExposure?: number // Exposure attuale per ultimo periodo
+) {
+  // ...
+  
+  // Ordina per data crescente
+  const sortedHistory = [...historicalData].sort(
+    (a, b) => new Date(a.snapshot_date).getTime() - new Date(b.snapshot_date).getTime()
+  );
+  
+  let cumulativeBenchmarkReturn = 0;
+  
+  for (let i = 0; i < sortedHistory.length; i++) {
+    const entry = sortedHistory[i];
+    const nextDate = i < sortedHistory.length - 1 
+      ? sortedHistory[i + 1].snapshot_date 
+      : today; // Ultimo punto → oggi
+    
+    // CHIAVE: L'equity exposure di QUESTO punto
+    // determina il benchmark per il periodo SUCCESSIVO
+    const equityPct = entry.equity_exposure_pct > 0 
+      ? entry.equity_exposure_pct 
+      : 0.6; // Fallback per dati legacy
+    
+    // Calcola rendimenti Equity e Bond nel periodo
+    const equityReturn = getEquityReturnBetween(entry.snapshot_date, nextDate);
+    const bondReturn = getBondReturnBetween(entry.snapshot_date, nextDate);
+    
+    // Benchmark ponderato per il periodo
+    const periodReturn = equityPct * equityReturn + (1 - equityPct) * bondReturn;
+    
+    // Compounding
+    cumulativeBenchmarkReturn = (1 + cumulativeBenchmarkReturn) * (1 + periodReturn) - 1;
+  }
+  
+  // ...
+}
 ```
 
-A:
-```tsx
-{availableStocks.length > matchingStocks.length && (
-  <div className="mt-4">
-    <p className="text-xs text-muted-foreground mb-2">Altri titoli disponibili:</p>
-    <ScrollArea className="h-40">
-      <div className="space-y-1 pr-3">
-        {/* ... items ... */}
-      </div>
-    </ScrollArea>
-  </div>
-)}
-```
+### 5. Tooltip Benchmark aggiornato
 
-**3. Applicare lo stesso fix alla sezione "Titoli suggeriti" (se può essere lunga):**
-Per consistenza, wrappare anche la lista dei titoli suggeriti in ScrollArea se supera un certo numero.
+```typescript
+const benchmarkTooltip = (
+  <>
+    <strong>Benchmark Dinamico Ponderato</strong>
+    <br /><br />
+    Paniere Equity (Media URTH/SPY/ACWI/EXSA.DE) e Bond (AGG) 
+    ponderato per l'equity exposure storica del portafoglio.
+    <br /><br />
+    <strong>Ponderazione variabile:</strong> Il peso Equity/Bond 
+    cambia nel tempo in base all'esposizione salvata in ogni snapshot.
+    L'exposure di ciascun punto determina la ponderazione 
+    per il periodo successivo.
+    <br /><br />
+    Equity exposure attuale: <strong>{(equityExposurePct * 100).toFixed(0)}%</strong>
+  </>
+);
+```
 
 ---
 
-## File Coinvolti
+## Edge Cases
 
-| File | Tipo Modifica |
-|------|---------------|
-| `src/lib/derivativeStrategies.ts` | Aggiungi alias JPMORGAN, migliora normalizzazione |
-| `src/components/derivatives/MoveOptionMenu.tsx` | Usa ScrollArea per liste stock |
+| Scenario | Comportamento |
+|----------|---------------|
+| Snapshot legacy senza equity_exposure_pct | Usa fallback 60% |
+| equity_exposure_pct = 0 | Usa fallback 60% (0 = non impostato) |
+| equity_exposure_pct = 0.01 (intenzionale 1%) | Usa 1% (valore valido) |
+| Solo 1 snapshot | Usa la sua equity exposure per tutto il periodo fino ad oggi |
+| Form: input > 100 | Clamp a 100 |
+| Form: input < 0 | Clamp a 0 |
 
 ---
 
-## Dettagli Tecnici
+## Flusso Utente
 
-### Normalizzazione migliorata (esempio)
+1. **Salvataggio automatico snapshot**: L'equity exposure attuale viene catturata automaticamente
+2. **Inserimento manuale**: L'utente deve inserire l'equity exposure che aveva in quella data storica
+3. **Modifica snapshot esistente**: Può correggere l'equity exposure se era sbagliata
+4. **Visualizzazione benchmark**: Ogni segmento del grafico usa la ponderazione appropriata
 
-| Input | Attuale | Con Fix |
-|-------|---------|---------|
-| `"J.P. MORGAN CHASE"` | `"J P MORGAN CHASE"` | `"JPMORGAN CHASE"` |
-| `"AZ.JPMORGAN CHASE"` | `"JPMORGAN CHASE"` | `"JPMORGAN CHASE"` |
+---
 
-### Matching JPMorgan
+## Migrazione Dati
 
-Dopo il fix:
-1. L'opzione `"J.P. MORGAN CHASE & CO"` viene normalizzata a `"JPMORGAN CHASE CO"`
-2. Lo stock `"AZ.JPMORGAN CHASE & CO"` viene normalizzato a `"JPMORGAN CHASE CO"`
-3. I token matchano perfettamente → Covered Call riconosciuta
-
-### ScrollArea comportamento
-
-ScrollArea di Radix:
-- Mostra sempre la scrollbar (stile semi-trasparente)
-- Diventa più opaca al hover
-- Funziona uniformemente su tutti i browser/OS
-- Mantiene l'accessibilità (keyboard scrolling)
+I dati esistenti senza `equity_exposure_pct` useranno il default 60%.
+L'utente può modificare ogni entry per inserire il valore corretto se lo ricorda.
 
 ---
 
 ## Test di Verifica
 
-1. **JPMorgan Covered Call**:
-   - Caricare un Excel con stock JPMorgan + CALL venduta JPMorgan
-   - Verificare che appaia nella sezione "Covered Call"
-   - Console log dovrebbe mostrare: `[CoveredCall] Matching "J.P. MORGAN...": FOUND -> AZ.JPMORGAN...`
+1. **Scenario multi-periodo**:
+   - Salva snapshot gen 2024 con equity 40%
+   - Salva snapshot feb 2024 con equity 70%
+   - Verifica che il benchmark gen→feb usi 40%, feb→oggi usi 70%
 
-2. **Scrollbar stock**:
-   - Aprire dialog "Sposta opzione" su un'opzione
-   - Verificare che la sezione "Altri titoli disponibili" mostri la scrollbar
-   - Verificare che si possa scorrere per vedere tutti i titoli
+2. **Form manuale**:
+   - Inserisci dato storico con equity 50%
+   - Verifica salvataggio corretto (0.5 nel DB)
 
----
-
-## Edge Cases Gestiti
-
-| Caso | Comportamento |
-|------|---------------|
-| `"J.P.MORGAN"` (senza spazio) | → `"JPMORGAN"` |
-| `"J. P. MORGAN"` (con spazi) | → `"JPMORGAN"` dopo collapse |
-| `"JPMORGAN"` (già unito) | → `"JPMORGAN"` (invariato) |
-| Lista con 2 stock | ScrollArea comunque presente, scrollbar appare se necessaria |
-| Lista con 20 stock | Scrollbar visibile, altezza fissa 160px |
+3. **Tooltip**:
+   - Hover su "Benchmark" nel grafico
+   - Verifica menzione ponderazione variabile
