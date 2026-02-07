@@ -29,7 +29,7 @@ export interface BenchmarkStaleSummary {
 }
 
 // Benchmark tickers
-const EQUITY_BENCHMARKS = ['URTH', 'SPY', 'ACWI', 'EXSA.DE'] as const;
+const EQUITY_BENCHMARKS = ['SPY', 'QQQ'] as const;
 const BOND_TICKER = 'AGG';
 const EURUSD_TICKER = 'EURUSD=X';
 const ALL_TICKERS = [...EQUITY_BENCHMARKS, BOND_TICKER, EURUSD_TICKER] as const;

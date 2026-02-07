@@ -9,10 +9,8 @@ const corsHeaders = {
 
 // Benchmark tickers to track
 const BENCHMARK_TICKERS = [
-  "URTH",    // MSCI World ETF
   "SPY",     // S&P 500
-  "ACWI",    // MSCI ACWI
-  "EXSA.DE", // Stoxx Europe 600 (iShares)
+  "QQQ",     // Nasdaq-100
   "AGG",     // iShares Core US Aggregate Bond
   "EURUSD=X", // EUR/USD exchange rate
 ];
