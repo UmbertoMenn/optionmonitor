@@ -108,10 +108,6 @@ async function sendEmail(
                 <td style="padding: 8px 0;">${strategyName}</td>
               </tr>
               <tr>
-                <td style="padding: 8px 0; color: #6b7280;">Tipo Alert:</td>
-                <td style="padding: 8px 0;">${alertTypeLabel}</td>
-              </tr>
-              <tr>
                 <td style="padding: 8px 0; color: #6b7280;">Messaggio:</td>
                 <td style="padding: 8px 0;">${alertData.message}</td>
               </tr>
@@ -163,7 +159,6 @@ ${severityEmoji} *${severityLabel}*
 
 📈 *Ticker:* ${alertData.ticker}
 📊 *Strategia:* ${strategyName}
-🏷️ *Tipo Alert:* ${alertTypeLabel}
 📝 *Messaggio:* ${alertData.message}`;
 
     if (strikeDisplay) {
