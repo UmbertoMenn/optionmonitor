@@ -1,168 +1,125 @@
 
-# Piano: Indicatore Mercato Chiuso per Prezzi Stale
+# Piano: Upload Excel per Dati Storici Automatico
 
 ## Obiettivo
-Modificare l'indicatore di prezzo non aggiornato (triangolino rosso) per mostrare **"Mercato chiuso"** quando il mercato di riferimento è effettivamente chiuso, distinguendo tra titoli USA ed europei.
+Aggiungere la possibilita di caricare un file Excel nella sezione Dati Storici. Il sistema estrarra automaticamente:
+- **Data snapshot** dal file Excel (cella C4 o pattern "POSIZIONE AL")
+- **Patrimonio Totale** calcolato dalla somma dei market_value + cash
+- **Netting values** calcolati automaticamente in base alle posizioni derivate
 
-## Orari di Mercato da Implementare
+Nessuna compilazione manuale richiesta - tutto viene estratto e calcolato dal file.
 
-| Mercato | Orario Locale | Orario CET (inverno) | Orario CEST (estate) |
-|---------|---------------|----------------------|----------------------|
-| **USA** (NYSE/NASDAQ) | 09:30-16:00 ET | 15:30-22:00 | 15:30-22:00 |
-| **Europa** (vari) | ~09:00-17:30 | 09:00-17:30 | 09:00-17:30 |
-
-**Weekend**: Tutti i mercati sono chiusi sabato e domenica.
-
-## Logica di Rilevamento
+## Come Funziona
 
 ```text
-┌─────────────────────────────────────────────┐
-│           isStale = true?                   │
-│                  │                          │
-│                  ▼                          │
-│    ┌─────────────────────────────┐          │
-│    │  Determina tipo ticker     │          │
-│    │  (EU suffix o US default)  │          │
-│    └─────────────────────────────┘          │
-│                  │                          │
-│         ┌───────┴───────┐                   │
-│         ▼               ▼                   │
-│    ┌─────────┐     ┌─────────┐              │
-│    │ EU Mkt  │     │ US Mkt  │              │
-│    └────┬────┘     └────┬────┘              │
-│         │               │                   │
-│         ▼               ▼                   │
-│  isMarketOpen(EU)?   isMarketOpen(US)?      │
-│         │               │                   │
-│    ┌────┴────┐     ┌────┴────┐              │
-│    ▼         ▼     ▼         ▼              │
-│  Aperto   Chiuso  Aperto   Chiuso           │
-│    │         │     │         │              │
-│    ▼         ▼     ▼         ▼              │
-│ "Prezzo"  "Mercato" "Prezzo" "Mercato"      │
-│ "non agg" "chiuso"  "non agg" "chiuso"      │
-└─────────────────────────────────────────────┘
+Utente carica Excel in "Dati Storici"
+              |
+              v
++----------------------------------+
+|  parsePortfolioExcel(file)       |
+|  - Estrae posizioni              |
+|  - Estrae cashValue              |
+|  - Estrae snapshotDate           |
++----------------------------------+
+              |
+              v
++----------------------------------+
+|  Calcola totali:                 |
+|  - totalValue = sum(market_value)|
+|                 + cashValue      |
+|  - Calcola netting dai derivati  |
++----------------------------------+
+              |
+              v
++----------------------------------+
+|  Salva in historical_data:       |
+|  - snapshot_date                 |
+|  - total_value                   |
+|  - netting_total                 |
+|  - netting_ex_cc                 |
+|  - netting_ex_cc_np              |
++----------------------------------+
 ```
 
 ## Modifiche Tecniche
 
-### 1. Nuovo helper: `src/lib/marketHours.ts`
+### 1. Nuovo parser per calcolo netting stand-alone
 
-Creare un modulo dedicato per la logica degli orari di mercato:
+Creare `src/lib/historicalNettingCalculator.ts`:
+
+Dato che il calcolo del netting attualmente usa gli hook React, servira una versione stand-alone che lavora direttamente sulle posizioni parsate:
 
 ```typescript
-// Suffissi ticker europei (riuso logica edge function)
-const EU_SUFFIXES = ['.MI', '.DE', '.SW', '.PA', '.AS', '.L', '.MC', '.BR', '.VI', '.CO', '.HE', '.ST', '.OL', '.LS'];
-
-export function isEuropeanTicker(ticker: string): boolean {
-  return EU_SUFFIXES.some(suffix => ticker.toUpperCase().endsWith(suffix));
-}
-
-export function isMarketOpen(ticker: string): boolean {
-  const now = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
-  
-  // Weekend - tutti i mercati chiusi
-  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
-  
-  // Get current time in CET/CEST
-  const cetOffset = getCETOffset(now);
-  const cetHour = (now.getUTCHours() + cetOffset) % 24;
-  const cetMinutes = now.getUTCMinutes();
-  const cetTime = cetHour * 60 + cetMinutes;
-  
-  if (isEuropeanTicker(ticker)) {
-    // EU: 09:00-17:30 CET
-    const euOpen = 9 * 60;      // 540
-    const euClose = 17 * 60 + 30; // 1050
-    return cetTime >= euOpen && cetTime < euClose;
-  } else {
-    // US: 15:30-22:00 CET (09:30-16:00 ET)
-    const usOpen = 15 * 60 + 30;  // 930
-    const usClose = 22 * 60;      // 1320
-    return cetTime >= usOpen && cetTime < usClose;
-  }
-}
-
-// Helper per gestire ora legale CET/CEST
-function getCETOffset(date: Date): number {
-  // Semplificazione: CET = UTC+1, CEST = UTC+2
-  // L'ora legale inizia l'ultima domenica di marzo e finisce l'ultima domenica di ottobre
-  const month = date.getUTCMonth(); // 0-11
-  if (month >= 3 && month < 10) return 2; // CEST (Apr-Sep)
-  if (month === 2 || month === 10) {
-    // Marzo o Ottobre - calcolo preciso necessario
-    // Semplificazione: assume CEST per marzo dopo il 25, CET per ottobre dopo il 25
-    const day = date.getUTCDate();
-    if (month === 2) return day >= 25 ? 2 : 1;
-    if (month === 10) return day >= 25 ? 1 : 2;
-  }
-  return 1; // CET (Nov-Feb)
+// Calcola i valori di netting dalle posizioni parsate
+export function calculateNettingFromPositions(
+  positions: Position[], 
+  cashValue: number
+): {
+  totalValue: number;
+  nettingTotal: number;
+  nettingExCC: number;
+  nettingExCCNP: number;
 }
 ```
 
-### 2. Modifica: `src/components/ui/stale-price-indicator.tsx`
+La logica riutilizzera quella esistente in `useDerivativeNetting.ts` ma senza dipendenze React.
 
-Aggiungere prop per il ticker e usare la logica mercato:
+### 2. Modifica: `src/components/dashboard/HistoricalDataForm.tsx`
 
-```typescript
-interface StalePriceIndicatorProps {
-  className?: string;
-  ticker?: string;  // Nuovo: ticker per determinare il mercato
-}
+Aggiungere un mini-uploader nella sezione:
 
-export function StalePriceIndicator({ className, ticker }: StalePriceIndicatorProps) {
-  const isMarketClosed = ticker && !isMarketOpen(ticker);
-  const message = isMarketClosed ? "Mercato chiuso" : "Prezzo non aggiornato";
-  
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <AlertTriangle 
-          className={`w-3 h-3 text-destructive animate-pulse ml-1 cursor-help ${className || ''}`}
-        />
-      </TooltipTrigger>
-      <TooltipContent>
-        <p>{message}</p>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
+- Pulsante "Carica da Excel" accanto a "Aggiungi dato storico"
+- Dropzone compatta per trascinare il file
+- Al caricamento:
+  1. Parsa il file con `parsePortfolioExcel`
+  2. Calcola totali con `calculateNettingFromPositions`
+  3. Salva automaticamente con `onSave`
+  4. Mostra toast di conferma con data e valori estratti
+
+### 3. Interfaccia utente
+
+La sezione "Dati Storici" avra:
+
+```text
++------------------------------------------+
+|  Dati Storici                    [^/v]   |
+|------------------------------------------|
+|  [+ Aggiungi manuale] [📄 Carica Excel]  |
+|                                          |
+|  --- oppure trascina un file qui ---     |
+|                                          |
+|  Dati salvati:                           |
+|  - 15 Gen 2025 | $102.500 | ...    [X]   |
+|  - 01 Gen 2025 | $100.000 | ...    [X]   |
++------------------------------------------+
 ```
-
-### 3. Modifica: `src/pages/Derivatives.tsx`
-
-Passare il ticker al componente `StalePriceIndicator` in tutte le occorrenze (7 punti):
-
-```typescript
-// Esempio per Covered Call (linea ~662)
-{option.underlying && underlyingPrices[option.underlying]?.isStale && (
-  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-)}
-```
-
-### 4. Aggiornare `UnderlyingPrice` interface
-
-L'interfaccia già include `ticker?: string`, quindi non servono modifiche al type.
 
 ## File da Modificare/Creare
 
 | File | Azione |
 |------|--------|
-| `src/lib/marketHours.ts` | **NUOVO** - Logica orari mercato |
-| `src/components/ui/stale-price-indicator.tsx` | Modificare - Aggiungere prop ticker e logica |
-| `src/pages/Derivatives.tsx` | Modificare - Passare ticker in 7 punti |
+| `src/lib/historicalNettingCalculator.ts` | **NUOVO** - Calcolo netting stand-alone |
+| `src/components/dashboard/HistoricalDataForm.tsx` | Aggiungere upload Excel |
+
+## Calcolo Netting Stand-Alone
+
+Il calcolo deve replicare la logica esistente:
+
+1. **Patrimonio Totale**: Somma di tutti i `market_value` + `cashValue`
+2. **Netting Totale**: Patrimonio - abs(sum derivati negativi)
+3. **Netting ex Covered Call**: Come sopra ma esclude le call corte su sottostanti posseduti
+4. **Netting ex CC e NP OTM**: Come sopra ma esclude anche le put corte OTM
+
+Per identificare covered call e naked put OTM servira:
+- Verificare se esiste una posizione azionaria per lo stesso underlying
+- Per le put, servirebbero i prezzi correnti (non disponibili nel file storico)
+
+**Semplificazione proposta per dati storici**:
+- Il file storico non ha prezzi aggiornati, quindi per le put OTM useremo un'euristica basata sullo strike vs prezzo di carico della posizione sottostante (se presente)
 
 ## Vantaggi
 
-1. **Chiarezza**: L'utente capisce subito se il prezzo è stale per un problema tecnico o perché il mercato è chiuso
-2. **Precisione**: Distingue tra mercati USA ed europei con orari differenti
-3. **Consistenza**: Usa la stessa logica di identificazione ticker dell'edge function
-4. **Fuso orario**: Calcolo corretto per CET/CEST
-
-## Edge Cases Gestiti
-
-- **Weekend**: Mostra "Mercato chiuso" per tutti i ticker
-- **Pre-market/After-hours USA**: Mostra "Mercato chiuso" (non gestiamo extended hours)
-- **Festività**: Non gestite esplicitamente (mostrerebbe "Prezzo non aggiornato" - accettabile)
-- **Ticker senza suffisso EU**: Assume mercato USA (comportamento conservativo)
+- **Zero compilazione manuale**: Basta trascinare il file
+- **Consistenza**: Usa lo stesso parser del portfolio
+- **Velocita**: Importa anni di dati storici in pochi secondi
+- **Accuratezza**: Calcoli automatici basati sui dati reali del file
