@@ -196,7 +196,7 @@ export function NotificationSettings() {
                   </div>
                   <div className="text-sm text-muted-foreground">
                     <ol className="list-decimal list-inside space-y-1">
-                      <li>Cerca <strong>@YourPortfolioBotName</strong> su Telegram</li>
+                      <li>Cerca <strong>@optionalertrobot</strong> su Telegram</li>
                       <li>Avvia la chat con <code>/start</code></li>
                       <li>Invia il codice: <code>{linkCode.code}</code></li>
                     </ol>
