@@ -1,164 +1,86 @@
 
-# Piano: Tooltip Dettagliato con Calcoli Reali - Istogramma Rendimento Annuo
+# Piano: Modifica Benchmark a SPY + QQQ
 
-## Obiettivo
+## Situazione Attuale
 
-Mostrare nel tooltip dell'istogramma i calcoli effettuati con i numeri reali, in modo che l'utente possa vedere esattamente come viene calcolato il rendimento annuo.
+| Componente | Ticker Attuali |
+|------------|----------------|
+| Equity | URTH, SPY, ACWI, EXSA.DE (media) |
+| Bond | AGG |
+| Cambio | EURUSD=X |
 
-## Esempio di Tooltip Atteso
+## Nuova Configurazione
 
-```
-Anno 2024
-
-Valore iniziale:     € 850.000
-Valore finale:       € 920.000
-Versamenti:          € 20.000
-────────────────────────────────
-P/L:                 € 50.000
-Giacenza media:      € 860.000
-────────────────────────────────
-Rendimento:          +5,81%
-
-Formula: (920.000 - 850.000 - 20.000) / (850.000 + 20.000/2) × 100
-```
+| Componente | Ticker Nuovi |
+|------------|--------------|
+| Equity | **SPY, QQQ** (media) |
+| Bond | AGG (invariato) |
+| Cambio | EURUSD=X (invariato) |
 
 ---
 
-## Modifiche
+## File da Modificare
 
-### File: `src/components/dashboard/charts/YearlyReturnChart.tsx`
+### 1. Frontend: `src/hooks/useBenchmarkData.ts`
 
-#### 1. Espandere l'interfaccia `YearlyDataPoint`
-
-Includere tutti i valori intermedi necessari per il tooltip:
+Modifica le costanti dei ticker:
 
 ```typescript
-interface YearlyDataPoint {
-  year: string;
-  returnPct: number;
-  startValue: number;    // NUOVO
-  endValue: number;      // NUOVO
-  deposits: number;      // NUOVO (yearDeposits)
-  pl: number;            // NUOVO
-  avgBalance: number;    // NUOVO
-}
+// PRIMA
+const EQUITY_BENCHMARKS = ['URTH', 'SPY', 'ACWI', 'EXSA.DE'] as const;
+
+// DOPO
+const EQUITY_BENCHMARKS = ['SPY', 'QQQ'] as const;
 ```
 
-#### 2. Salvare i valori nel data array
+Nessun'altra modifica necessaria - la logica calcola già la media dei benchmark equity disponibili.
 
-Nel `useMemo`, salvare tutti i valori calcolati:
+### 2. Backend: `supabase/functions/update-benchmark-prices/index.ts`
+
+Modifica la lista dei ticker da scaricare:
 
 ```typescript
-data.push({
-  year,
-  returnPct,
-  startValue,    // NUOVO
-  endValue,      // NUOVO
-  deposits: yearDeposits,  // NUOVO
-  pl,            // NUOVO
-  avgBalance,    // NUOVO
-});
-```
+// PRIMA
+const BENCHMARK_TICKERS = [
+  "URTH",    // MSCI World ETF
+  "SPY",     // S&P 500
+  "ACWI",    // MSCI ACWI
+  "EXSA.DE", // Stoxx Europe 600 (iShares)
+  "AGG",     // iShares Core US Aggregate Bond
+  "EURUSD=X", // EUR/USD exchange rate
+];
 
-#### 3. Creare un Custom Tooltip
-
-Sostituire il Tooltip standard con un componente custom che mostra il breakdown completo:
-
-```typescript
-import { formatEUR, formatPercentage, formatNumber } from '@/lib/formatters';
-
-interface CustomTooltipProps {
-  active?: boolean;
-  payload?: Array<{ payload: YearlyDataPoint }>;
-}
-
-function CustomTooltip({ active, payload }: CustomTooltipProps) {
-  if (!active || !payload || payload.length === 0) return null;
-  
-  const data = payload[0].payload;
-  const isProfit = data.returnPct >= 0;
-  
-  return (
-    <div className="bg-card border border-border rounded-lg p-3 shadow-lg text-sm">
-      <p className="font-semibold text-foreground mb-2">Anno {data.year}</p>
-      
-      <div className="space-y-1 text-muted-foreground">
-        <div className="flex justify-between gap-4">
-          <span>Valore iniziale:</span>
-          <span className="text-foreground font-medium">{formatEUR(data.startValue)}</span>
-        </div>
-        <div className="flex justify-between gap-4">
-          <span>Valore finale:</span>
-          <span className="text-foreground font-medium">{formatEUR(data.endValue)}</span>
-        </div>
-        <div className="flex justify-between gap-4">
-          <span>Versamenti:</span>
-          <span className="text-foreground font-medium">{formatEUR(data.deposits)}</span>
-        </div>
-      </div>
-      
-      <div className="border-t border-border my-2" />
-      
-      <div className="space-y-1">
-        <div className="flex justify-between gap-4 text-muted-foreground">
-          <span>P/L:</span>
-          <span className={`font-medium ${isProfit ? 'text-profit' : 'text-loss'}`}>
-            {formatEUR(data.pl)}
-          </span>
-        </div>
-        <div className="flex justify-between gap-4 text-muted-foreground">
-          <span>Giacenza media:</span>
-          <span className="text-foreground font-medium">{formatEUR(data.avgBalance)}</span>
-        </div>
-      </div>
-      
-      <div className="border-t border-border my-2" />
-      
-      <div className="flex justify-between gap-4">
-        <span className="font-semibold">Rendimento:</span>
-        <span className={`font-bold ${isProfit ? 'text-profit' : 'text-loss'}`}>
-          {formatPercentage(data.returnPct)}
-        </span>
-      </div>
-      
-      <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border">
-        P/L ÷ (Valore iniziale + Versamenti/2)
-      </p>
-    </div>
-  );
-}
-```
-
-#### 4. Usare il Custom Tooltip nel grafico
-
-```tsx
-<Tooltip content={<CustomTooltip />} />
+// DOPO
+const BENCHMARK_TICKERS = [
+  "SPY",     // S&P 500
+  "QQQ",     // Nasdaq-100
+  "AGG",     // iShares Core US Aggregate Bond
+  "EURUSD=X", // EUR/USD exchange rate
+];
 ```
 
 ---
 
-## Struttura del Tooltip Finale
+## Azioni Post-Implementazione
 
-| Sezione | Contenuto |
-|---------|-----------|
-| **Header** | Anno XXXX |
-| **Valori** | Valore iniziale, Valore finale, Versamenti |
-| **Calcoli** | P/L, Giacenza media |
-| **Risultato** | Rendimento % (colorato) |
-| **Formula** | Spiegazione breve della formula |
+1. **Deploy edge function** - Automatico
+2. **Backfill QQQ** - Necessario chiamare l'edge function con `backfill: true` per scaricare lo storico di QQQ (che non esiste ancora nel database)
+3. **I vecchi ticker** (URTH, ACWI, EXSA.DE) rimarranno nel database ma non verranno più usati nei calcoli
 
 ---
 
-## File Coinvolti
+## Impatto
 
-| File | Modifiche |
-|------|-----------|
-| `src/components/dashboard/charts/YearlyReturnChart.tsx` | Espandi data model, aggiungi custom tooltip |
+| Aspetto | Descrizione |
+|---------|-------------|
+| **Composizione** | Il benchmark equity sarà ora la media di S&P 500 e Nasdaq-100 |
+| **Carattere** | Più orientato al mercato USA e tech rispetto al paniere precedente (che era globale) |
+| **Storico** | Necessario backfill per QQQ; gli snapshot storici useranno i nuovi ticker |
 
 ---
 
-## Vantaggi
+## Note
 
-1. **Trasparenza**: L'utente vede esattamente come viene calcolato il rendimento
-2. **Debug facile**: Se qualcosa non torna, i numeri sono visibili
-3. **Educativo**: Mostra la formula della giacenza media ponderata
+- Il benchmark bond (AGG) e il cambio EUR/USD rimangono invariati
+- La logica di ponderazione dinamica (equity exposure storica) funziona già correttamente
+- La correzione valutaria (Currency Adjusted) continua a funzionare
