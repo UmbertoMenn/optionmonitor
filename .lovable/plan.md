@@ -1,153 +1,127 @@
 
 
-# Piano: Filtro LEAP Call nel Calcolatore Premi
+# Piano: Persistenza Premi Covered Call e Gestione Operazioni Cumulative
 
 ## Obiettivo
-Escludere automaticamente le opzioni LEAP Call dai calcoli dei premi Covered Call, identificandole come:
-- CALL con **strike alto** (OTM rispetto al prezzo corrente)
-- Che sono **solo acquistate** nel file (nessuna vendita precedente dello stesso simbolo)
+1. **Salvare in database** i calcoli dei premi covered call (netto commissioni, operazioni, date)
+2. **Pulizia automatica** quando una covered call non esiste più nel portafoglio
+3. **Mostrare "UNIT: X.XX $"** sulla riga della covered call (come indicatore del netto unitario calcolato)
+4. **Aggiunta cumulativa** di operazioni da nuovi file Excel senza perdere le precedenti
+5. **Mostrare "Data ultima operazione"** accanto al conteggio operazioni nell'intestazione collapsible
 
 ---
 
-## Logica di Filtro
+## Modifiche Database
 
-### Regola
+### Nuova tabella: `covered_call_premiums`
+
+| Colonna | Tipo | Descrizione |
+|---------|------|-------------|
+| id | uuid (PK) | Identificatore univoco |
+| portfolio_id | uuid (FK) | Riferimento al portafoglio |
+| ticker | text | Ticker del sottostante (es. BABA) |
+| underlying | text | Nome sottostante (es. Alibaba Group) |
+| orders_json | jsonb | Array di operazioni salvate |
+| transaction_cost | numeric | Costo per transazione (default 10) |
+| net_per_share | numeric | Netto unitario calcolato |
+| first_operation_date | date | Data prima operazione |
+| last_operation_date | date | Data ultima operazione |
+| contracts_count | integer | Numero contratti usati nel calcolo |
+| updated_at | timestamptz | Ultimo aggiornamento |
+| created_at | timestamptz | Creazione |
+
+**RLS Policy**: Accesso solo per owner del portafoglio (tramite join con portfolios.user_id)
+
+---
+
+## Logica di Persistenza
+
+### Al salvataggio/aggiornamento dei premi
+
+1. **Chiave univoca**: `(portfolio_id, ticker)` - una riga per ticker per portafoglio
+2. **Quando l'utente carica un nuovo Excel**:
+   - Recupera le operazioni esistenti da DB per quel ticker
+   - Unisce le nuove operazioni (evitando duplicati basati su `symbol + operation + avgPrice + quantity + validityDate`)
+   - Ricalcola metriche (netto, date, rendimenti)
+   - Salva in DB
+
+### Al caricamento del portafoglio (cleanup)
+
+1. Quando `strategy_cache` viene aggiornato (in `saveStrategyCache`):
+   - Estrae la lista di ticker delle Covered Call attive
+   - Cancella dalla tabella `covered_call_premiums` i record con ticker che non esistono più nelle CC attive
+
+---
+
+## Modifiche UI
+
+### 1. CoveredCallRow (Derivatives.tsx)
+
+**Attuale grid**: 11 colonne
+**Nuova grid**: +1 colonna per "UNIT: X.XX $"
+
+Dopo la colonna "Menu" e prima di "PS", aggiungere:
 ```text
-Per ogni simbolo CALL nel file:
-├── Ha almeno una VENDITA? → Mantieni TUTTO (è Covered Call o rolling)
-└── Solo ACQUISTI?
-    ├── Strike > prezzo * 1.3 (30%+ OTM)? → LEAP → ESCLUDI
-    └── Strike vicino al prezzo? → Mantieni (potrebbe essere chiusura)
+UNIT: $13,45
+```
+- Colore: testo verde se positivo, rosso se negativo
+- Tooltip: "Netto unitario premi CALL"
+- Se non c'è dato salvato: mostrare "-" o nascondere
+
+### 2. CallPremiumCalculatorDialog
+
+**Modifica al comportamento del caricamento file**:
+- Al primo render, carica le operazioni salvate da DB (se esistono)
+- Mostra subito le metriche calcolate dalle operazioni salvate
+- Il pulsante "Nuovo file" ora dice "Aggiungi operazioni"
+- Quando si carica un nuovo file:
+  - Merge con operazioni esistenti (dedup)
+  - Ricalcola metriche
+  - Aggiorna stato locale (non salva ancora)
+- Nuovo pulsante "Salva" per persistere in DB
+- Pulsante "Reset" per cancellare tutto (con conferma)
+
+**Modifica all'intestazione "Operazioni (15)"**:
+```text
+📋 Operazioni (15) | Ultima: 06/02/2026
+```
+oppure:
+```text
+📋 Operazioni (15) — Data ultima: 06/02/2026
 ```
 
-### Esempi con BABA a $100
+### 3. Nuovo Hook: useCoveredCallPremiums
 
-| Simbolo | Operazioni nel file | Strike | Azione |
-|---------|---------------------|--------|--------|
-| BABAH6C165 | Vendita + Acquisto | 165 | ✅ Covered Call rolling |
-| BABAH6C165 | Solo Vendita | 165 | ✅ Covered Call |
-| BABAG6C150 | Solo Acquisto | 150 | ❌ LEAP (strike 50% sopra) |
-| BABAM6C105 | Solo Acquisto | 105 | ✅ Mantieni (strike vicino) |
+```typescript
+interface CoveredCallPremium {
+  id: string;
+  portfolio_id: string;
+  ticker: string;
+  underlying: string;
+  orders_json: ParsedOrder[];
+  transaction_cost: number;
+  net_per_share: number;
+  first_operation_date: string | null;
+  last_operation_date: string | null;
+  contracts_count: number;
+}
+
+function useCoveredCallPremiums(portfolioId: string | undefined) {
+  // Query per recuperare tutti i record per il portfolio
+  // Mutation per upsert
+  // Mutation per delete
+}
+```
 
 ---
 
-## Modifiche Tecniche
+## Flusso Utente
 
-### 1. `src/lib/orderFileParser.ts`
-
-**Nuova funzione: `extractStrikeFromSymbol`**
-```typescript
-/**
- * Extract strike price from option symbol
- * BABAH6C165 → 165
- * TSLAG6P350 → 350
- */
-export function extractStrikeFromSymbol(symbol: string): number | null {
-  const match = symbol.match(/(\d+)$/);
-  return match ? parseInt(match[1], 10) : null;
-}
-```
-
-**Modifica: `filterAndCalculateCallPremiums`**
-
-Aggiungere parametro `underlyingPrice` e logica di filtro:
-
-```typescript
-export function filterAndCalculateCallPremiums(
-  orders: ParsedOrder[],
-  ticker: string,
-  underlyingPrice?: number  // NUOVO
-): OrderParseResult {
-  // Step 1: Filtro base (eseguito + CALL + ticker)
-  const baseFiltered = orders.filter(order => {
-    const isExecuted = order.status.toLowerCase() === 'eseguito';
-    const isCall = order.optionType === 'CALL';
-    const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    return isExecuted && isCall && matchesTicker;
-  });
-  
-  // Step 2: Identifica simboli che hanno almeno una vendita
-  const symbolsWithSells = new Set<string>();
-  for (const order of baseFiltered) {
-    if (order.operation === 'sell') {
-      symbolsWithSells.add(order.symbol);
-    }
-  }
-  
-  // Step 3: Filtra le potenziali LEAP
-  const LEAP_THRESHOLD = 1.3; // Strike > 130% del prezzo = LEAP
-  
-  const filteredOrders = baseFiltered.filter(order => {
-    // Se il simbolo ha almeno una vendita → mantieni tutto
-    if (symbolsWithSells.has(order.symbol)) {
-      return true;
-    }
-    
-    // Solo acquisti per questo simbolo → verifica se è LEAP
-    if (order.operation === 'buy' && underlyingPrice && underlyingPrice > 0) {
-      const strike = extractStrikeFromSymbol(order.symbol);
-      if (strike !== null && strike > underlyingPrice * LEAP_THRESHOLD) {
-        // Strike molto alto → LEAP → escludi
-        if (import.meta.env.DEV) {
-          console.log(`[LEAP filter] Excluded ${order.symbol} (strike ${strike} > ${underlyingPrice * LEAP_THRESHOLD})`);
-        }
-        return false;
-      }
-    }
-    
-    return true;
-  });
-  
-  // ... resto del calcolo invariato ...
-}
-```
-
-### 2. `src/components/derivatives/CallPremiumCalculatorDialog.tsx`
-
-Passare `underlyingPrice` alla funzione di filtro:
-
-```typescript
-const result = filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
-```
-
-E anche in `recalculateMetrics`:
-
-```typescript
-const result = filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
-```
-
-### 3. `src/test/orderFileParserHtmlXls.test.ts`
-
-Aggiungere test per la logica LEAP:
-
-```typescript
-describe('LEAP Call filtering', () => {
-  it('should exclude buy-only CALL with high strike (LEAP)', () => {
-    const orders: ParsedOrder[] = [
-      { symbol: 'BABAG6C150', operation: 'buy', ... }, // 150 > 100*1.3 → LEAP
-    ];
-    const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
-    expect(result.filteredOrders).toHaveLength(0);
-  });
-  
-  it('should keep CALL with sell operation (Covered Call)', () => {
-    const orders: ParsedOrder[] = [
-      { symbol: 'BABAH6C165', operation: 'sell', ... },
-    ];
-    const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
-    expect(result.filteredOrders).toHaveLength(1);
-  });
-  
-  it('should keep buy if same symbol has a sell (rolling)', () => {
-    const orders: ParsedOrder[] = [
-      { symbol: 'BABAH6C165', operation: 'sell', ... },
-      { symbol: 'BABAH6C165', operation: 'buy', ... },
-    ];
-    const result = filterAndCalculateCallPremiums(orders, 'BABA', 100);
-    expect(result.filteredOrders).toHaveLength(2);
-  });
-});
-```
+1. **Prima volta**: L'utente apre la calcolatrice, vede "Nessun dato salvato", carica Excel, vede le operazioni, clicca "Salva"
+2. **Visite successive**: Apre la calcolatrice, vede subito le operazioni e metriche salvate
+3. **Aggiunta operazioni**: Clicca "Aggiungi operazioni", carica nuovo Excel, il sistema merge, clicca "Salva"
+4. **Rimozione singole righe**: L'utente rimuove righe, metriche si aggiornano, deve cliccare "Salva" per persistere
+5. **Cleanup automatico**: Quando l'utente carica un nuovo Excel portafoglio e una covered call sparisce, i premi associati vengono cancellati automaticamente
 
 ---
 
@@ -155,27 +129,79 @@ describe('LEAP Call filtering', () => {
 
 | File | Modifiche |
 |------|-----------|
-| `src/lib/orderFileParser.ts` | Nuova `extractStrikeFromSymbol`, modifica `filterAndCalculateCallPremiums` con logica LEAP |
-| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Passaggio `underlyingPrice` alla funzione di filtro |
-| `src/test/orderFileParserHtmlXls.test.ts` | Nuovi test per filtro LEAP |
+| **Nuova migrazione SQL** | Crea tabella `covered_call_premiums` con RLS |
+| `src/hooks/useCoveredCallPremiums.ts` (nuovo) | Hook per CRUD dei premi salvati |
+| `src/lib/strategyCache.ts` | Aggiunge cleanup dei premi orfani dopo save |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Load da DB, merge operazioni, salvataggio, UI aggiornata |
+| `src/pages/Derivatives.tsx` | Mostra "UNIT: X.XX $" nella riga CC, passa dati salvati |
+| `src/lib/orderFileParser.ts` | (opzionale) Aggiunge utility `findLastOperationDate` |
 
 ---
 
-## Parametri
+## Esempio Visivo
 
-- **Soglia LEAP**: `1.3` (30% sopra il prezzo corrente)
-  - Esempio: BABA a $100 → strike > $130 = LEAP
-  - Questo valore può essere modificato se necessario
+### Riga Covered Call (con UNIT)
+```
+> V | BABA CALL 165 FEB/26 | ITM | ⚙️ | UNIT: $13,45 | PS: $98,50 | 1×100 | $8,40 | $7,20 +5.2%
+```
+
+### Accordion Operazioni
+```
+📋 Operazioni (15) — Ultima: 06/02/2026
+```
 
 ---
 
-## Comportamento Atteso
+## Dettagli Tecnici
 
-Con file contenente:
-- `BABAH6C165` venduta a 8,40
-- `BABAG6C150` comprata a 14,95 (LEAP, strike alto, nessuna vendita)
+### Deduplicazione Operazioni
 
-E prezzo BABA = $100:
-- La CALL venduta entra nel calcolo ✅
-- La LEAP viene esclusa automaticamente ❌
+Per evitare duplicati quando si caricano più Excel:
+```typescript
+const orderKey = (o: ParsedOrder) => 
+  `${o.symbol}|${o.operation}|${o.avgPrice}|${o.quantity}|${o.validityDate || ''}`;
+
+const merged = [...existingOrders];
+const existingKeys = new Set(existingOrders.map(orderKey));
+for (const newOrder of newOrders) {
+  if (!existingKeys.has(orderKey(newOrder))) {
+    merged.push(newOrder);
+  }
+}
+```
+
+### Utility findLastOperationDate
+
+Simile a `findFirstOperationDate` ma restituisce la data più recente:
+```typescript
+export function findLastOperationDate(validityDates: (string | undefined)[]): string | null {
+  const isoDates = validityDates
+    .map(d => toIsoDateFromIT(d))
+    .filter((d): d is string => d !== null);
+  
+  if (isoDates.length === 0) return null;
+  return isoDates.sort().reverse()[0]; // Data più recente
+}
+```
+
+---
+
+## RLS Policy
+
+```sql
+-- Solo l'owner del portfolio può accedere ai propri premi
+CREATE POLICY "Users can manage their own covered call premiums"
+ON covered_call_premiums
+FOR ALL
+USING (
+  portfolio_id IN (
+    SELECT id FROM portfolios WHERE user_id = auth.uid()
+  )
+)
+WITH CHECK (
+  portfolio_id IN (
+    SELECT id FROM portfolios WHERE user_id = auth.uid()
+  )
+);
+```
 
