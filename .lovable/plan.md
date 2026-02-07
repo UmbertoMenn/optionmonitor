@@ -1,108 +1,162 @@
 
-Obiettivo: ripristinare i tooltip dei badge “OTM/ITM/IB/OOB/IR/OOR” nella pagina Derivati in modo stabile (non workaround “a caso”), identificando la causa reale e applicando una fix strutturale.
+# Piano: Fix Matching JPMorgan + Scrollbar Lista Stock
 
----
+## Problema 1: CALL JPMorgan non riconosciuta come Covered Call
 
-## Diagnosi approfondita (root cause)
+### Causa Radice
+La normalizzazione di `"J.P. MORGAN"` produce `"J P MORGAN"` (3 token separati), mentre `"JPMORGAN"` resta un token unico. Il token matching fallisce perché non trova abbastanza overlap.
 
-### 1) Dove si rompe
-Nel file `src/pages/Derivatives.tsx` i tooltip “problematici” sono quasi tutti costruiti così:
+### Soluzione
+Aggiungere JPMORGAN agli alias speciali in `SPECIAL_ALIASES` e migliorare la normalizzazione per gestire abbreviazioni con punti.
 
-```tsx
-<Tooltip>
-  <TooltipTrigger asChild>
-    <Badge ...>OTM</Badge>
-  </TooltipTrigger>
-  <TooltipContent>...</TooltipContent>
-</Tooltip>
+#### Modifiche in `src/lib/derivativeStrategies.ts`:
+
+**1. Estendere `SPECIAL_ALIASES`:**
+```typescript
+export const SPECIAL_ALIASES: Record<string, string[]> = {
+  // ... existing aliases ...
+  JPMORGAN: ['JPMORGAN', 'JP MORGAN', 'J.P. MORGAN', 'JPMORGAN CHASE', 'JP MORGAN CHASE', 'J.P. MORGAN CHASE'],
+};
 ```
 
-Esempi reali nel codice:
-- `GroupedOptionLegRow`: badge `ITM/OTM` (riga ~1709+)
-- `GroupedOtherStrategyRow`: badge `IB/OOB` e `IR/OOR` (righe ~1550+)
-- altre righe strategie usano lo stesso pattern
+**2. Migliorare `normalizeForMatching()` per collassare abbreviazioni con punti:**
+```typescript
+export function normalizeForMatching(text: string): string {
+  return text
+    .toUpperCase()
+    .replace(/^AZ\./i, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/([A-Z])\.([A-Z])/g, '$1$2')  // ← NUOVO: "J.P." diventa "JP"
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+```
 
-Quindi i trigger dei tooltip sono “Badge” come child.
+Con questa modifica:
+- `"J.P. MORGAN CHASE & CO"` → `"JP MORGAN CHASE CO"`
 
-### 2) Perché Radix Tooltip non si attiva con quel pattern
-Il componente `Badge` attuale (`src/components/ui/badge.tsx`) è un normale function component che **NON** usa `React.forwardRef`.
+Questo non basta ancora perché `"JPMORGAN"` ≠ `"JP MORGAN"`.
 
-Radix (TooltipTrigger) quando usi `asChild` deve poter:
-- attaccare **ref** al nodo DOM reale del trigger
-- comporre handler di pointer/focus sul trigger
+**3. Aggiungere preprocessing in `findUnderlyingStock()` per unire token di 1-2 lettere:**
+```typescript
+// Prima del token matching, prova a unire lettere isolate
+// "JP MORGAN" → "JPMORGAN"
+const collapseShortTokens = (text: string): string => {
+  return text.replace(/\b([A-Z]{1,2})\s+(?=[A-Z])/g, '$1');
+};
 
-Con `asChild`, il ref viene passato al child. Se il child è un component React che **non forwarda il ref** verso il `<div>`, Radix non riesce ad “agganciarsi” correttamente al trigger. Risultato tipico: tooltip che non appare (o comportamento intermittente), e spesso in console appare anche un warning del tipo:
-- “Function components cannot be given refs…”
-
-Nel tuo progetto:
-- `Badge` renderizza un `<div {...props} />` ma **non** forwarda `ref` → per Radix è un trigger “non affidabile”.
-- Questo spiega perfettamente perché “OTM/ITM/IB/OOB ecc.” (tutti badge) non funzionano, mentre altri tooltip con trigger DOM nativi (`<span>`, icone lucide `forwardRef`, `<button>`) tendono a funzionare.
-
-### 3) Perché i fix precedenti non hanno risolto
-I fix precedenti (stopPropagation / rimozione `CollapsibleTrigger asChild` su wrapper di riga) risolvono conflitti di click/hover tra contenitori interattivi, ma **non** risolvono il problema strutturale: il trigger del tooltip (Badge) non supporta ref quando usato con `asChild`.
-
----
-
-## Soluzione proposta (robusta)
-
-### A) Fix principale: rendere `Badge` compatibile con Radix `asChild`
-Aggiornare `src/components/ui/badge.tsx` trasformando `Badge` in `React.forwardRef<HTMLDivElement, BadgeProps>`.
-
-Cosa cambia:
-- il `ref` viene inoltrato al `<div>` reale
-- Radix TooltipTrigger riesce a gestire correttamente trigger/posizionamento/eventi
-- tutte le istanze `TooltipTrigger asChild` + `<Badge>` in tutta l’app smettono di essere fragili
-
-Deliverable:
-- `Badge.displayName = "Badge"`
-- export invariato: `export { Badge, badgeVariants }` (nessun refactor nei consumers)
-
-### B) Hardening (opzionale ma consigliato): audit di altri trigger “asChild”
-Fare una mini-verifica su eventuali altri componenti custom usati come child di:
-- `TooltipTrigger asChild`
-- `DropdownMenuTrigger asChild`
-- ecc.
-
-Nel tuo repo, l’uso più critico è `TooltipTrigger asChild` con `Badge`. Altri casi (es. `<Button>`, icone lucide) sono già `forwardRef` o DOM nativi.
-
-### C) Test manuale mirato (riduce spreco crediti)
-Checklist di test in preview:
-1. Vai su `/derivatives`
-2. Hover su badge:
-   - OTM/ITM (nelle righe opzioni)
-   - IB/OOB e IR/OOR (nelle righe strategie raggruppate)
-3. Verifica:
-   - tooltip appare immediatamente (o con delay standard)
-   - non viene “tagliato” (Portal già presente)
-   - cliccare sul badge non rompe il collapsible (lo stopPropagation è già presente dove serve)
-
-### D) Regressioni da controllare
-Perché `Badge` è usato ovunque, verificare velocemente anche:
-- tooltips in altre pagine che usano badge come trigger (se presenti)
-- stili badge invariati (classi tailwind e cva restano uguali)
+const optionCollapsed = collapseShortTokens(optionNormalized);
+const stockCollapsed = collapseShortTokens(stockNormalized);
+// Usa anche questi per il matching
+```
 
 ---
 
-## File coinvolti
+## Problema 2: Scrollbar invisibile nella lista stock
 
-1) `src/components/ui/badge.tsx`
-- Modifica: `Badge` → `React.forwardRef`
-- Nessuna modifica API esterna (props/exports)
+### Causa Radice
+Il `<div className="overflow-y-auto">` usa la scrollbar nativa del browser, che su molti sistemi (macOS, Windows con overlay scrollbars) è invisibile finché non si inizia a scrollare. L'utente non sa che può scorrere.
 
-2) (Nessuna modifica necessaria) `src/pages/Derivatives.tsx`
-- Dovrebbe “magicamente” iniziare a funzionare senza toccare ogni tooltip, perché il bug è nel trigger component.
+### Soluzione
+Usare il componente `ScrollArea` di Radix che mostra una scrollbar sempre visibile.
+
+#### Modifiche in `src/components/derivatives/MoveOptionMenu.tsx`:
+
+**1. Import ScrollArea:**
+```typescript
+import { ScrollArea } from '@/components/ui/scroll-area';
+```
+
+**2. Sostituire il div con ScrollArea:**
+
+Linee 245-270, da:
+```tsx
+{availableStocks.length > matchingStocks.length && (
+  <div className="mt-4">
+    <p className="text-xs text-muted-foreground mb-2">Altri titoli disponibili:</p>
+    <div className="space-y-1 max-h-40 overflow-y-auto">
+      {/* ... items ... */}
+    </div>
+  </div>
+)}
+```
+
+A:
+```tsx
+{availableStocks.length > matchingStocks.length && (
+  <div className="mt-4">
+    <p className="text-xs text-muted-foreground mb-2">Altri titoli disponibili:</p>
+    <ScrollArea className="h-40">
+      <div className="space-y-1 pr-3">
+        {/* ... items ... */}
+      </div>
+    </ScrollArea>
+  </div>
+)}
+```
+
+**3. Applicare lo stesso fix alla sezione "Titoli suggeriti" (se può essere lunga):**
+Per consistenza, wrappare anche la lista dei titoli suggeriti in ScrollArea se supera un certo numero.
 
 ---
 
-## Perché questa è la fix “giusta”
-- Non è un workaround locale su una singola riga
-- Risolve il problema alla radice (contratto richiesto da Radix quando si usa `asChild`)
-- Evita di dover riscrivere decine di tooltip
-- Riduce probabilità di ricadute future quando aggiungi nuovi tooltip su Badge
+## File Coinvolti
+
+| File | Tipo Modifica |
+|------|---------------|
+| `src/lib/derivativeStrategies.ts` | Aggiungi alias JPMORGAN, migliora normalizzazione |
+| `src/components/derivatives/MoveOptionMenu.tsx` | Usa ScrollArea per liste stock |
 
 ---
 
-## Criteri di completamento
-- Tooltip su badge OTM/ITM/IB/OOB/IR/OOR visibili e consistenti al hover/focus
-- Nessun warning React “ref” correlato a Badge quando si aprono pagine che li usano come trigger
-- Nessun impatto sul layout/stile dei badge
+## Dettagli Tecnici
+
+### Normalizzazione migliorata (esempio)
+
+| Input | Attuale | Con Fix |
+|-------|---------|---------|
+| `"J.P. MORGAN CHASE"` | `"J P MORGAN CHASE"` | `"JPMORGAN CHASE"` |
+| `"AZ.JPMORGAN CHASE"` | `"JPMORGAN CHASE"` | `"JPMORGAN CHASE"` |
+
+### Matching JPMorgan
+
+Dopo il fix:
+1. L'opzione `"J.P. MORGAN CHASE & CO"` viene normalizzata a `"JPMORGAN CHASE CO"`
+2. Lo stock `"AZ.JPMORGAN CHASE & CO"` viene normalizzato a `"JPMORGAN CHASE CO"`
+3. I token matchano perfettamente → Covered Call riconosciuta
+
+### ScrollArea comportamento
+
+ScrollArea di Radix:
+- Mostra sempre la scrollbar (stile semi-trasparente)
+- Diventa più opaca al hover
+- Funziona uniformemente su tutti i browser/OS
+- Mantiene l'accessibilità (keyboard scrolling)
+
+---
+
+## Test di Verifica
+
+1. **JPMorgan Covered Call**:
+   - Caricare un Excel con stock JPMorgan + CALL venduta JPMorgan
+   - Verificare che appaia nella sezione "Covered Call"
+   - Console log dovrebbe mostrare: `[CoveredCall] Matching "J.P. MORGAN...": FOUND -> AZ.JPMORGAN...`
+
+2. **Scrollbar stock**:
+   - Aprire dialog "Sposta opzione" su un'opzione
+   - Verificare che la sezione "Altri titoli disponibili" mostri la scrollbar
+   - Verificare che si possa scorrere per vedere tutti i titoli
+
+---
+
+## Edge Cases Gestiti
+
+| Caso | Comportamento |
+|------|---------------|
+| `"J.P.MORGAN"` (senza spazio) | → `"JPMORGAN"` |
+| `"J. P. MORGAN"` (con spazi) | → `"JPMORGAN"` dopo collapse |
+| `"JPMORGAN"` (già unito) | → `"JPMORGAN"` (invariato) |
+| Lista con 2 stock | ScrollArea comunque presente, scrollbar appare se necessaria |
+| Lista con 20 stock | Scrollbar visibile, altezza fissa 160px |
