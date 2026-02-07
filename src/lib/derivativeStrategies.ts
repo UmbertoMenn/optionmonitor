@@ -1066,6 +1066,7 @@ export const SPECIAL_ALIASES: Record<string, string[]> = {
   NETEASE: ['NETEASE', 'NTES', 'NETEASE INC', 'NETEASE INC ADR'],
   ENI: ['ENI', 'ENI SPA', 'ENI STOCK', 'ENI - STOCK'],
   APPLE: ['APPLE', 'AAPL', 'APPLE INC', 'APPLE COMPUTER', 'APPLE COMPUTER INC'],
+  JPMORGAN: ['JPMORGAN', 'JP MORGAN', 'J.P. MORGAN', 'JPMORGAN CHASE', 'JP MORGAN CHASE', 'J.P. MORGAN CHASE', 'JPM'],
 };
 
 /**
@@ -1076,10 +1077,19 @@ export function normalizeForMatching(text: string): string {
     .toUpperCase()
     .replace(/^AZ\./i, '')  // Remove "AZ." prefix common in Italian brokers
     .replace(/\([^)]*\)/g, '')  // Remove content in parentheses like (OHIO)
+    .replace(/([A-Z])\.([A-Z])/g, '$1$2')  // Collapse dotted abbreviations: "J.P." -> "JP"
     .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
     .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '') // Remove common suffixes including ADR, SPA
     .replace(/\s+/g, ' ')  // Normalize spaces AFTER suffix removal to avoid multiple spaces
     .trim();
+}
+
+/**
+ * Collapses short tokens (1-2 letters) into the following token.
+ * "JP MORGAN" -> "JPMORGAN"
+ */
+function collapseShortTokens(text: string): string {
+  return text.replace(/\b([A-Z]{1,2})\s+(?=[A-Z])/g, '$1');
 }
 
 /**
@@ -1144,10 +1154,14 @@ export function findUnderlyingStock(option: Position, stocks: Position[]): Posit
 
   // 2) Simple containment: if option contains stock ticker or normalized name
   const optionTokens = optionNormalized.split(' ').filter(w => w.length > 2);
+  
+  // Also try collapsed version for cases like "JP MORGAN" -> "JPMORGAN"
+  const optionCollapsed = collapseShortTokens(optionNormalized);
 
   for (const stock of stocksOnly) {
     const stockName = normalizeForMatching(stock.description);
     const stockTokens = stockName.split(' ').filter(w => w.length > 2);
+    const stockCollapsed = collapseShortTokens(stockName);
 
     // Ticker containment (when available)
     if (stock.ticker) {
@@ -1157,6 +1171,14 @@ export function findUnderlyingStock(option: Position, stocks: Position[]): Posit
 
     // Name containment / token overlap
     if (stockName && optionNormalized.includes(stockName)) return stock;
+    
+    // Collapsed name matching (for "JP MORGAN" vs "JPMORGAN")
+    if (stockCollapsed && optionCollapsed.includes(stockCollapsed)) return stock;
+    if (optionCollapsed && stockCollapsed && stockCollapsed.includes(optionCollapsed.split(' ')[0])) {
+      // Check if primary token matches
+      const optionPrimaryToken = optionCollapsed.split(' ')[0];
+      if (optionPrimaryToken.length >= 5 && stockCollapsed.startsWith(optionPrimaryToken)) return stock;
+    }
 
     if (stockTokens.length > 0) {
       const shared = stockTokens.filter(t => optionTokens.includes(t)).length;

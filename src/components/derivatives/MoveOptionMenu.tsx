@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Position } from '@/types/portfolio';
 import { OverrideCategory, OVERRIDE_CATEGORY_LABELS } from '@/types/derivativeOverrides';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
@@ -213,27 +214,31 @@ export function MoveOptionMenu({ option, availableStocks, currentCategory }: Mov
             {matchingStocks.length > 0 ? (
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground mb-2">Titoli suggeriti:</p>
-                {matchingStocks.map(stock => (
-                  <div
-                    key={stock.id}
-                    onClick={() => setSelectedStock(stock.id)}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                      selectedStock === stock.id 
-                        ? 'border-primary bg-primary/10' 
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{stock.description}</span>
-                      {selectedStock === stock.id && (
-                        <Check className="h-4 w-4 text-primary" />
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {stock.quantity} azioni
-                    </div>
+                <ScrollArea className="h-40">
+                  <div className="space-y-1 pr-3">
+                    {matchingStocks.map(stock => (
+                      <div
+                        key={stock.id}
+                        onClick={() => setSelectedStock(stock.id)}
+                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                          selectedStock === stock.id 
+                            ? 'border-primary bg-primary/10' 
+                            : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">{stock.description}</span>
+                          {selectedStock === stock.id && (
+                            <Check className="h-4 w-4 text-primary" />
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {stock.quantity} azioni
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </ScrollArea>
               </div>
             ) : (
               <div className="text-center py-4 text-muted-foreground">
@@ -245,28 +250,30 @@ export function MoveOptionMenu({ option, availableStocks, currentCategory }: Mov
             {availableStocks.length > matchingStocks.length && (
               <div className="mt-4">
                 <p className="text-xs text-muted-foreground mb-2">Altri titoli disponibili:</p>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {availableStocks
-                    .filter(s => !matchingStocks.some(m => m.id === s.id))
-                    .map(stock => (
-                      <div
-                        key={stock.id}
-                        onClick={() => setSelectedStock(stock.id)}
-                        className={`p-2 rounded-lg border cursor-pointer transition-colors text-sm ${
-                          selectedStock === stock.id 
-                            ? 'border-primary bg-primary/10' 
-                            : 'border-border hover:border-primary/50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span>{stock.description}</span>
-                          {selectedStock === stock.id && (
-                            <Check className="h-4 w-4 text-primary" />
-                          )}
+                <ScrollArea className="h-40">
+                  <div className="space-y-1 pr-3">
+                    {availableStocks
+                      .filter(s => !matchingStocks.some(m => m.id === s.id))
+                      .map(stock => (
+                        <div
+                          key={stock.id}
+                          onClick={() => setSelectedStock(stock.id)}
+                          className={`p-2 rounded-lg border cursor-pointer transition-colors text-sm ${
+                            selectedStock === stock.id 
+                              ? 'border-primary bg-primary/10' 
+                              : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>{stock.description}</span>
+                            {selectedStock === stock.id && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                </div>
+                      ))}
+                  </div>
+                </ScrollArea>
               </div>
             )}
           </div>
