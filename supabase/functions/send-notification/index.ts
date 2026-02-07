@@ -16,6 +16,9 @@ interface AlertPayload {
   severity: string;
   alert_type: string;
   portfolio_id?: string;
+  strategy_type?: string;
+  strike_price?: number;
+  underlying_price?: number;
 }
 
 interface Profile {
@@ -30,42 +33,103 @@ interface Profile {
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 
+// Determine alert type label in Italian
+function getAlertTypeLabel(alertType: string): string {
+  if (alertType.startsWith('distance_')) return 'Avviso di Distanza';
+  if (alertType.startsWith('price_alert_')) return 'Avviso di Prezzo';
+  return 'Avviso di Stato';
+}
+
+// Get severity emoji
+function getSeverityEmoji(severity: string): string {
+  if (severity === 'critical') return '🔴';
+  if (severity === 'warning') return '🟡';
+  return '🔵';
+}
+
+// Get severity label in Italian
+function getSeverityLabel(severity: string): string {
+  if (severity === 'critical') return 'Critical';
+  if (severity === 'warning') return 'Warning';
+  return 'Info';
+}
+
+// Build strike display
+function getStrikeDisplay(alertType: string, strikePrice?: number): string | null {
+  if (!strikePrice) return null;
+  
+  // Distance alerts
+  if (alertType.includes('_call') || alertType === 'action_covered_call_itm') {
+    return `CALL $${strikePrice.toFixed(2)}`;
+  }
+  if (alertType.includes('_put') || alertType === 'action_naked_put_itm') {
+    return `PUT $${strikePrice.toFixed(2)}`;
+  }
+  
+  return `$${strikePrice.toFixed(2)}`;
+}
+
 async function sendEmail(
   email: string,
   alertData: AlertPayload,
   isAdmin: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const severityEmoji = getSeverityEmoji(alertData.severity);
+    const severityLabel = getSeverityLabel(alertData.severity);
     const severityColor = alertData.severity === "critical" ? "#dc2626" : 
                           alertData.severity === "warning" ? "#f59e0b" : "#3b82f6";
     
     const adminPrefix = isAdmin ? "[ADMIN] " : "";
+    const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
+    const strategyName = alertData.strategy_type || 'Altre Strategie';
+    const strikeDisplay = getStrikeDisplay(alertData.alert_type, alertData.strike_price);
+    const priceLabel = alertData.underlying_price ? 
+      `<strong>Prezzo ${alertData.ticker}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
     
     await resend.emails.send({
       from: "Portfolio Alerts <noreply@resend.dev>",
       to: [email],
-      subject: `${adminPrefix}⚠️ Avviso Portfolio: ${alertData.ticker}`,
+      subject: `${adminPrefix}${severityEmoji} Avviso Portfolio: ${alertData.ticker}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: ${severityColor}; color: white; padding: 16px; border-radius: 8px 8px 0 0;">
-            <h2 style="margin: 0;">⚠️ ${adminPrefix}Avviso Portfolio: ${alertData.ticker}</h2>
+            <h2 style="margin: 0;">🚨 ${adminPrefix}Avviso Portafoglio</h2>
+            <p style="margin: 8px 0 0 0; font-size: 14px;">${severityEmoji} ${severityLabel}</p>
           </div>
           <div style="padding: 20px; background: #f9fafb; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
-            <p style="font-size: 16px; color: #111827; margin-top: 0;">${alertData.message}</p>
-            <table style="margin-top: 16px; width: 100%; border-collapse: collapse;">
+            <table style="width: 100%; border-collapse: collapse;">
               <tr>
-                <td style="padding: 8px 0; color: #6b7280;">Severità:</td>
-                <td style="padding: 8px 0;"><strong style="color: ${severityColor};">${alertData.severity.toUpperCase()}</strong></td>
+                <td style="padding: 8px 0; color: #6b7280; width: 120px;">Ticker:</td>
+                <td style="padding: 8px 0;"><strong>${alertData.ticker}</strong></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #6b7280;">Strategia:</td>
+                <td style="padding: 8px 0;">${strategyName}</td>
               </tr>
               <tr>
                 <td style="padding: 8px 0; color: #6b7280;">Tipo Alert:</td>
-                <td style="padding: 8px 0;">${alertData.alert_type.replace(/_/g, ' ')}</td>
+                <td style="padding: 8px 0;">${alertTypeLabel}</td>
               </tr>
               <tr>
-                <td style="padding: 8px 0; color: #6b7280;">Data:</td>
-                <td style="padding: 8px 0;">${new Date().toLocaleString('it-IT')}</td>
+                <td style="padding: 8px 0; color: #6b7280;">Messaggio:</td>
+                <td style="padding: 8px 0;">${alertData.message}</td>
               </tr>
+              ${strikeDisplay ? `
+              <tr>
+                <td style="padding: 8px 0; color: #6b7280;">Strike:</td>
+                <td style="padding: 8px 0;">${strikeDisplay}</td>
+              </tr>
+              ` : ''}
             </table>
+            ${priceLabel ? `
+            <div style="margin-top: 16px; padding: 12px; background: #e5e7eb; border-radius: 4px;">
+              ${priceLabel}
+            </div>
+            ` : ''}
+            <p style="font-size: 12px; color: #9ca3af; margin-top: 16px;">
+              ${new Date().toLocaleString('it-IT')}
+            </p>
           </div>
         </div>
       `,
@@ -85,18 +149,30 @@ async function sendTelegram(
   isAdmin: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const severityEmoji = alertData.severity === "critical" ? "🔴" : 
-                          alertData.severity === "warning" ? "🟡" : "🔵";
-    
+    const severityEmoji = getSeverityEmoji(alertData.severity);
+    const severityLabel = getSeverityLabel(alertData.severity);
     const adminPrefix = isAdmin ? "*[ADMIN]* " : "";
+    const alertTypeLabel = getAlertTypeLabel(alertData.alert_type);
+    const strategyName = alertData.strategy_type || 'Altre Strategie';
+    const strikeDisplay = getStrikeDisplay(alertData.alert_type, alertData.strike_price);
+    const priceLabel = alertData.underlying_price ? 
+      `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     
-    const text = `🚨 ${adminPrefix}*Avviso Portfolio*
+    let text = `🚨 ${adminPrefix}*Avviso Portafoglio*
+${severityEmoji} *${severityLabel}*
 
 📈 *Ticker:* ${alertData.ticker}
-${severityEmoji} *Severità:* ${alertData.severity.toUpperCase()}
-📝 *Messaggio:* ${alertData.message}
-🏷️ *Tipo:* ${alertData.alert_type.replace(/_/g, ' ')}
-📅 *Data:* ${new Date().toLocaleString('it-IT')}`;
+📊 *Strategia:* ${strategyName}
+🏷️ *Tipo Alert:* ${alertTypeLabel}
+📝 *Messaggio:* ${alertData.message}`;
+
+    if (strikeDisplay) {
+      text += `\n🎯 *Strike:* ${strikeDisplay}`;
+    }
+    
+    if (priceLabel) {
+      text += `\n\n${priceLabel}`;
+    }
 
     const response = await fetch(
       `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
@@ -155,6 +231,21 @@ serve(async (req: Request): Promise<Response> => {
 
     const alertData: AlertPayload = await req.json();
     console.log("Received alert:", alertData);
+    
+    // Fetch additional alert details from database if missing
+    if (!alertData.strategy_type || !alertData.strike_price || !alertData.underlying_price) {
+      const { data: alertDetails } = await supabase
+        .from('alerts')
+        .select('strategy_type, strike_price, underlying_price')
+        .eq('id', alertData.alert_id)
+        .single();
+      
+      if (alertDetails) {
+        alertData.strategy_type = alertData.strategy_type || alertDetails.strategy_type;
+        alertData.strike_price = alertData.strike_price || alertDetails.strike_price;
+        alertData.underlying_price = alertData.underlying_price || alertDetails.underlying_price;
+      }
+    }
 
     // 1. Get user profile
     const { data: userProfile, error: profileError } = await supabase

@@ -12,7 +12,7 @@ import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSummaryCard';
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   categorizeDerivatives, 
   formatOptionDescription,
@@ -36,6 +36,7 @@ import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOpti
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { saveStrategyCache } from '@/lib/strategyCache';
 
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -153,6 +154,32 @@ export function Derivatives() {
 
   // Fetch underlying prices from Yahoo Finance
   const { prices: underlyingPrices, isLoading: isPricesLoading } = useUnderlyingPrices(allUnderlyingNames);
+  
+  // Track if we've saved the cache for the current portfolio + categories
+  const lastSavedRef = useRef<string>('');
+  
+  // Save strategy cache to database whenever categories change
+  useEffect(() => {
+    if (!portfolio?.id || Object.keys(underlyingPrices).length === 0) return;
+    
+    // Create a key to track what we've saved
+    const cacheKey = `${portfolio.id}_${JSON.stringify({
+      cc: categories.coveredCalls.length,
+      np: categories.nakedPuts.length,
+      ic: categories.ironCondors.length,
+      dd: categories.doubleDiagonals.length,
+      lc: categories.leapCalls.length,
+      os: categories.groupedOtherStrategies.length,
+    })}`;
+    
+    if (lastSavedRef.current === cacheKey) return;
+    lastSavedRef.current = cacheKey;
+    
+    // Save to database (fire and forget)
+    saveStrategyCache(portfolio.id, categories, underlyingPrices).catch(err => {
+      console.error('Failed to save strategy cache:', err);
+    });
+  }, [portfolio?.id, categories, underlyingPrices]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;
