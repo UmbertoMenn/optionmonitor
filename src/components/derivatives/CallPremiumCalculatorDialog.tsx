@@ -279,6 +279,13 @@ export function CallPremiumCalculatorDialog({
                   </div>
                 </div>
 
+                {/* First operation date - visible under yields */}
+                {metrics.firstOperationDate && (
+                  <div className="text-center text-xs text-muted-foreground pt-1">
+                    📅 Prima operazione: {formatFirstOperationDate(metrics.firstOperationDate)}
+                  </div>
+                )}
+
                 {/* Collapsible: Other data */}
                 <Accordion type="single" collapsible className="border-t pt-2">
                   <AccordionItem value="other-data" className="border-none">
@@ -326,13 +333,6 @@ export function CallPremiumCalculatorDialog({
                           </div>
                         </div>
 
-                        {/* First operation date */}
-                        <div className="border-t pt-2">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Prima operazione:</span>
-                            <span>{formatFirstOperationDate(metrics.firstOperationDate)}</span>
-                          </div>
-                        </div>
 
                         {/* Transaction cost input */}
                         <div className="border-t pt-3 space-y-2">
