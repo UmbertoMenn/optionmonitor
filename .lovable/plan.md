@@ -1,110 +1,168 @@
 
-# Piano: Supporto Versamenti e Prelievi
+# Piano: Indicatore Mercato Chiuso per Prezzi Stale
 
 ## Obiettivo
-Modificare la sezione "Versamenti" per supportare esplicitamente sia versamenti (importi positivi) che prelievi (importi negativi), migliorando l'UX e le etichette.
+Modificare l'indicatore di prezzo non aggiornato (triangolino rosso) per mostrare **"Mercato chiuso"** quando il mercato di riferimento è effettivamente chiuso, distinguendo tra titoli USA ed europei.
 
-## Analisi Impatto
+## Orari di Mercato da Implementare
 
-### Cosa GIÀ funziona
-La logica attuale supporta già importi negativi:
-- `parseValue()` in `DepositsSection.tsx` gestisce numeri negativi
-- `totalDeposits = reduce((sum, d) => sum + d.amount, 0)` somma correttamente positivi e negativi
-- I calcoli in `StatsCards.tsx`, `PerformanceEvolutionChart.tsx` e `YearlyReturnChart.tsx` usano la somma dei depositi senza distinzione di segno
+| Mercato | Orario Locale | Orario CET (inverno) | Orario CEST (estate) |
+|---------|---------------|----------------------|----------------------|
+| **USA** (NYSE/NASDAQ) | 09:30-16:00 ET | 15:30-22:00 | 15:30-22:00 |
+| **Europa** (vari) | ~09:00-17:30 | 09:00-17:30 | 09:00-17:30 |
 
-### Cosa va modificato
-Solo le etichette UI e l'esperienza utente del form.
+**Weekend**: Tutti i mercati sono chiusi sabato e domenica.
+
+## Logica di Rilevamento
+
+```text
+┌─────────────────────────────────────────────┐
+│           isStale = true?                   │
+│                  │                          │
+│                  ▼                          │
+│    ┌─────────────────────────────┐          │
+│    │  Determina tipo ticker     │          │
+│    │  (EU suffix o US default)  │          │
+│    └─────────────────────────────┘          │
+│                  │                          │
+│         ┌───────┴───────┐                   │
+│         ▼               ▼                   │
+│    ┌─────────┐     ┌─────────┐              │
+│    │ EU Mkt  │     │ US Mkt  │              │
+│    └────┬────┘     └────┬────┘              │
+│         │               │                   │
+│         ▼               ▼                   │
+│  isMarketOpen(EU)?   isMarketOpen(US)?      │
+│         │               │                   │
+│    ┌────┴────┐     ┌────┴────┐              │
+│    ▼         ▼     ▼         ▼              │
+│  Aperto   Chiuso  Aperto   Chiuso           │
+│    │         │     │         │              │
+│    ▼         ▼     ▼         ▼              │
+│ "Prezzo"  "Mercato" "Prezzo" "Mercato"      │
+│ "non agg" "chiuso"  "non agg" "chiuso"      │
+└─────────────────────────────────────────────┘
+```
 
 ## Modifiche Tecniche
 
-### 1. File: `src/components/dashboard/DepositsSection.tsx`
+### 1. Nuovo helper: `src/lib/marketHours.ts`
 
-**Modifiche etichette:**
-- Titolo sezione: `"Versamenti"` → `"Versamenti e prelievi"`
-- Etichetta salvati: `"Versamenti salvati"` → `"Movimenti salvati"`
-- Titolo modifica: `"Modifica versamento"` → `"Modifica movimento"`
-- Titolo nuovo: `"Nuovo versamento"` → `"Nuovo movimento"`
-- Bottone: `"Aggiungi versamento"` → `"+ Aggiungi movimento"`
+Creare un modulo dedicato per la logica degli orari di mercato:
 
-**Miglioramento form input:**
-- Aggiungere pulsanti rapidi per selezionare il tipo di movimento (Versamento/Prelievo)
-- Se l'utente seleziona "Prelievo", il segno viene gestito automaticamente
-- Placeholder aggiornato: `"es. 5.000"` (il segno è determinato dal tipo selezionato)
-
-**Visualizzazione lista:**
-- Già mostra `+` per positivi e nessun prefisso per negativi, i negativi hanno già il `-`
-- Colore già differenziato: verde per positivi, rosso per negativi
-
-### 2. File: `src/hooks/useDeposits.ts`
-
-**Modifiche messaggi toast:**
-- `"Versamento salvato!"` → `"Movimento salvato!"`
-- `"Versamento eliminato"` → `"Movimento eliminato"`
-
-### 3. File: `src/components/dashboard/StatsCards.tsx`
-
-**Modifiche etichette:**
-- Il subtext della giacenza media mostra `"Versamenti: €X"` → Modificare in `"Movimenti: €X"` per essere più generico
-- Oppure se negativo mostrare `"Prelievi netti: €X"` e se positivo `"Versamenti netti: €X"`
-
-## Struttura UI Aggiornata del Form
-
-```text
-┌─────────────────────────────────────────┐
-│ Nuovo movimento                         │
-├─────────────────────────────────────────┤
-│ Tipo movimento:                         │
-│ ┌─────────────┐  ┌─────────────┐        │
-│ │ Versamento  │  │  Prelievo   │        │
-│ │    (+)      │  │    (-)      │        │
-│ └─────────────┘  └─────────────┘        │
-├─────────────────────────────────────────┤
-│ Data: [date picker]                     │
-├─────────────────────────────────────────┤
-│ Importo (€): [input numerico]           │
-├─────────────────────────────────────────┤
-│ Descrizione: [input opzionale]          │
-├─────────────────────────────────────────┤
-│ [Annulla]  [Salva]                      │
-└─────────────────────────────────────────┘
-```
-
-## Logica Tipo Movimento
-
-Nuovo stato nel form:
 ```typescript
-const [movementType, setMovementType] = useState<'deposit' | 'withdrawal'>('deposit');
+// Suffissi ticker europei (riuso logica edge function)
+const EU_SUFFIXES = ['.MI', '.DE', '.SW', '.PA', '.AS', '.L', '.MC', '.BR', '.VI', '.CO', '.HE', '.ST', '.OL', '.LS'];
+
+export function isEuropeanTicker(ticker: string): boolean {
+  return EU_SUFFIXES.some(suffix => ticker.toUpperCase().endsWith(suffix));
+}
+
+export function isMarketOpen(ticker: string): boolean {
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 6 = Saturday
+  
+  // Weekend - tutti i mercati chiusi
+  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+  
+  // Get current time in CET/CEST
+  const cetOffset = getCETOffset(now);
+  const cetHour = (now.getUTCHours() + cetOffset) % 24;
+  const cetMinutes = now.getUTCMinutes();
+  const cetTime = cetHour * 60 + cetMinutes;
+  
+  if (isEuropeanTicker(ticker)) {
+    // EU: 09:00-17:30 CET
+    const euOpen = 9 * 60;      // 540
+    const euClose = 17 * 60 + 30; // 1050
+    return cetTime >= euOpen && cetTime < euClose;
+  } else {
+    // US: 15:30-22:00 CET (09:30-16:00 ET)
+    const usOpen = 15 * 60 + 30;  // 930
+    const usClose = 22 * 60;      // 1320
+    return cetTime >= usOpen && cetTime < usClose;
+  }
+}
+
+// Helper per gestire ora legale CET/CEST
+function getCETOffset(date: Date): number {
+  // Semplificazione: CET = UTC+1, CEST = UTC+2
+  // L'ora legale inizia l'ultima domenica di marzo e finisce l'ultima domenica di ottobre
+  const month = date.getUTCMonth(); // 0-11
+  if (month >= 3 && month < 10) return 2; // CEST (Apr-Sep)
+  if (month === 2 || month === 10) {
+    // Marzo o Ottobre - calcolo preciso necessario
+    // Semplificazione: assume CEST per marzo dopo il 25, CET per ottobre dopo il 25
+    const day = date.getUTCDate();
+    if (month === 2) return day >= 25 ? 2 : 1;
+    if (month === 10) return day >= 25 ? 1 : 2;
+  }
+  return 1; // CET (Nov-Feb)
+}
 ```
 
-Al salvataggio:
+### 2. Modifica: `src/components/ui/stale-price-indicator.tsx`
+
+Aggiungere prop per il ticker e usare la logica mercato:
+
 ```typescript
-const handleSave = () => {
-  const absAmount = Math.abs(parseValue(formAmount));
-  const finalAmount = movementType === 'withdrawal' ? -absAmount : absAmount;
-  // ...save con finalAmount
-};
+interface StalePriceIndicatorProps {
+  className?: string;
+  ticker?: string;  // Nuovo: ticker per determinare il mercato
+}
+
+export function StalePriceIndicator({ className, ticker }: StalePriceIndicatorProps) {
+  const isMarketClosed = ticker && !isMarketOpen(ticker);
+  const message = isMarketClosed ? "Mercato chiuso" : "Prezzo non aggiornato";
+  
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <AlertTriangle 
+          className={`w-3 h-3 text-destructive animate-pulse ml-1 cursor-help ${className || ''}`}
+        />
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{message}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 ```
 
-In modifica, determinare il tipo dal segno:
+### 3. Modifica: `src/pages/Derivatives.tsx`
+
+Passare il ticker al componente `StalePriceIndicator` in tutte le occorrenze (7 punti):
+
 ```typescript
-const startEdit = (entry: DepositEntry) => {
-  setMovementType(entry.amount >= 0 ? 'deposit' : 'withdrawal');
-  setFormAmount(Math.abs(entry.amount).toString());
-  // ...
-};
+// Esempio per Covered Call (linea ~662)
+{option.underlying && underlyingPrices[option.underlying]?.isStale && (
+  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
+)}
 ```
 
-## File da Modificare
+### 4. Aggiornare `UnderlyingPrice` interface
 
-| File | Modifiche |
-|------|-----------|
-| `src/components/dashboard/DepositsSection.tsx` | Etichette + pulsanti tipo movimento + logica segno |
-| `src/hooks/useDeposits.ts` | Messaggi toast |
-| `src/components/dashboard/StatsCards.tsx` | Subtext giacenza media |
+L'interfaccia già include `ticker?: string`, quindi non servono modifiche al type.
+
+## File da Modificare/Creare
+
+| File | Azione |
+|------|--------|
+| `src/lib/marketHours.ts` | **NUOVO** - Logica orari mercato |
+| `src/components/ui/stale-price-indicator.tsx` | Modificare - Aggiungere prop ticker e logica |
+| `src/pages/Derivatives.tsx` | Modificare - Passare ticker in 7 punti |
 
 ## Vantaggi
 
-1. **UX migliorata**: L'utente non deve ricordarsi di inserire il segno negativo
-2. **Chiarezza**: Distinzione visiva tra versamenti e prelievi
-3. **Retrocompatibilità**: I dati esistenti continuano a funzionare
-4. **Nessuna modifica database**: Il campo `amount` può già essere negativo
+1. **Chiarezza**: L'utente capisce subito se il prezzo è stale per un problema tecnico o perché il mercato è chiuso
+2. **Precisione**: Distingue tra mercati USA ed europei con orari differenti
+3. **Consistenza**: Usa la stessa logica di identificazione ticker dell'edge function
+4. **Fuso orario**: Calcolo corretto per CET/CEST
+
+## Edge Cases Gestiti
+
+- **Weekend**: Mostra "Mercato chiuso" per tutti i ticker
+- **Pre-market/After-hours USA**: Mostra "Mercato chiuso" (non gestiamo extended hours)
+- **Festività**: Non gestite esplicitamente (mostrerebbe "Prezzo non aggiornato" - accettabile)
+- **Ticker senza suffisso EU**: Assume mercato USA (comportamento conservativo)
