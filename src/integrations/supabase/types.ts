@@ -715,6 +715,62 @@ export type Database = {
         }
         Relationships: []
       }
+      strategy_cache: {
+        Row: {
+          bought_call_strike: number | null
+          bought_put_strike: number | null
+          id: string
+          is_range_strategy: boolean | null
+          portfolio_id: string
+          position_ids: string[]
+          sold_call_strike: number | null
+          sold_put_strike: number | null
+          strategy_key: string
+          strategy_type: string
+          ticker: string | null
+          underlying: string
+          updated_at: string | null
+        }
+        Insert: {
+          bought_call_strike?: number | null
+          bought_put_strike?: number | null
+          id?: string
+          is_range_strategy?: boolean | null
+          portfolio_id: string
+          position_ids: string[]
+          sold_call_strike?: number | null
+          sold_put_strike?: number | null
+          strategy_key: string
+          strategy_type: string
+          ticker?: string | null
+          underlying: string
+          updated_at?: string | null
+        }
+        Update: {
+          bought_call_strike?: number | null
+          bought_put_strike?: number | null
+          id?: string
+          is_range_strategy?: boolean | null
+          portfolio_id?: string
+          position_ids?: string[]
+          sold_call_strike?: number | null
+          sold_put_strike?: number | null
+          strategy_key?: string
+          strategy_type?: string
+          ticker?: string | null
+          underlying?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategy_cache_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       telegram_link_codes: {
         Row: {
           code: string
