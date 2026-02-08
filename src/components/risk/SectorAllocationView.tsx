@@ -211,7 +211,10 @@ export function SectorAllocationView({
     );
   });
 
-  const hasData = safeSectorExposure.length > 0 && Number.isFinite(grandTotal) && grandTotal > 0;
+  // Calculate total from displayed sectors to ensure consistency with pie chart
+  const displayedGrandTotal = safeSectorExposure.reduce((sum, s) => sum + s.totalRisk, 0);
+
+  const hasData = safeSectorExposure.length > 0 && displayedGrandTotal > 0;
   
   // Prepare chart data
   const chartData = safeSectorExposure.map(s => ({
@@ -253,7 +256,7 @@ export function SectorAllocationView({
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-                <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+                <div className="text-3xl font-bold text-primary">{formatEUR(displayedGrandTotal)}</div>
                 {hasData && safeSectorExposure.length > 0 && (
                   <div className="text-sm text-muted-foreground mt-1">
                     Settore principale: <span className="font-medium text-foreground">{safeSectorExposure[0].sector} ({safeSectorExposure[0].percentage.toFixed(1)}%)</span>
