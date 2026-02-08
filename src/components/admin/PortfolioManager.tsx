@@ -4,13 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Briefcase, Copy, ExternalLink, Loader2, ChevronDown, ChevronRight, User } from 'lucide-react';
+import { Briefcase, Copy, ExternalLink, Loader2, ChevronDown, ChevronRight, User, Trash2 } from 'lucide-react';
 import { useAdminPortfolios, PortfolioWithOwner } from '@/hooks/useAdminPortfolios';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { CopyPortfolioDialog } from './CopyPortfolioDialog';
+import { useDeletePortfolio } from '@/hooks/useDeletePortfolio';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Portfolio } from '@/types/portfolio';
 
 export function PortfolioManager() {
@@ -22,6 +24,8 @@ export function PortfolioManager() {
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
   const [portfolioToCopy, setPortfolioToCopy] = useState<Portfolio | null>(null);
   const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
+  const [portfolioToDelete, setPortfolioToDelete] = useState<PortfolioWithOwner | null>(null);
+  const { deletePortfolio, isDeleting } = useDeletePortfolio();
 
   const toggleUserExpanded = (userId: string) => {
     setExpandedUsers(prev => {
@@ -43,6 +47,20 @@ export function PortfolioManager() {
   const handleCopyClick = (portfolio: Portfolio) => {
     setPortfolioToCopy(portfolio);
     setCopyDialogOpen(true);
+  };
+
+  const handleDeleteClick = (portfolio: PortfolioWithOwner) => {
+    setPortfolioToDelete(portfolio);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!portfolioToDelete) return;
+    try {
+      await deletePortfolio(portfolioToDelete.id);
+      setPortfolioToDelete(null);
+    } catch (error) {
+      // Error già gestito nel hook
+    }
   };
 
   // Get all users for the copy dialog dropdown (including admin)
@@ -102,15 +120,25 @@ export function PortfolioManager() {
                     {portfolio.last_updated ? formatDate(portfolio.last_updated) : '-'}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleCopyClick(portfolio)}
-                      disabled={otherUsers.length === 0}
-                    >
-                      <Copy className="w-4 h-4 mr-2" />
-                      Copia su Utente
-                    </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCopyClick(portfolio)}
+                        disabled={otherUsers.length === 0}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copia su Utente
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDeleteClick(portfolio as PortfolioWithOwner)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -209,6 +237,17 @@ export function PortfolioManager() {
                                     <ExternalLink className="w-4 h-4 mr-2" />
                                     Apri
                                   </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteClick(portfolio);
+                                    }}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -232,6 +271,57 @@ export function PortfolioManager() {
         users={allUsersForCopy}
         onSuccess={refetch}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!portfolioToDelete} onOpenChange={(open) => !open && setPortfolioToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Conferma Eliminazione</DialogTitle>
+            <DialogDescription className="space-y-2">
+              <span>
+                Stai per eliminare il portfolio "<strong>{portfolioToDelete?.name}</strong>"
+                {portfolioToDelete?.owner_email && (
+                  <> di <strong>{portfolioToDelete.owner_name || portfolioToDelete.owner_email}</strong></>
+                )}.
+              </span>
+              <br />
+              <span>
+                Verranno eliminati anche tutti i dati associati (posizioni, depositi, dati storici, alert).
+              </span>
+              <br />
+              <span className="text-destructive font-medium">
+                Questa azione non può essere annullata.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setPortfolioToDelete(null)}
+              disabled={isDeleting}
+            >
+              Annulla
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Eliminazione...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Elimina Portfolio
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
