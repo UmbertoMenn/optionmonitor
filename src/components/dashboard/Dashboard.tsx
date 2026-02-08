@@ -335,6 +335,7 @@ export function Dashboard() {
           <HistoricalChartsCarousel
             historicalData={historicalData}
             viewMode={viewMode}
+            onViewModeChange={setViewMode}
             currentValue={
               viewMode === 'base' ? summary?.totalValue ?? 0
               : viewMode === 'netting_total' ? netting.nettingTotal
