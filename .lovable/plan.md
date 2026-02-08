@@ -1,51 +1,81 @@
 
-# Modifica Branding Pagina Login
 
 ## Obiettivo
-Cambiare il titolo da "Portfolio Monitor" a "Option Tech" e sostituire l'icona `TrendingUp` con un'icona custom SVG che rappresenta un Iron Condor.
+Aggiungere un selettore rapido per cambiare vista (Base, Netting ex. CC, Netting ex. CC e NP, Netting Totale) direttamente nei grafici "Evoluzione Rendimento" e "Rendimento per Anno", senza dover scorrere fino al selettore globale della dashboard.
 
-## Modifiche
+## Analisi della situazione attuale
 
-### 1. Nuovo Componente Icona Iron Condor
-Creerò un componente `IronCondorIcon` che disegna il payoff diagram stilizzato di un Iron Condor:
-- Forma trapezoidale con "ali" laterali
-- Design minimalista e tecnologico
-- Colori coerenti con il tema (usa `currentColor` per integrarsi)
+- Il `viewMode` e` gestito centralmente in `Dashboard.tsx` tramite `useState`
+- Viene passato a `HistoricalChartsCarousel` che lo distribuisce ai grafici figli
+- I grafici mostrano solo un badge statico con la vista corrente (es. "Base")
+- L'utente deve usare il selettore globale in cima alla dashboard per cambiare vista
 
-La forma rappresenterà:
+## Soluzione proposta
+
+Aggiungere un menu dropdown compatto al posto del badge statico attuale in entrambe le card dei grafici, permettendo di cambiare la vista direttamente da li.
+
 ```text
-    ___________
-   /           \
-  /             \
++------------------------------------------------------+
+| [icona] Evoluzione Rendimento    [▼ Base        ]    |
+| Rendimento % e P/L nel tempo...                      |
+|                                                      |
+| [grafico]                                            |
++------------------------------------------------------+
 ```
-Questa è la tipica forma del profitto di un Iron Condor.
 
-### 2. Modifica AuthForm.tsx
-- **Titolo**: "Portfolio Monitor" → "Option Tech"
-- **Sottotitolo**: Può rimanere "Gestisci il tuo portafoglio derivati" o modificarlo se preferisci
-- **Icona**: Sostituire `TrendingUp` con il nuovo `IronCondorIcon`
+## Modifiche tecniche
 
-## File da Creare/Modificare
-| File | Azione |
-|------|--------|
-| `src/components/ui/iron-condor-icon.tsx` | Nuovo - Componente SVG icona |
-| `src/components/auth/AuthForm.tsx` | Modifica - Titolo e icona |
+### 1. HistoricalChartsCarousel.tsx
+- Aggiungere una callback `onViewModeChange` alle props
+- Sostituire il badge statico con un `Select` (dropdown) compatto
+- Applicare la stessa modifica sia alla card del carousel che alla card "Rendimento per Anno"
 
-## Dettagli Tecnici
+### 2. Dashboard.tsx
+- Passare `onViewModeChange={setViewMode}` al componente `HistoricalChartsCarousel`
 
-### Componente IronCondorIcon
+## Dettagli implementativi
+
+### Componente Select per la vista
+Utilizzera il componente `Select` di shadcn/ui gia presente nel progetto:
+
 ```tsx
-// Accetta props standard SVG (size, className, etc.)
-// Disegna un payoff diagram di Iron Condor stilizzato
-// Design: linee geometriche che formano il profilo caratteristico
+<Select value={viewMode} onValueChange={onViewModeChange}>
+  <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2">
+    <SelectValue />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="base">Base</SelectItem>
+    <SelectItem value="netting_ex_cc">Netting ex. CC</SelectItem>
+    <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
+    <SelectItem value="netting_total">Netting Totale</SelectItem>
+  </SelectContent>
+</Select>
 ```
 
-### Modifiche AuthForm
+### Props aggiornate per HistoricalChartsCarousel
+
 ```tsx
-// Import
-import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
-
-// Nel JSX (riga 159-162):
-<IronCondorIcon className="w-8 h-8 text-primary" />
-<h1>Option Tech</h1>
+interface HistoricalChartsCarouselProps {
+  historicalData: HistoricalDataEntry[];
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;  // NUOVA PROP
+  currentValue: number;
+  currentDate: string | null;
+  deposits: DepositEntry[];
+}
 ```
+
+## File da modificare
+
+| File | Modifica |
+|------|----------|
+| `src/components/dashboard/HistoricalChartsCarousel.tsx` | Aggiungere prop `onViewModeChange`, sostituire badge con Select in entrambe le card |
+| `src/components/dashboard/Dashboard.tsx` | Passare `onViewModeChange={setViewMode}` al carousel |
+
+## Vantaggi
+
+- Cambio vista rapido senza scroll
+- UI coerente: stesso dropdown in entrambe le card
+- Sincronizzazione automatica: cambiando vista dal dropdown si aggiorna anche il selettore globale (stesso state)
+- Nessuna modifica ai grafici interni (PerformanceEvolutionChart, YearlyReturnChart)
+
