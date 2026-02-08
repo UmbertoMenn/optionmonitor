@@ -72,8 +72,8 @@ export async function parsePortfolioExcel(file: File): Promise<{
   cashValue: number;
   snapshotDate: string | null;
 }> {
-  // Dynamic import of xlsx library
-  const XLSX = await import('xlsx');
+  // Dynamic import of xlsx library (using @e965/xlsx for security patches)
+  const XLSX = await import('@e965/xlsx');
   
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
