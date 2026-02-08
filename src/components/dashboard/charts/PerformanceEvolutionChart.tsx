@@ -123,6 +123,8 @@ function CustomLegend({
     ? `Paniere Equity/Bond ponderato per l'equity exposure storica del portafoglio.\n\n` +
       `Ponderazione dinamica: Il peso Equity/Bond varia nel tempo in base all'esposizione salvata in ogni snapshot.\n` +
       `L'exposure di ciascun punto determina la ponderazione per il periodo successivo.\n\n` +
+      `⚠️ Nota metodologica: Per comparabilità, l'esposizione equity esclude Naked PUT, Leap CALL e Strategie.\n` +
+      `Questi derivati rappresentano esposizione potenziale con profilo rischio/rendimento diverso dalla detenzione diretta di equity.\n\n` +
       `Equity exposure attuale: ${equityPctFormatted}%\n` +
       `Benchmark attuale: ${equityPctFormatted}% × Equity (SPY/QQQ) + ${bondPctFormatted}% × Bond (AGG)`
     : 'Paniere Equity/Bond ponderato per l\'equity exposure storica del portafoglio.\nEquity exposure non disponibile - usando fallback 60%.';
@@ -245,8 +247,13 @@ export function PerformanceEvolutionChart({
   const [currencyAdjusted, setCurrencyAdjusted] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('MAX');
   
-  // Get equity exposure from Risk Analyzer logic
-  const { equityExposurePct, equityExposureEUR, assetsTotalEUR, hasData: hasEquityData } = useEquityExposurePct();
+  // Get equity exposure for BENCHMARK only: protections on, all derivatives off
+  // This ensures a fair comparison with direct equity holdings (SPY/QQQ/AGG)
+  const { equityExposurePct, equityExposureEUR, assetsTotalEUR, hasData: hasEquityData } = useEquityExposurePct({
+    includeNakedPut: false,
+    includeStrategies: false,
+    includeLeapCall: false
+  });
   
   // Get USD exposure for currency adjustment (derivatives excluded, bonds included)
   const { usdExposurePct, totalExposure: usdTotalExposure, isLoading: isUsdLoading } = useCurrencyExposure({ 

@@ -29,7 +29,12 @@ export function Dashboard() {
   const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
   const netting = useDerivativeNetting(positions, summary, overrides);
-  const { equityExposurePct } = useEquityExposurePct();
+  // Equity exposure for benchmark: only protections, no derivatives
+  const { equityExposurePct } = useEquityExposurePct({
+    includeNakedPut: false,
+    includeStrategies: false,
+    includeLeapCall: false
+  });
   const { usdExposurePct } = useCurrencyExposure({ includeProtections: false, includeNakedPut: false, includeStrategies: false, includeLeapCall: false, includeBonds: true });
   const { 
     historicalData, 

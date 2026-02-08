@@ -4,6 +4,15 @@ import { useDerivativeOverrides } from './useDerivativeOverrides';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk } from '@/lib/riskCalculator';
 
+export interface UseEquityExposurePctOptions {
+  /** Include Naked PUT exposure in calculation (default: true) */
+  includeNakedPut?: boolean;
+  /** Include Strategies exposure in calculation (default: true) */
+  includeStrategies?: boolean;
+  /** Include Leap CALL exposure in calculation (default: true) */
+  includeLeapCall?: boolean;
+}
+
 export interface EquityExposureResult {
   /** Equity exposure as percentage (0-1), capped at 100% */
   equityExposurePct: number;
@@ -22,11 +31,21 @@ export interface EquityExposureResult {
  * 
  * Formula: equityExposurePct = grandTotal / totalValue (capped at 100%)
  * 
- * Where:
- * - grandTotal = ETF + Stocks + Commodities + Naked PUT + Leap CALL + Strategies Max Loss
- * - totalValue = Total asset value (cash, bonds, stocks, ETFs, commodities - excludes derivatives)
+ * Where grandTotal can include:
+ * - ETF + Stocks (net of protections) + Commodities (always included)
+ * - Naked PUT (optional, default: true)
+ * - Leap CALL (optional, default: true)
+ * - Strategies Max Loss (optional, default: true)
+ * 
+ * For benchmark comparison, use with all flags set to false to get direct equity exposure only.
  */
-export function useEquityExposurePct(): EquityExposureResult {
+export function useEquityExposurePct(options: UseEquityExposurePctOptions = {}): EquityExposureResult {
+  const {
+    includeNakedPut = true,
+    includeStrategies = true,
+    includeLeapCall = true
+  } = options;
+  
   const { positions, summary, isLoading: isLoadingPortfolio } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
   
@@ -53,25 +72,32 @@ export function useEquityExposurePct(): EquityExposureResult {
     // Calculate risk analysis (same as Risk Analyzer)
     const analysis = analyzePortfolioRisk(positions, categories);
     
-    // Equity exposure = grandTotal / totalValue
-    // grandTotal includes ETF + Stocks + Commodities + Naked PUT + Leap CALL + Strategies
-    const equityExposureEUR = analysis.grandTotal;
+    // Dynamic grandTotal based on options
+    // Always include: ETF + Stocks (net of protections) + Commodities
+    // Conditionally include: Naked PUT, Leap CALL, Strategies
+    const grandTotal = 
+      analysis.totalStockRisk +        // Stocks (already net of protections)
+      analysis.totalCommodityRisk +    // Commodities
+      (includeNakedPut ? analysis.totalNakedPutRisk : 0) +
+      (includeLeapCall ? analysis.totalLeapCallRisk : 0) +
+      (includeStrategies ? analysis.totalStrategyRisk : 0);
+    
     const assetsTotalEUR = summary.totalValue;
     
     // Calculate percentage with safety clamp
-    let equityExposurePct = equityExposureEUR / assetsTotalEUR;
+    let equityExposurePct = grandTotal / assetsTotalEUR;
     
     // Clamp between 0 and 1 to avoid unrealistic values
     equityExposurePct = Math.max(0, Math.min(1, equityExposurePct));
     
     return {
       equityExposurePct,
-      equityExposureEUR,
+      equityExposureEUR: grandTotal,
       assetsTotalEUR,
       isLoading,
       hasData: true
     };
-  }, [positions, summary, overrides, isLoadingPortfolio, isLoadingOverrides]);
+  }, [positions, summary, overrides, isLoadingPortfolio, isLoadingOverrides, includeNakedPut, includeStrategies, includeLeapCall]);
   
   return result;
 }
