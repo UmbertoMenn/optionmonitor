@@ -1,206 +1,177 @@
 
-# Piano: Correzione Completa Aggregazione Vista Globale
+# Piano: Correzione Dashboard Nera su Cambio Vista e Uscita Admin Mode
 
-## Diagnosi dei Problemi
+## Problema Identificato
 
-### Problema 1: Rendimenti Falsati
-I grafici calcolano il rendimento partendo dal primo punto della serie. Se Portfolio A ha snapshot dal 01/01 e Portfolio B entra solo il 01/06, l'ingresso di B non viene trattato come "nuovo capitale" - il valore sale improvvisamente senza che ci sia un apporto, falsando il rendimento.
+La dashboard diventa nera (crash) in due scenari:
+1. **Cambio vista** (Base → Netting, etc.)
+2. **Uscita dalla admin mode** (clic sulla X)
 
-### Problema 2: Giacenza Media = 0
-La giacenza media viene calcolata in `StatsCards.tsx` usando `portfolio.snapshot_date` come data finale. Anche con `aggregatedSnapshotDate` corretto, la formula non considera i "versamenti sintetici" (ingresso di nuovi portafogli).
+### Causa Radice
 
-### Problema 3: Grafici Non Interpolano Correttamente
-L'interpolazione attuale gestisce bene i portafogli che **già esistono**, ma non crea "apporti sintetici" quando un portafoglio **compare per la prima volta**.
-
----
-
-## Strategia: Apporti Sintetici per Nuovi Portafogli
-
-Quando aggreghiamo i dati storici, dobbiamo:
-1. Per ogni portafoglio, identificare la sua **data di ingresso** (primo snapshot)
-2. Nelle date precedenti, quel portafoglio contribuisce 0
-3. Alla data di ingresso, il suo valore iniziale viene registrato come **apporto sintetico** (synthetic deposit)
-4. Gli apporti sintetici vengono sommati ai depositi reali per il calcolo di giacenza media e P/L
-
----
-
-## Modifiche Richieste
-
-### 1. Modificare `useHistoricalData.ts` - Calcolare Apporti Sintetici
-
-Estendere `aggregateHistoricalWithInterpolation` per restituire anche gli apporti sintetici:
+Il problema è un **anti-pattern React** nel file `Dashboard.tsx` (righe 99-102):
 
 ```typescript
-interface AggregatedHistoricalResult {
-  entries: HistoricalDataEntry[];
-  syntheticDeposits: { date: string; amount: number; portfolioId: string }[];
-}
-
-function aggregateHistoricalWithInterpolation(
-  data: HistoricalDataEntry[],
-  viewMode: ViewMode = 'base'
-): AggregatedHistoricalResult {
-  // ... codice esistente per raggruppamento ...
-  
-  const syntheticDeposits: { date: string; amount: number; portfolioId: string }[] = [];
-  
-  // Per ogni portfolio, registra il valore alla prima data come apporto sintetico
-  byPortfolio.forEach((entries, portfolioId) => {
-    if (entries.length === 0) return;
-    const firstEntry = entries[0]; // già ordinato ascendente
-    const firstValue = getValueForViewMode(firstEntry, viewMode);
-    syntheticDeposits.push({
-      date: firstEntry.snapshot_date,
-      amount: firstValue,
-      portfolioId,
-    });
-  });
-  
-  // ... resto del codice per aggregazione ...
-  
-  return { entries: aggregated, syntheticDeposits };
+// ❌ ERRORE: setState durante il render!
+if (earliestEntry && !selectedHistoricalDate && historicalData.length > 0) {
+  setSelectedHistoricalDate(earliestEntry.snapshot_date);
 }
 ```
 
-### 2. Modificare l'hook per esporre i synthetic deposits
+Questo codice:
+1. Viene eseguito **durante la fase di render** (non in un `useEffect`)
+2. Chiama `setSelectedHistoricalDate()` che triggera un nuovo render
+3. Quando cambia `viewMode`, la queryKey di `useHistoricalData` cambia → i dati vengono refetchati → `earliestEntry` cambia → nuovo setState → loop infinito → crash
+
+### Problema Secondario
+
+Quando si esce dalla admin mode, il `portfolio?.id` cambia improvvisamente e può causare:
+- Query con ID invalido temporaneo
+- Dati undefined che causano errori nei componenti figli
+
+---
+
+## Soluzione
+
+### 1. Spostare la logica di inizializzazione in un `useEffect`
+
+Convertire il codice problematico in un `useEffect` che si attiva solo una volta al caricamento iniziale dei dati:
 
 ```typescript
-export function useHistoricalData(portfolioId: string | undefined) {
-  // ...
-  
-  const historicalDataQuery = useQuery({
-    queryKey: ['historical-data', portfolioId],
-    queryFn: async () => {
-      // Vista aggregata
-      if (isAggregated && isAdmin) {
-        const { data, error } = await supabase
-          .from('historical_data')
-          .select('*')
-          .order('snapshot_date', { ascending: false });
-        
-        if (error) throw error;
-        return aggregateHistoricalWithInterpolation(data as HistoricalDataEntry[]);
-      }
-      
-      // Portfolio singolo - nessun synthetic deposit
-      const { data, error } = await supabase
-        .from('historical_data')
-        .select('*')
-        .eq('portfolio_id', portfolioId)
-        .order('snapshot_date', { ascending: false });
-      
-      if (error) throw error;
-      return { 
-        entries: data as HistoricalDataEntry[], 
-        syntheticDeposits: [] 
-      };
-    },
-    // ...
-  });
-  
-  return {
-    historicalData: historicalDataQuery.data?.entries || [],
-    syntheticDeposits: historicalDataQuery.data?.syntheticDeposits || [],
-    // ... resto invariato
-  };
+// ✅ CORRETTO: useEffect per inizializzazione una tantum
+const [hasInitializedDate, setHasInitializedDate] = useState(false);
+
+useEffect(() => {
+  // Inizializza solo UNA VOLTA quando i dati sono disponibili
+  if (!hasInitializedDate && earliestEntry && historicalData.length > 0) {
+    setSelectedHistoricalDate(earliestEntry.snapshot_date);
+    setHasInitializedDate(true);
+  }
+}, [earliestEntry, historicalData.length, hasInitializedDate]);
+
+// Reset quando cambia portfolio
+useEffect(() => {
+  setHasInitializedDate(false);
+  setSelectedHistoricalDate(null);
+}, [portfolio?.id]);
+```
+
+### 2. Rimuovere `viewMode` dalla queryKey di `useHistoricalData`
+
+La `viewMode` non dovrebbe essere nella queryKey perché i dati storici sono gli stessi - solo il calcolo degli apporti sintetici cambia. Questo evita refetch inutili:
+
+```typescript
+// Prima:
+queryKey: ['historical-data', portfolioId, viewMode],
+
+// Dopo:
+queryKey: ['historical-data', portfolioId],
+```
+
+E calcolare i `syntheticDeposits` **a livello di componente** usando `useMemo`, non dentro la query.
+
+### 3. Aggiungere gestione errori con ErrorBoundary wrapper
+
+Verificare che il componente `Dashboard` sia protetto da un ErrorBoundary per evitare schermate nere in caso di errori non gestiti.
+
+---
+
+## Modifiche ai File
+
+### File 1: `src/components/dashboard/Dashboard.tsx`
+
+**Rimuovere** le righe 99-102 (setState durante render):
+```typescript
+// RIMUOVERE QUESTO:
+if (earliestEntry && !selectedHistoricalDate && historicalData.length > 0) {
+  setSelectedHistoricalDate(earliestEntry.snapshot_date);
 }
 ```
 
-### 3. Modificare `Dashboard.tsx` - Passare Synthetic Deposits
-
-Passare i synthetic deposits ai componenti che ne hanno bisogno:
-
+**Aggiungere** `useEffect` per inizializzazione:
 ```typescript
-const { 
-  historicalData, 
-  syntheticDeposits, // NEW
-  // ...
-} = useHistoricalData(portfolio?.id);
+// Flag per evitare re-inizializzazioni
+const [hasInitializedDate, setHasInitializedDate] = useState(false);
 
-// Combinare depositi reali e sintetici per i grafici
-const allDepositsForCharts = useMemo(() => {
-  if (!isAggregatedView) return deposits;
-  
-  const syntheticAsDeposits: DepositEntry[] = syntheticDeposits.map(sd => ({
-    id: `synthetic-${sd.portfolioId}-${sd.date}`,
-    portfolio_id: 'AGGREGATED',
-    deposit_date: sd.date,
-    amount: sd.amount,
-    description: 'Apporto sintetico (ingresso portafoglio)',
-    created_at: '',
-    updated_at: '',
-  }));
-  
-  return [...deposits, ...syntheticAsDeposits];
-}, [deposits, syntheticDeposits, isAggregatedView]);
+// Inizializza selectedHistoricalDate solo una volta al primo caricamento
+useEffect(() => {
+  if (!hasInitializedDate && earliestEntry && historicalData.length > 0) {
+    setSelectedHistoricalDate(earliestEntry.snapshot_date);
+    setHasInitializedDate(true);
+  }
+}, [earliestEntry, historicalData.length, hasInitializedDate]);
 
-// Passare ai grafici e a StatsCards
-<StatsCards
-  allDeposits={allDepositsForCharts}
-  // ...
-/>
-
-<HistoricalChartsCarousel
-  deposits={allDepositsForCharts}
-  // ...
-/>
+// Reset quando cambia portfolio
+useEffect(() => {
+  setHasInitializedDate(false);
+  setSelectedHistoricalDate(null);
+  setPlDeposits(0);
+  setAverageBalance(0);
+  setIsManualAverageBalance(false);
+}, [portfolio?.id]);
 ```
 
-### 4. Modificare `StatsCards.tsx` - Usare Depositi Combinati
+### File 2: `src/hooks/useHistoricalData.ts`
 
-Nessuna modifica necessaria al componente stesso - riceverà già i depositi combinati tramite la prop `allDeposits`.
+**Rimuovere `viewMode` dalla queryKey** per evitare refetch inutili:
 
-### 5. Modificare i Grafici - Usare Depositi Combinati
+```typescript
+// Prima:
+queryKey: ['historical-data', portfolioId, viewMode],
 
-**`PerformanceEvolutionChart.tsx`** e **`YearlyReturnChart.tsx`**:
-- Già ricevono `deposits` come prop
-- Con i synthetic deposits inclusi, i calcoli di P/L e giacenza media saranno corretti
+// Dopo:
+queryKey: ['historical-data', portfolioId],
+```
+
+**Calcolare `syntheticDeposits` separatamente** usando `useMemo` basato su `viewMode`:
+
+```typescript
+// I dati grezzi dalla query
+const rawResult = historicalDataQuery.data || { entries: [], syntheticDeposits: [] };
+
+// Ricalcola syntheticDeposits quando cambia viewMode
+const syntheticDeposits = useMemo(() => {
+  if (!isAggregated || rawResult.entries.length === 0) {
+    return rawResult.syntheticDeposits;
+  }
+  
+  // Raggruppa per portfolio e calcola il primo valore con viewMode corrente
+  const byPortfolio = new Map<string, HistoricalDataEntry[]>();
+  // ... logica per ricalcolare con viewMode attuale
+  
+  return recalculatedDeposits;
+}, [rawResult, viewMode, isAggregated]);
+```
+
+### File 3: `src/App.tsx`
+
+Verificare che `Dashboard` sia wrappato in un ErrorBoundary. Se non lo e', aggiungere:
+
+```tsx
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+
+// In AppRoutes:
+<Route path="/" element={
+  <ErrorBoundary title="Errore nel caricamento della dashboard">
+    <Dashboard />
+  </ErrorBoundary>
+} />
+```
 
 ---
 
-## Logica di Calcolo Rendimento con Apporti Sintetici
+## Riepilogo Modifiche
 
-Esempio con 2 portafogli:
-- **Portfolio A**: primo snapshot 01/01/2025, valore 100k
-- **Portfolio B**: primo snapshot 01/06/2025, valore 50k
-
-| Data | Valore A | Valore B | Totale | Apporti | Giacenza Media | Rendimento |
-|------|----------|----------|--------|---------|----------------|------------|
-| 01/01 | 100k | - | 100k | 100k (synth A) | 100k | 0% |
-| 01/03 | 110k | - | 110k | - | 100k | +10% |
-| 01/06 | 120k | 50k | 170k | 50k (synth B) | 125k | ~16% |
-| 01/09 | 130k | 60k | 190k | - | 150k | ~17% |
-
-Formula: `P/L = Valore Attuale - Valore Iniziale - Σ Apporti`
-Rendimento: `P/L ÷ Giacenza Media`
-
----
-
-## Riepilogo File da Modificare
-
-| File | Modifiche |
-|------|-----------|
-| `src/hooks/useHistoricalData.ts` | Calcolare e restituire `syntheticDeposits` insieme ai dati aggregati |
-| `src/components/dashboard/Dashboard.tsx` | Combinare depositi reali e sintetici, passarli ai componenti figli |
-| `src/types/historicalData.ts` | (Opzionale) Aggiungere tipo per synthetic deposit |
+| File | Modifica |
+|------|----------|
+| `src/components/dashboard/Dashboard.tsx` | Spostare inizializzazione `selectedHistoricalDate` in `useEffect`, aggiungere reset su cambio portfolio |
+| `src/hooks/useHistoricalData.ts` | Rimuovere `viewMode` dalla queryKey, calcolare syntheticDeposits in `useMemo` separato |
+| `src/App.tsx` | Aggiungere ErrorBoundary wrapper per Dashboard |
 
 ---
 
 ## Comportamento Atteso
 
-### Vista Aggregata
-1. **Grafici Rendimento**: Il rendimento parte da 0% per il primo portafoglio. Quando un nuovo portafoglio entra, il suo valore viene trattato come apporto sintetico, mantenendo la continuità del rendimento.
-2. **Giacenza Media**: Calcolata correttamente considerando gli apporti sintetici come versamenti.
-3. **P/L**: `Valore Attuale - Valore Primo Snapshot - Depositi Reali - Apporti Sintetici`
-
-### Vista Portfolio Singolo
-Comportamento invariato - nessun apporto sintetico.
-
----
-
-## Edge Cases Gestiti
-
-1. **Portfolio che chiude**: L'ultimo valore viene mantenuto (carry forward) - già gestito
-2. **Portfolio con un solo snapshot**: Contribuisce solo a quella data
-3. **Date identiche per primo snapshot**: Ogni portafoglio ha comunque il suo apporto sintetico
-4. **ViewMode diversi**: L'apporto sintetico usa il valore della viewMode selezionata (Base/Netting/etc)
+1. **Cambio vista**: La dashboard rimane visibile, i dati storici non vengono refetchati, solo i syntheticDeposits vengono ricalcolati
+2. **Uscita admin mode**: Transizione fluida al portfolio personale, reset dello stato senza crash
+3. **Errori imprevisti**: ErrorBoundary mostra un messaggio invece di schermo nero
