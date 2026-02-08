@@ -172,6 +172,7 @@ function aggregateHistoricalWithInterpolation(
   return {
     entries: aggregated.sort((a, b) => b.snapshot_date.localeCompare(a.snapshot_date)),
     syntheticDeposits,
+    rawEntries: data, // Salva dati originali per ricalcolo viewMode
   };
 }
 
@@ -214,15 +215,17 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
   });
 
   // Recalculate syntheticDeposits based on current viewMode (without refetching data)
+  // Uses rawEntries (original data with real portfolio_id) instead of aggregated entries
   const syntheticDeposits = useMemo((): SyntheticDeposit[] => {
-    const rawEntries = historicalDataQuery.data?.entries || [];
+    // Use rawEntries for aggregated view (they have original portfolio_id)
+    const rawEntries = historicalDataQuery.data?.rawEntries;
     
-    // For non-aggregated view, no synthetic deposits
-    if (!isAggregated || rawEntries.length === 0) {
+    // For non-aggregated view or no raw data, no synthetic deposits
+    if (!isAggregated || !rawEntries || rawEntries.length === 0) {
       return [];
     }
     
-    // Group entries by portfolio_id and calculate first value for current viewMode
+    // Group entries by original portfolio_id
     const byPortfolio = new Map<string, HistoricalDataEntry[]>();
     rawEntries.forEach(entry => {
       const list = byPortfolio.get(entry.portfolio_id) || [];
@@ -236,7 +239,7 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
       byPortfolio.set(key, entries);
     });
     
-    // Calculate synthetic deposits based on viewMode
+    // Calculate synthetic deposits based on current viewMode
     const deposits: SyntheticDeposit[] = [];
     byPortfolio.forEach((entries, portfolioId) => {
       if (entries.length === 0) return;
@@ -250,7 +253,7 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
     });
     
     return deposits;
-  }, [historicalDataQuery.data?.entries, viewMode, isAggregated]);
+  }, [historicalDataQuery.data?.rawEntries, viewMode, isAggregated]);
 
   const upsertMutation = useMutation({
     mutationFn: async (entry: HistoricalDataInput) => {
