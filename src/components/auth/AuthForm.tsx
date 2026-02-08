@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { TrendingUp, Lock, Mail, User, ArrowLeft } from 'lucide-react';
+import { Lock, Mail, User, ArrowLeft } from 'lucide-react';
+import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { toast } from 'sonner';
 
 export function AuthForm() {
@@ -157,9 +158,9 @@ export function AuthForm() {
         {/* Logo */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-xl bg-primary/10 border border-primary/20 mb-4">
-            <TrendingUp className="w-8 h-8 text-primary" />
+            <IronCondorIcon size={32} className="text-primary" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">Portfolio Monitor</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Option Tech</h1>
           <p className="text-muted-foreground">Gestisci il tuo portafoglio derivati</p>
         </div>
 
