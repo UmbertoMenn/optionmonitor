@@ -33,6 +33,7 @@ interface IsinMapping {
   exchange: string | null;
   description: string;
   hasMapping: boolean;
+  isDerivativeUnderlying?: boolean; // true if this comes from derivative positions
 }
 
 export function SectorMappingManager() {
@@ -59,14 +60,23 @@ export function SectorMappingManager() {
 
       if (posError) throw posError;
 
-      // 2. Carica i mapping esistenti
+      // 2. Carica gli underlying unici dai derivati
+      const { data: derivatives, error: derError } = await supabase
+        .from('positions')
+        .select('underlying, description')
+        .eq('asset_type', 'derivative')
+        .not('underlying', 'is', null);
+
+      if (derError) throw derError;
+
+      // 3. Carica i mapping esistenti
       const { data: existingMappings, error: mapError } = await supabase
         .from('isin_mappings')
         .select('*');
 
       if (mapError) throw mapError;
 
-      // 3. Combina: mostra tutti gli ISIN stock con info mapping se disponibile
+      // 4. Combina: mostra tutti gli ISIN stock con info mapping se disponibile
       const uniqueIsins = [...new Set(positions?.map(p => p.isin).filter(Boolean) || [])] as string[];
       
       const combined: IsinMapping[] = uniqueIsins.map(isin => {
@@ -80,8 +90,45 @@ export function SectorMappingManager() {
           industry: mapping?.industry || null,
           exchange: mapping?.exchange || null,
           hasMapping: !!mapping,
+          isDerivativeUnderlying: false,
         };
       });
+      
+      // 5. Aggiungi underlying derivati unici (con ISIN sintetico)
+      const derivativeUnderlyings = [...new Set(
+        (derivatives || []).map(d => d.underlying).filter(Boolean)
+      )] as string[];
+      
+      for (const underlying of derivativeUnderlyings) {
+        // Try to find existing mapping by various synthetic ISIN formats
+        const syntheticIsin = `TICKER:${underlying.toUpperCase().split(' ')[0]}`;
+        const nameIsin = `NAME:${underlying.toUpperCase()}`;
+        
+        const existingMapping = existingMappings?.find(m => 
+          m.isin === syntheticIsin || 
+          m.isin === nameIsin ||
+          m.isin.startsWith('TICKER:') && underlying.toUpperCase().includes(m.ticker?.toUpperCase() || '')
+        );
+        
+        // Skip if already covered by a stock ISIN (by checking if description contains the underlying)
+        const alreadyCoveredByStock = combined.some(c => 
+          c.description?.toUpperCase().includes(underlying.toUpperCase()) ||
+          underlying.toUpperCase().includes(c.ticker?.toUpperCase() || '')
+        );
+        
+        if (!alreadyCoveredByStock) {
+          combined.push({
+            isin: syntheticIsin,
+            description: underlying,
+            ticker: existingMapping?.ticker || underlying.split(' ')[0],
+            sector: existingMapping?.sector || null,
+            industry: existingMapping?.industry || null,
+            exchange: existingMapping?.exchange || null,
+            hasMapping: !!existingMapping,
+            isDerivativeUnderlying: true,
+          });
+        }
+      }
       
       // Ordina per ticker (se presente) o descrizione
       combined.sort((a, b) => {
@@ -276,13 +323,22 @@ export function SectorMappingManager() {
                       className={`border-border hover:bg-background-tertiary ${!mapping.hasMapping ? 'bg-warning/5' : ''}`}
                     >
                       <TableCell className="font-mono font-medium">
-                        {mapping.ticker || <span className="text-muted-foreground italic">—</span>}
+                        <div className="flex items-center gap-2">
+                          {mapping.ticker || <span className="text-muted-foreground italic">—</span>}
+                          {mapping.isDerivativeUnderlying && (
+                            <Badge variant="outline" className="text-xs px-1 py-0 h-4 bg-purple-500/10 text-purple-500 border-purple-500/30">
+                              Derivato
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm max-w-[250px] truncate" title={mapping.description}>
                         {mapping.description || '-'}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
-                        {mapping.isin}
+                        {mapping.isDerivativeUnderlying ? (
+                          <span className="text-purple-400">{mapping.isin}</span>
+                        ) : mapping.isin}
                       </TableCell>
                       <TableCell>
                         {mapping.sector ? (

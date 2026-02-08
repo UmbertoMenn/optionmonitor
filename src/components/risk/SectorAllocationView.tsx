@@ -250,11 +250,20 @@ export function SectorAllocationView({
       reason: string;
     }
     
-    // Build set of displayed instrument names
+    // Build set of displayed instrument names (include both full name and base name for matching)
     const displayed = new Set<string>();
+    const displayedBaseNames = new Set<string>();
     for (const sector of safeSectorExposure) {
       for (const instr of sector.instruments) {
         displayed.add(instr.name);
+        // Extract base name (before parenthesis) for derivative matching
+        // e.g., "PALANTIR TECHNOLOGIES (PUT 24)" → "PALANTIR TECHNOLOGIES"
+        const baseNameMatch = instr.name.match(/^(.+?)\s*\(/);
+        if (baseNameMatch) {
+          displayedBaseNames.add(baseNameMatch[1].trim().toUpperCase());
+        } else {
+          displayedBaseNames.add(instr.name.toUpperCase());
+        }
       }
     }
     
@@ -301,8 +310,17 @@ export function SectorAllocationView({
         missing.push({ name: np.underlying, category: 'Naked Put', risk: np.riskEUR, reason: reasonDetail });
         continue;
       }
-      if (!displayed.has(np.underlying)) {
-        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => i.name === np.underlying && i.category === 'nakedPuts'));
+      // Check if displayed using flexible matching (base name or name with suffix)
+      const npUpperName = np.underlying.toUpperCase();
+      const isDisplayedNP = displayed.has(np.underlying) || displayedBaseNames.has(npUpperName) ||
+        [...displayed].some(d => d.toUpperCase().startsWith(npUpperName + ' ('));
+      
+      if (!isDisplayedNP) {
+        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => 
+          i.name === np.underlying || 
+          i.name.toUpperCase().startsWith(npUpperName + ' (') ||
+          (i.category === 'nakedPuts' && i.name.toUpperCase().includes(npUpperName))
+        ));
         if (foundInRaw) {
           missing.push({ name: np.underlying, category: 'Naked Put', risk: np.riskEUR, reason: 'Settore filtrato (totalRisk ≤ 0)' });
         } else {
@@ -326,8 +344,17 @@ export function SectorAllocationView({
         missing.push({ name: lc.underlying, category: 'Leap Call', risk: lc.riskEUR, reason: reasonDetail });
         continue;
       }
-      if (!displayed.has(lc.underlying)) {
-        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => i.name === lc.underlying && i.category === 'leapCalls'));
+      // Check if displayed using flexible matching (base name or name with suffix)
+      const lcUpperName = lc.underlying.toUpperCase();
+      const isDisplayedLC = displayed.has(lc.underlying) || displayedBaseNames.has(lcUpperName) ||
+        [...displayed].some(d => d.toUpperCase().startsWith(lcUpperName + ' ('));
+      
+      if (!isDisplayedLC) {
+        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => 
+          i.name === lc.underlying || 
+          i.name.toUpperCase().startsWith(lcUpperName + ' (') ||
+          (i.category === 'leapCalls' && i.name.toUpperCase().includes(lcUpperName))
+        ));
         if (foundInRaw) {
           missing.push({ name: lc.underlying, category: 'Leap Call', risk: lc.riskEUR, reason: 'Settore filtrato (totalRisk ≤ 0)' });
         } else {
@@ -351,10 +378,20 @@ export function SectorAllocationView({
         missing.push({ name: `${strat.strategyName} (${strat.underlying})`, category: 'Strategia', risk: strat.maxLossEUR, reason: reasonDetail });
         continue;
       }
-      // Strategy underlying name may differ slightly
+      // Strategy underlying name may differ slightly - use flexible matching
       const stratName = strat.underlying;
-      if (!displayed.has(stratName)) {
-        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => i.name === stratName && i.category === 'strategies'));
+      const stratUpperName = stratName.toUpperCase();
+      // Check: exact match, base name match, or formatted name with strategy suffix
+      const isDisplayedStrat = displayed.has(stratName) || 
+        displayedBaseNames.has(stratUpperName) ||
+        [...displayed].some(d => d.toUpperCase().startsWith(stratUpperName + ' ('));
+      
+      if (!isDisplayedStrat) {
+        const foundInRaw = sectorExposure.some(s => s.instruments.some(i => 
+          i.name === stratName ||
+          i.name.toUpperCase().startsWith(stratUpperName + ' (') ||
+          (i.category === 'strategies' && i.name.toUpperCase().includes(stratUpperName))
+        ));
         if (foundInRaw) {
           missing.push({ name: `${strat.strategyName} (${stratName})`, category: 'Strategia', risk: strat.maxLossEUR, reason: 'Settore filtrato (totalRisk ≤ 0)' });
         } else {
