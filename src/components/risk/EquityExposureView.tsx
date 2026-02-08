@@ -47,6 +47,9 @@ export function EquityExposureView({
   isLoadingETFData = false,
 }: EquityExposureViewProps) {
   const [includeProtections, setIncludeProtections] = useState(true);
+  const [includeNakedPut, setIncludeNakedPut] = useState(true);
+  const [includeStrategies, setIncludeStrategies] = useState(true);
+  const [includeLeapCall, setIncludeLeapCall] = useState(true);
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   
@@ -69,8 +72,13 @@ export function EquityExposureView({
   
   // Calculate all consolidated holdings (no limit)
   const consolidatedHoldings = useMemo(() => {
-    return calculateConsolidatedTopHoldings(analysis, etfAllocations, { includeProtections });
-  }, [analysis, etfAllocations, includeProtections]);
+    return calculateConsolidatedTopHoldings(analysis, etfAllocations, { 
+      includeProtections,
+      includeNakedPut,
+      includeStrategies,
+      includeLeapCall
+    });
+  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall]);
 
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
@@ -90,11 +98,30 @@ export function EquityExposureView({
     };
   }, [stockDetails]);
 
-  // Dynamic grand total based on toggle
+  // Dynamic grand total based on toggles
   const dynamicGrandTotal = useMemo(() => {
     const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
-    return totalETFRisk + stockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
-  }, [includeProtections, totalETFRisk, totalPureStockRisk, grossPureStockRisk, totalCommodityRisk, totalNakedPutRisk, totalLeapCallRisk, totalStrategyRisk]);
+    return (
+      totalETFRisk + 
+      stockRisk + 
+      totalCommodityRisk + 
+      (includeNakedPut ? totalNakedPutRisk : 0) + 
+      (includeLeapCall ? totalLeapCallRisk : 0) + 
+      (includeStrategies ? totalStrategyRisk : 0)
+    );
+  }, [
+    includeProtections, 
+    includeNakedPut, 
+    includeLeapCall, 
+    includeStrategies,
+    totalETFRisk, 
+    totalPureStockRisk, 
+    grossPureStockRisk, 
+    totalCommodityRisk, 
+    totalNakedPutRisk, 
+    totalLeapCallRisk, 
+    totalStrategyRisk
+  ]);
 
   const getPercentage = (value: number) => dynamicGrandTotal > 0 ? (value / dynamicGrandTotal) * 100 : 0;
   
@@ -191,9 +218,9 @@ export function EquityExposureView({
     },
     { 
       label: 'Rischio Naked PUT', 
-      value: totalNakedPutRisk, 
+      value: includeNakedPut ? totalNakedPutRisk : 0, 
       sortValue: totalNakedPutRisk,
-      percentage: getPercentage(totalNakedPutRisk),
+      percentage: getPercentage(includeNakedPut ? totalNakedPutRisk : 0),
       color: 'bg-red-500',
       icon: TrendingDown,
       description: 'Strike × Contratti × 100',
@@ -202,9 +229,9 @@ export function EquityExposureView({
     },
     { 
       label: 'Rischio Leap Call', 
-      value: totalLeapCallRisk, 
+      value: includeLeapCall ? totalLeapCallRisk : 0, 
       sortValue: totalLeapCallRisk,
-      percentage: getPercentage(totalLeapCallRisk),
+      percentage: getPercentage(includeLeapCall ? totalLeapCallRisk : 0),
       color: 'bg-amber-500',
       icon: DollarSign,
       description: 'Premio pagato (PMC × Contratti × 100)',
@@ -213,9 +240,9 @@ export function EquityExposureView({
     },
     { 
       label: 'Rischio Strategie', 
-      value: totalStrategyRisk, 
+      value: includeStrategies ? totalStrategyRisk : 0, 
       sortValue: totalStrategyRisk,
-      percentage: getPercentage(totalStrategyRisk),
+      percentage: getPercentage(includeStrategies ? totalStrategyRisk : 0),
       color: 'bg-purple-500',
       icon: BarChart3,
       description: 'Max Loss delle strategie',
@@ -254,20 +281,16 @@ export function EquityExposureView({
                       <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs text-sm">
-                      <p>Se toggle "Protezioni" attivo, le azioni singole sono calcolate al netto delle protezioni (Long PUT). Il rischio Strategie è calcolato come il max loss di ogni strategia. Le Leap Call sono calcolate come il valore di mercato (prezzo × contratti × 100).</p>
+                      <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
+                      <ul className="list-disc ml-4 space-y-1">
+                        <li><b>Protezioni</b>: calcola azioni al netto delle Long PUT</li>
+                        <li><b>Naked Put</b>: include rischio Naked PUT (Strike × Ctr × 100)</li>
+                        <li><b>Strategie</b>: include Max Loss delle strategie</li>
+                        <li><b>Leap Call</b>: include valore di mercato Leap Call</li>
+                      </ul>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch 
-                  id="protections-toggle"
-                  checked={includeProtections}
-                  onCheckedChange={setIncludeProtections}
-                />
-                <Label htmlFor="protections-toggle" className="text-sm">
-                  Protezioni
-                </Label>
               </div>
             </div>
             <div className="text-3xl font-bold text-primary">{formatEUR(dynamicGrandTotal)}</div>
@@ -277,6 +300,50 @@ export function EquityExposureView({
                 ({((dynamicGrandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
               </div>
             )}
+            
+            {/* Toggle Row */}
+            <div className="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-border/50">
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="protections-toggle"
+                  checked={includeProtections}
+                  onCheckedChange={setIncludeProtections}
+                />
+                <Label htmlFor="protections-toggle" className="text-sm cursor-pointer">
+                  Protezioni
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="naked-put-toggle"
+                  checked={includeNakedPut}
+                  onCheckedChange={setIncludeNakedPut}
+                />
+                <Label htmlFor="naked-put-toggle" className="text-sm cursor-pointer">
+                  Naked Put
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="strategies-toggle"
+                  checked={includeStrategies}
+                  onCheckedChange={setIncludeStrategies}
+                />
+                <Label htmlFor="strategies-toggle" className="text-sm cursor-pointer">
+                  Strategie
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch 
+                  id="leap-call-toggle"
+                  checked={includeLeapCall}
+                  onCheckedChange={setIncludeLeapCall}
+                />
+                <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">
+                  Leap Call
+                </Label>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
