@@ -1,142 +1,60 @@
 
+
 ## Obiettivo
-Aggiungere un flag "Elimina regola dopo trigger" agli avvisi di prezzo. Quando questo flag è attivo, la regola verrà automaticamente eliminata dopo che l'avviso viene triggerato.
+Aggiungere un tooltip informativo (icona "i") nell'header della pagina Strategie Derivati che spiega:
+- I prezzi dei sottostanti (PS: xxxx) sono aggiornati ogni 5 minuti
+- I prezzi delle opzioni sono statici e caricati dal file Excel
 
 ---
 
-## Modifiche al Database
+## Modifica
 
-### 1. Nuova colonna nella tabella `price_alerts`
+### File: `src/pages/Derivatives.tsx`
 
-```sql
-ALTER TABLE price_alerts 
-ADD COLUMN delete_after_trigger boolean NOT NULL DEFAULT false;
-```
+#### 1. Importare l'icona HelpCircle
+Aggiungere `HelpCircle` all'import da lucide-react (riga 11).
 
----
+#### 2. Aggiungere il tooltip nell'header
+Posizionare l'icona informativa accanto al titolo "Strategie Derivati" (riga 202), con un tooltip di dimensioni maggiorate:
 
-## Modifiche al Frontend
-
-### 2. File: `src/types/alerts.ts`
-
-Aggiungere il campo all'interfaccia `PriceAlert`:
-
-```typescript
-export interface PriceAlert {
-  // ... campi esistenti
-  delete_after_trigger: boolean;  // NUOVO
-}
-```
-
-### 3. File: `src/hooks/usePriceAlerts.ts`
-
-Aggiornare `useCreatePriceAlert` per accettare il nuovo parametro:
-
-```typescript
-mutationFn: async (alert: {
-  ticker: string;
-  direction: 'above' | 'below';
-  target_price: number;
-  cooldown_minutes?: number;
-  delete_after_trigger?: boolean;  // NUOVO
-}) => {
-  // ... insert con delete_after_trigger
-}
-```
-
-### 4. File: `src/components/derivatives/AlertSettingsDialog.tsx`
-
-#### A. Aggiungere stato per il nuovo flag
-```typescript
-const [newPriceDeleteAfterTrigger, setNewPriceDeleteAfterTrigger] = useState(false);
-```
-
-#### B. Aggiungere checkbox nel form "Nuovo avviso di prezzo"
-Sotto il campo "Prezzo target", aggiungere:
 ```tsx
-<div className="flex items-center gap-2 pt-2">
-  <Checkbox
-    id="delete-after-trigger"
-    checked={newPriceDeleteAfterTrigger}
-    onCheckedChange={(checked) => setNewPriceDeleteAfterTrigger(checked === true)}
-  />
-  <Label htmlFor="delete-after-trigger" className="text-sm cursor-pointer">
-    Elimina regola dopo trigger
-  </Label>
+<div className="flex items-center gap-2">
+  <h1 className="text-lg font-bold">Strategie Derivati</h1>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+    </TooltipTrigger>
+    <TooltipContent className="max-w-xs p-3">
+      <div className="space-y-2 text-sm">
+        <p>
+          <strong>Prezzi Sottostanti (PS):</strong> aggiornati automaticamente ogni 5 minuti durante le ore di mercato.
+        </p>
+        <p>
+          <strong>Prezzi Opzioni:</strong> valori statici caricati dal file Excel.
+        </p>
+      </div>
+    </TooltipContent>
+  </Tooltip>
 </div>
 ```
 
-#### C. Passare il flag alla mutation
-```typescript
-await createPriceAlertMutation.mutateAsync({
-  ticker,
-  direction: newPriceDirection,
-  target_price: targetPrice,
-  cooldown_minutes: cooldownMinutes,
-  delete_after_trigger: newPriceDeleteAfterTrigger,  // NUOVO
-});
-```
-
-#### D. Mostrare badge nella lista degli avvisi configurati
-Per ogni avviso con `delete_after_trigger === true`, aggiungere un indicatore visivo:
-```tsx
-{alert.delete_after_trigger && (
-  <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
-    Una tantum
-  </Badge>
-)}
-```
-
 ---
 
-## Modifiche all'Edge Function
+## Dettagli tecnici
 
-### 5. File: `supabase/functions/check-alerts/index.ts`
-
-Nella sezione "PRICE ALERTS" (righe 1259-1293), dopo l'inserimento dell'alert e l'aggiornamento dello stato, aggiungere la logica di eliminazione:
-
-```typescript
-// Dopo aver creato l'alert...
-if (priceAlert.delete_after_trigger) {
-  // Elimina la regola
-  await supabase
-    .from('price_alerts')
-    .delete()
-    .eq('id', priceAlert.id);
-  
-  // Elimina anche lo stato associato
-  await supabase
-    .from('alert_states')
-    .delete()
-    .eq('position_key', positionKey);
-    
-  console.log(`Price alert ${priceAlert.id} deleted after trigger`);
-} else {
-  // Altrimenti aggiorna solo last_triggered_at (comportamento esistente)
-  await supabase
-    .from('price_alerts')
-    .update({ last_triggered_at: new Date().toISOString() })
-    .eq('id', priceAlert.id);
-}
-```
-
----
-
-## Riepilogo modifiche
-
-| Componente | Modifica |
-|------------|----------|
-| Database | Nuova colonna `delete_after_trigger` (boolean, default false) |
-| `src/types/alerts.ts` | Campo `delete_after_trigger` nell'interfaccia `PriceAlert` |
-| `src/hooks/usePriceAlerts.ts` | Supporto per il nuovo parametro nella creazione |
-| `AlertSettingsDialog.tsx` | Checkbox nel form + badge "Una tantum" nella lista |
-| `check-alerts/index.ts` | Logica di eliminazione automatica dopo trigger |
+| Elemento | Valore |
+|----------|--------|
+| Icona | `HelpCircle` (standard uniforme per tooltip informativi) |
+| Dimensione icona | `w-4 h-4` |
+| Larghezza tooltip | `max-w-xs` (~20rem) per maggiore leggibilità |
+| Padding tooltip | `p-3` per più spazio interno |
+| Stile | Testo strutturato con `<strong>` per i titoli |
 
 ---
 
 ## Risultato atteso
 
-1. Nel form "Nuovo avviso di prezzo" compare un checkbox "Elimina regola dopo trigger"
-2. Gli avvisi con questa opzione attiva mostrano un badge "Una tantum"
-3. Quando l'avviso viene triggerato, la regola viene eliminata automaticamente dal database
-4. L'utente non deve più cancellare manualmente gli avvisi "one-shot"
+1. Un'icona "?" appare accanto al titolo "Strategie Derivati"
+2. Al passaggio del mouse, compare un tooltip chiaro e ben formattato
+3. Il tooltip spiega la differenza tra prezzi live (sottostanti) e statici (opzioni)
+
