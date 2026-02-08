@@ -36,4 +36,5 @@ export interface SyntheticDeposit {
 export interface AggregatedHistoricalResult {
   entries: HistoricalDataEntry[];
   syntheticDeposits: SyntheticDeposit[];
+  rawEntries?: HistoricalDataEntry[]; // Dati originali per ricalcolo viewMode
 }
