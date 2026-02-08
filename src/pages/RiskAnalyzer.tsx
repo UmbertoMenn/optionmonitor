@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
+
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -42,7 +42,6 @@ export function RiskAnalyzer() {
   const { summary } = usePortfolio();
   
   const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
-  const toastShownRef = useRef(false);
   
   
   // Use centralized currency exposure hook with granular toggles
@@ -113,20 +112,6 @@ export function RiskAnalyzer() {
     }
   }, [stocksForSectorMapping, viewMode, fetchSectorMappings]);
   
-  // Show toast when AI sector resolution is in progress
-  useEffect(() => {
-    if (resolvingCount > 0 && !toastShownRef.current) {
-      toastShownRef.current = true;
-      toast.loading(`Risoluzione AI settori per ${resolvingCount} strumenti...`, {
-        id: 'sector-resolution',
-        duration: Infinity,
-      });
-    } else if (resolvingCount === 0 && toastShownRef.current) {
-      toast.dismiss('sector-resolution');
-      toast.success('Settori aggiornati', { duration: 2000 });
-      toastShownRef.current = false;
-    }
-  }, [resolvingCount]);
   
   // Calculate sector exposure with dynamic mappings and granular toggles
   const sectorExposure = useMemo(() => {

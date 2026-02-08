@@ -36,6 +36,15 @@ interface UpdateResult {
 // Exchange rate cache to avoid multiple calls per currency
 const exchangeRateCache: Map<string, number> = new Map();
 
+// Helper function to chunk array for batch processing
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
 // Fetch exchange rate from Yahoo Finance (e.g., EURUSD=X)
 async function fetchExchangeRate(pair: string): Promise<number> {
   // Check cache first
@@ -778,243 +787,260 @@ serve(async (req) => {
     
     console.log(`Resolving sectors for ${isins.length} ISINs and ${names.length} names`);
     
-    // =================== PROCESS ISINs ===================
-    for (const isin of isins) {
-      // 1. Check if mapping already exists with sector
-      const { data: existing } = await supabase
-        .from('isin_mappings')
-        .select('ticker, sector, industry')
-        .eq('isin', isin)
-        .single();
+    // =================== PROCESS ISINs (PARALLEL BATCHES) ===================
+    const BATCH_SIZE = 5;
+    const isinBatches = chunkArray(isins, BATCH_SIZE);
+    console.log(`Processing ${isins.length} ISINs in ${isinBatches.length} batches of ${BATCH_SIZE}`);
+    
+    for (let batchIndex = 0; batchIndex < isinBatches.length; batchIndex++) {
+      const batch = isinBatches[batchIndex];
+      console.log(`Processing ISIN batch ${batchIndex + 1}/${isinBatches.length}...`);
       
-      if (existing?.sector) {
-        // Already has sector, skip
-        results.push({ isin, ticker: existing.ticker, sector: existing.sector, source: 'cache' });
-        console.log(`Cache hit for ${isin}: ${existing.sector}`);
-        continue;
-      }
-      
-      // 2. Need to resolve or update
-      let ticker = existing?.ticker || null;
-      const description = descriptions[isin] || '';
-      
-      // 3. If no ticker, resolve ISIN via Yahoo Search
-      if (!ticker) {
-        console.log(`Resolving ticker for ISIN ${isin}...`);
-        const searchResult = await searchYahooByISIN(isin);
+      const batchPromises = batch.map(async (isin) => {
+        // 1. Check if mapping already exists with sector
+        const { data: existing } = await supabase
+          .from('isin_mappings')
+          .select('ticker, sector, industry')
+          .eq('isin', isin)
+          .single();
         
-        if (searchResult) {
-          ticker = searchResult.ticker;
-          console.log(`Yahoo Search resolved ${isin} to ${ticker}`);
-        } else {
-          results.push({ isin, sector: null, source: 'error', error: 'Could not resolve ticker' });
-          console.log(`Failed to resolve ticker for ISIN ${isin}`);
-          continue;
+        if (existing?.sector) {
+          console.log(`Cache hit for ${isin}: ${existing.sector}`);
+          return { isin, ticker: existing.ticker, sector: existing.sector, source: 'cache' };
         }
-      }
-      
-      // 4. Get sector using Yahoo + AI fallback
-      console.log(`Fetching sector for ${ticker} (${description})...`);
-      const sectorInfo = await fetchYahooSectorInfo(ticker, description);
-      
-      // Log AI response for debugging
-      console.log(`Sector result for ${ticker}:`, { 
-        sector: sectorInfo.sector || 'null', 
-        industry: sectorInfo.industry || 'null' 
-      });
-      
-      // 5. Save to database (UPSERT)
-      const upsertData: any = {
-        isin,
-        ticker,
-        source: sectorInfo.sector ? 'ai' : 'unknown',
-        last_verified_at: new Date().toISOString(),
-      };
-      
-      if (sectorInfo.sector) {
-        upsertData.sector = sectorInfo.sector;
-      }
-      if (sectorInfo.industry) {
-        upsertData.industry = sectorInfo.industry;
-      }
-      
-      const { error: upsertError } = await supabase
-        .from('isin_mappings')
-        .upsert(upsertData, { onConflict: 'isin' });
-      
-      if (upsertError) {
-        console.error(`Failed to upsert mapping for ${isin}:`, upsertError);
-        results.push({ isin, ticker, sector: null, source: 'error', error: upsertError.message });
-      } else {
-        results.push({ 
+        
+        // 2. Need to resolve or update
+        let ticker = existing?.ticker || null;
+        const description = descriptions[isin] || '';
+        
+        // 3. If no ticker, resolve ISIN via Yahoo Search
+        if (!ticker) {
+          console.log(`Resolving ticker for ISIN ${isin}...`);
+          const searchResult = await searchYahooByISIN(isin);
+          
+          if (searchResult) {
+            ticker = searchResult.ticker;
+            console.log(`Yahoo Search resolved ${isin} to ${ticker}`);
+          } else {
+            console.log(`Failed to resolve ticker for ISIN ${isin}`);
+            return { isin, sector: null, source: 'error', error: 'Could not resolve ticker' };
+          }
+        }
+        
+        // 4. Get sector using Yahoo + AI fallback
+        console.log(`Fetching sector for ${ticker} (${description})...`);
+        const sectorInfo = await fetchYahooSectorInfo(ticker, description);
+        
+        console.log(`Sector result for ${ticker}:`, { 
+          sector: sectorInfo.sector || 'null', 
+          industry: sectorInfo.industry || 'null' 
+        });
+        
+        // 5. Save to database (UPSERT)
+        const upsertData: any = {
+          isin,
+          ticker,
+          source: sectorInfo.sector ? 'ai' : 'unknown',
+          last_verified_at: new Date().toISOString(),
+        };
+        
+        if (sectorInfo.sector) {
+          upsertData.sector = sectorInfo.sector;
+        }
+        if (sectorInfo.industry) {
+          upsertData.industry = sectorInfo.industry;
+        }
+        
+        const { error: upsertError } = await supabase
+          .from('isin_mappings')
+          .upsert(upsertData, { onConflict: 'isin' });
+        
+        if (upsertError) {
+          console.error(`Failed to upsert mapping for ${isin}:`, upsertError);
+          return { isin, ticker, sector: null, source: 'error', error: upsertError.message };
+        }
+        
+        console.log(`Saved sector for ${isin} (${ticker}): ${sectorInfo.sector || 'unknown'}`);
+        return { 
           isin, 
           ticker, 
           sector: sectorInfo.sector, 
           source: sectorInfo.sector ? 'resolved' : 'unknown' 
-        });
-        console.log(`Saved sector for ${isin} (${ticker}): ${sectorInfo.sector || 'unknown'}`);
-      }
-      
-      // Small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-    
-    // =================== PROCESS DERIVATIVE NAMES ===================
-    // These are underlying names without ISINs (e.g., "IREN LTD", "MARA HOLDINGS")
-    for (const name of names) {
-      console.log(`Processing derivative underlying: ${name}`);
-      
-      // 1. Try to extract/infer ticker from name
-      const upperName = name.toUpperCase();
-      
-      // Common patterns to extract ticker
-      const tickerPatterns = [
-        /^([A-Z]{1,5})(?:\s|$)/, // First word if uppercase
-        /\b([A-Z]{2,5})\s+(?:INC|CORP|LTD|HOLDINGS?|CO|LLC|PLC|AG|SE)\b/i, // Before company suffix
-      ];
-      
-      let inferredTicker: string | null = null;
-      for (const pattern of tickerPatterns) {
-        const match = upperName.match(pattern);
-        if (match && match[1]) {
-          inferredTicker = match[1];
-          break;
-        }
-      }
-      
-      // Special case mappings for known derivatives - EXPANDED
-      const specialMappings: Record<string, string> = {
-        // Original mappings
-        'IREN LTD': 'IREN',
-        'MARA HOLDINGS': 'MARA', 
-        'MARATHON DIGITAL': 'MARA',
-        'RIOT PLATFORMS': 'RIOT',
-        'RIOT BLOCKCHAIN': 'RIOT',
-        'COINBASE': 'COIN',
-        'MICROSTRATEGY': 'MSTR',
-        'ALPHABET': 'GOOGL',
-        'NETEASE': 'NTES',
-        'PALANTIR': 'PLTR',
-        'CONSTELLATION': 'CEG',
-        
-        // NEW - Common names that fail regex
-        'AMAZON': 'AMZN',
-        'AMAZON.COM': 'AMZN',
-        'ORACLE': 'ORCL',
-        'ADVANCED MICRO DEVICES': 'AMD',
-        'AMD': 'AMD',
-        'MICRON': 'MU',
-        'ACCENTURE': 'ACN',
-        'APPLOVIN': 'APP',
-        'WESTERN DIGITAL': 'WDC',
-        'CELESTICA': 'CLS',
-        'REDDIT': 'RDDT',
-        'REDDITI': 'RDDT',
-        'REGULUS': 'RGLS',
-        'SALESFORCE': 'CRM',
-        'JD.COM': 'JD',
-        'JD(JD.COM': 'JD',
-        'NVIDIA': 'NVDA',
-        'BROADCOM': 'AVGO',
-        'QUALCOMM': 'QCOM',
-        'CISCO': 'CSCO',
-        'INTEL': 'INTC',
-        'ADOBE': 'ADBE',
-        'PAYPAL': 'PYPL',
-        'TESLA': 'TSLA',
-        'APPLE': 'AAPL',
-        'APPLE COMPUTER': 'AAPL',
-        'MICROSOFT': 'MSFT',
-        'META': 'META',
-        'META PLATFORMS': 'META',
-        'NETFLIX': 'NFLX',
-        'DISNEY': 'DIS',
-        'VISA': 'V',
-        'MASTERCARD': 'MA',
-        'JPMORGAN': 'JPM',
-        'J.P. MORGAN': 'JPM',
-        'JP MORGAN': 'JPM',
-        'GOLDMAN': 'GS',
-        'OKLO': 'OKLO',
-        'ROCKET LAB': 'RKLB',
-        'ROCKETLAB': 'RKLB',
-        'ASTERA': 'ALAB',
-        'KLA': 'KLAC',
-        'UBER': 'UBER',
-        'UBER TECHNOLOGIES': 'UBER',
-        'UNITEDHEALTH': 'UNH',
-        'UNITED HEALTH': 'UNH',
-        'LULULEMON': 'LULU',
-        'PROGRESSIVE': 'PGR',
-        'COREWEAVE': 'CRWV',
-        'EUROFOREX': 'SKIP', // Currency-related, not a stock
-      };
-      
-      for (const [pattern, ticker] of Object.entries(specialMappings)) {
-        if (upperName.includes(pattern)) {
-          if (ticker === 'SKIP') {
-            console.log(`Skipping non-stock underlying: ${name}`);
-            nameResults.push({ name, sector: null, source: 'skipped' });
-            continue;
-          }
-          inferredTicker = ticker;
-          break;
-        }
-      }
-      
-      // If still no ticker, use AI to infer it
-      if (!inferredTicker) {
-        console.log(`Asking AI to infer ticker from: ${name}`);
-        inferredTicker = await inferTickerWithAI(name);
-      }
-      
-      if (!inferredTicker) {
-        console.log(`Could not infer ticker from name: ${name}`);
-        nameResults.push({ name, sector: null, source: 'error' });
-        continue;
-      }
-      
-      // 2. Check DB for existing mapping first (supports both real and synthetic ISINs)
-      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-      const supabaseClient = createClient(supabaseUrl, supabaseKey);
-      
-      // Try to find by ticker (both real ISIN entries and synthetic TICKER: entries)
-      const { data: existingMappings } = await supabaseClient
-        .from('isin_mappings')
-        .select('sector, industry')
-        .or(`ticker.eq.${inferredTicker.toUpperCase()},isin.eq.TICKER:${inferredTicker.toUpperCase()}`)
-        .not('sector', 'is', null)
-        .limit(1);
-      
-      if (existingMappings && existingMappings.length > 0 && existingMappings[0].sector) {
-        console.log(`Using cached DB sector for ${inferredTicker}: ${existingMappings[0].sector}`);
-        nameResults.push({
-          name,
-          ticker: inferredTicker,
-          sector: existingMappings[0].sector,
-          industry: existingMappings[0].industry,
-          source: 'db_cache',
-        });
-        continue;
-      }
-      
-      // 3. Get sector using AI (fallback)
-      console.log(`Getting sector for ${inferredTicker} (from name: ${name}) via AI...`);
-      const sectorInfo = await fetchSectorWithAI(inferredTicker, name);
-      
-      nameResults.push({
-        name,
-        ticker: inferredTicker,
-        sector: sectorInfo.sector,
-        industry: sectorInfo.industry,
-        source: sectorInfo.sector ? 'ai' : 'unknown',
+        };
       });
       
-      console.log(`Sector for ${name} (${inferredTicker}): ${sectorInfo.sector || 'unknown'}`);
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
       
-      // Small delay
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Short delay between batches to avoid rate limiting
+      if (batchIndex < isinBatches.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    
+    // =================== PROCESS DERIVATIVE NAMES (PARALLEL BATCHES) ===================
+    // These are underlying names without ISINs (e.g., "IREN LTD", "MARA HOLDINGS")
+    
+    // Special case mappings for known derivatives - EXPANDED
+    const specialMappings: Record<string, string> = {
+      // Original mappings
+      'IREN LTD': 'IREN',
+      'MARA HOLDINGS': 'MARA', 
+      'MARATHON DIGITAL': 'MARA',
+      'RIOT PLATFORMS': 'RIOT',
+      'RIOT BLOCKCHAIN': 'RIOT',
+      'COINBASE': 'COIN',
+      'MICROSTRATEGY': 'MSTR',
+      'ALPHABET': 'GOOGL',
+      'NETEASE': 'NTES',
+      'PALANTIR': 'PLTR',
+      'CONSTELLATION': 'CEG',
+      
+      // Common names that fail regex
+      'AMAZON': 'AMZN',
+      'AMAZON.COM': 'AMZN',
+      'ORACLE': 'ORCL',
+      'ADVANCED MICRO DEVICES': 'AMD',
+      'AMD': 'AMD',
+      'MICRON': 'MU',
+      'ACCENTURE': 'ACN',
+      'APPLOVIN': 'APP',
+      'WESTERN DIGITAL': 'WDC',
+      'CELESTICA': 'CLS',
+      'REDDIT': 'RDDT',
+      'REDDITI': 'RDDT',
+      'REGULUS': 'RGLS',
+      'SALESFORCE': 'CRM',
+      'JD.COM': 'JD',
+      'JD(JD.COM': 'JD',
+      'NVIDIA': 'NVDA',
+      'BROADCOM': 'AVGO',
+      'QUALCOMM': 'QCOM',
+      'CISCO': 'CSCO',
+      'INTEL': 'INTC',
+      'ADOBE': 'ADBE',
+      'PAYPAL': 'PYPL',
+      'TESLA': 'TSLA',
+      'APPLE': 'AAPL',
+      'APPLE COMPUTER': 'AAPL',
+      'MICROSOFT': 'MSFT',
+      'META': 'META',
+      'META PLATFORMS': 'META',
+      'NETFLIX': 'NFLX',
+      'DISNEY': 'DIS',
+      'VISA': 'V',
+      'MASTERCARD': 'MA',
+      'JPMORGAN': 'JPM',
+      'J.P. MORGAN': 'JPM',
+      'JP MORGAN': 'JPM',
+      'GOLDMAN': 'GS',
+      'OKLO': 'OKLO',
+      'ROCKET LAB': 'RKLB',
+      'ROCKETLAB': 'RKLB',
+      'ASTERA': 'ALAB',
+      'KLA': 'KLAC',
+      'UBER': 'UBER',
+      'UBER TECHNOLOGIES': 'UBER',
+      'UNITEDHEALTH': 'UNH',
+      'UNITED HEALTH': 'UNH',
+      'LULULEMON': 'LULU',
+      'PROGRESSIVE': 'PGR',
+      'COREWEAVE': 'CRWV',
+      'EUROFOREX': 'SKIP', // Currency-related, not a stock
+    };
+    
+    const nameBatches = chunkArray(names, BATCH_SIZE);
+    console.log(`Processing ${names.length} derivative names in ${nameBatches.length} batches of ${BATCH_SIZE}`);
+    
+    for (let batchIndex = 0; batchIndex < nameBatches.length; batchIndex++) {
+      const batch = nameBatches[batchIndex];
+      console.log(`Processing name batch ${batchIndex + 1}/${nameBatches.length}...`);
+      
+      const batchPromises = batch.map(async (name) => {
+        console.log(`Processing derivative underlying: ${name}`);
+        
+        // 1. Try to extract/infer ticker from name
+        const upperName = name.toUpperCase();
+        
+        // Common patterns to extract ticker
+        const tickerPatterns = [
+          /^([A-Z]{1,5})(?:\s|$)/, // First word if uppercase
+          /\b([A-Z]{2,5})\s+(?:INC|CORP|LTD|HOLDINGS?|CO|LLC|PLC|AG|SE)\b/i, // Before company suffix
+        ];
+        
+        let inferredTicker: string | null = null;
+        for (const pattern of tickerPatterns) {
+          const match = upperName.match(pattern);
+          if (match && match[1]) {
+            inferredTicker = match[1];
+            break;
+          }
+        }
+        
+        // Check special mappings
+        for (const [pattern, ticker] of Object.entries(specialMappings)) {
+          if (upperName.includes(pattern)) {
+            if (ticker === 'SKIP') {
+              console.log(`Skipping non-stock underlying: ${name}`);
+              return { name, sector: null, source: 'skipped' };
+            }
+            inferredTicker = ticker;
+            break;
+          }
+        }
+        
+        // If still no ticker, use AI to infer it
+        if (!inferredTicker) {
+          console.log(`Asking AI to infer ticker from: ${name}`);
+          inferredTicker = await inferTickerWithAI(name);
+        }
+        
+        if (!inferredTicker) {
+          console.log(`Could not infer ticker from name: ${name}`);
+          return { name, sector: null, source: 'error' };
+        }
+        
+        // 2. Check DB for existing mapping first
+        const { data: existingMappings } = await supabase
+          .from('isin_mappings')
+          .select('sector, industry')
+          .or(`ticker.eq.${inferredTicker.toUpperCase()},isin.eq.TICKER:${inferredTicker.toUpperCase()}`)
+          .not('sector', 'is', null)
+          .limit(1);
+        
+        if (existingMappings && existingMappings.length > 0 && existingMappings[0].sector) {
+          console.log(`Using cached DB sector for ${inferredTicker}: ${existingMappings[0].sector}`);
+          return {
+            name,
+            ticker: inferredTicker,
+            sector: existingMappings[0].sector,
+            industry: existingMappings[0].industry,
+            source: 'db_cache',
+          };
+        }
+        
+        // 3. Get sector using AI (fallback)
+        console.log(`Getting sector for ${inferredTicker} (from name: ${name}) via AI...`);
+        const sectorInfo = await fetchSectorWithAI(inferredTicker, name);
+        
+        console.log(`Sector for ${name} (${inferredTicker}): ${sectorInfo.sector || 'unknown'}`);
+        
+        return {
+          name,
+          ticker: inferredTicker,
+          sector: sectorInfo.sector,
+          industry: sectorInfo.industry,
+          source: sectorInfo.sector ? 'ai' : 'unknown',
+        };
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      nameResults.push(...batchResults);
+      
+      // Short delay between batches
+      if (batchIndex < nameBatches.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
     
     const duration = Date.now() - startTime;
