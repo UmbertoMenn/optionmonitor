@@ -1,161 +1,117 @@
 
-# Piano: Correzione Dashboard Nera su Cambio Vista e Uscita Admin Mode
+# Piano: Correzione Errore React "Should have a queue"
 
 ## Problema Identificato
 
-La dashboard diventa nera (crash) in due scenari:
-1. **Cambio vista** (Base → Netting, etc.)
-2. **Uscita dalla admin mode** (clic sulla X)
+L'errore si verifica perche' il `useMemo` per `syntheticDeposits` (righe 217-253 di `useHistoricalData.ts`) tenta di ricalcolare gli apporti sintetici partendo dalle `entries` gia' aggregate, ma queste hanno tutte `portfolio_id: 'AGGREGATED'` dopo l'aggregazione.
 
-### Causa Radice
-
-Il problema è un **anti-pattern React** nel file `Dashboard.tsx` (righe 99-102):
-
-```typescript
-// ❌ ERRORE: setState durante il render!
-if (earliestEntry && !selectedHistoricalDate && historicalData.length > 0) {
-  setSelectedHistoricalDate(earliestEntry.snapshot_date);
-}
+### Flusso Attuale (Errato)
+```text
+1. Query fetcha dati raw dal DB
+2. aggregateHistoricalWithInterpolation():
+   - Raggruppa per portfolio_id ✓
+   - Calcola syntheticDeposits con viewMode='base' ✓
+   - Aggrega entries (portfolio_id diventa 'AGGREGATED') ✓
+3. useMemo per syntheticDeposits:
+   - Prova a raggruppare entries per portfolio_id
+   - Ma tutte hanno portfolio_id='AGGREGATED' → un solo gruppo
+   - Risultato errato
 ```
 
-Questo codice:
-1. Viene eseguito **durante la fase di render** (non in un `useEffect`)
-2. Chiama `setSelectedHistoricalDate()` che triggera un nuovo render
-3. Quando cambia `viewMode`, la queryKey di `useHistoricalData` cambia → i dati vengono refetchati → `earliestEntry` cambia → nuovo setState → loop infinito → crash
-
-### Problema Secondario
-
-Quando si esce dalla admin mode, il `portfolio?.id` cambia improvvisamente e può causare:
-- Query con ID invalido temporaneo
-- Dati undefined che causano errori nei componenti figli
+### Problema Root Cause
+Il `useMemo` non puo' ricalcolare i synthetic deposits perche' le entries restituite dalla query hanno gia' perso l'informazione del portfolio originale.
 
 ---
 
 ## Soluzione
 
-### 1. Spostare la logica di inizializzazione in un `useEffect`
+### Strategia A: Salvare i Dati Raw nella Query
 
-Convertire il codice problematico in un `useEffect` che si attiva solo una volta al caricamento iniziale dei dati:
-
-```typescript
-// ✅ CORRETTO: useEffect per inizializzazione una tantum
-const [hasInitializedDate, setHasInitializedDate] = useState(false);
-
-useEffect(() => {
-  // Inizializza solo UNA VOLTA quando i dati sono disponibili
-  if (!hasInitializedDate && earliestEntry && historicalData.length > 0) {
-    setSelectedHistoricalDate(earliestEntry.snapshot_date);
-    setHasInitializedDate(true);
-  }
-}, [earliestEntry, historicalData.length, hasInitializedDate]);
-
-// Reset quando cambia portfolio
-useEffect(() => {
-  setHasInitializedDate(false);
-  setSelectedHistoricalDate(null);
-}, [portfolio?.id]);
-```
-
-### 2. Rimuovere `viewMode` dalla queryKey di `useHistoricalData`
-
-La `viewMode` non dovrebbe essere nella queryKey perché i dati storici sono gli stessi - solo il calcolo degli apporti sintetici cambia. Questo evita refetch inutili:
+Modificare la struttura di ritorno della query per includere anche i dati raw (non aggregati) da usare per ricalcolare i syntheticDeposits.
 
 ```typescript
-// Prima:
-queryKey: ['historical-data', portfolioId, viewMode],
-
-// Dopo:
-queryKey: ['historical-data', portfolioId],
-```
-
-E calcolare i `syntheticDeposits` **a livello di componente** usando `useMemo`, non dentro la query.
-
-### 3. Aggiungere gestione errori con ErrorBoundary wrapper
-
-Verificare che il componente `Dashboard` sia protetto da un ErrorBoundary per evitare schermate nere in caso di errori non gestiti.
-
----
-
-## Modifiche ai File
-
-### File 1: `src/components/dashboard/Dashboard.tsx`
-
-**Rimuovere** le righe 99-102 (setState durante render):
-```typescript
-// RIMUOVERE QUESTO:
-if (earliestEntry && !selectedHistoricalDate && historicalData.length > 0) {
-  setSelectedHistoricalDate(earliestEntry.snapshot_date);
+interface AggregatedHistoricalResult {
+  entries: HistoricalDataEntry[];
+  syntheticDeposits: SyntheticDeposit[];
+  rawEntries?: HistoricalDataEntry[]; // NEW: dati originali per ricalcolo
 }
 ```
 
-**Aggiungere** `useEffect` per inizializzazione:
+### Modifiche a useHistoricalData.ts
+
+**1. Modificare la funzione di aggregazione per restituire anche i dati raw:**
+
 ```typescript
-// Flag per evitare re-inizializzazioni
-const [hasInitializedDate, setHasInitializedDate] = useState(false);
-
-// Inizializza selectedHistoricalDate solo una volta al primo caricamento
-useEffect(() => {
-  if (!hasInitializedDate && earliestEntry && historicalData.length > 0) {
-    setSelectedHistoricalDate(earliestEntry.snapshot_date);
-    setHasInitializedDate(true);
-  }
-}, [earliestEntry, historicalData.length, hasInitializedDate]);
-
-// Reset quando cambia portfolio
-useEffect(() => {
-  setHasInitializedDate(false);
-  setSelectedHistoricalDate(null);
-  setPlDeposits(0);
-  setAverageBalance(0);
-  setIsManualAverageBalance(false);
-}, [portfolio?.id]);
+function aggregateHistoricalWithInterpolation(
+  data: HistoricalDataEntry[],
+  viewMode: ViewMode = 'base'
+): AggregatedHistoricalResult {
+  // ... codice esistente ...
+  
+  return {
+    entries: aggregated.sort(...),
+    syntheticDeposits,
+    rawEntries: data, // Salva i dati originali
+  };
+}
 ```
 
-### File 2: `src/hooks/useHistoricalData.ts`
-
-**Rimuovere `viewMode` dalla queryKey** per evitare refetch inutili:
+**2. Modificare la queryFn per passare rawEntries:**
 
 ```typescript
-// Prima:
-queryKey: ['historical-data', portfolioId, viewMode],
-
-// Dopo:
-queryKey: ['historical-data', portfolioId],
+// Vista aggregata
+if (isAggregated && isAdmin) {
+  const { data, error } = await supabase
+    .from('historical_data')
+    .select('*')
+    .order('snapshot_date', { ascending: false });
+  
+  if (error) throw error;
+  const result = aggregateHistoricalWithInterpolation(
+    data as unknown as HistoricalDataEntry[], 
+    'base'
+  );
+  // rawEntries gia' incluso nel risultato
+  return result;
+}
 ```
 
-**Calcolare `syntheticDeposits` separatamente** usando `useMemo` basato su `viewMode`:
+**3. Modificare il useMemo per usare rawEntries:**
 
 ```typescript
-// I dati grezzi dalla query
-const rawResult = historicalDataQuery.data || { entries: [], syntheticDeposits: [] };
-
-// Ricalcola syntheticDeposits quando cambia viewMode
-const syntheticDeposits = useMemo(() => {
-  if (!isAggregated || rawResult.entries.length === 0) {
-    return rawResult.syntheticDeposits;
+const syntheticDeposits = useMemo((): SyntheticDeposit[] => {
+  // Usa rawEntries se disponibile (vista aggregata)
+  const rawEntries = historicalDataQuery.data?.rawEntries;
+  
+  // Per non-aggregated o senza raw data
+  if (!isAggregated || !rawEntries || rawEntries.length === 0) {
+    return [];
   }
   
-  // Raggruppa per portfolio e calcola il primo valore con viewMode corrente
+  // Raggruppa per portfolio_id originale
   const byPortfolio = new Map<string, HistoricalDataEntry[]>();
-  // ... logica per ricalcolare con viewMode attuale
+  rawEntries.forEach(entry => {
+    const list = byPortfolio.get(entry.portfolio_id) || [];
+    list.push(entry);
+    byPortfolio.set(entry.portfolio_id, list);
+  });
   
-  return recalculatedDeposits;
-}, [rawResult, viewMode, isAggregated]);
+  // ... resto del calcolo con viewMode attuale
+}, [historicalDataQuery.data?.rawEntries, viewMode, isAggregated]);
 ```
 
-### File 3: `src/App.tsx`
+---
 
-Verificare che `Dashboard` sia wrappato in un ErrorBoundary. Se non lo e', aggiungere:
+## Modifiche ai Tipi
 
-```tsx
-import { ErrorBoundary } from '@/components/ErrorBoundary';
+**File: `src/types/historicalData.ts`**
 
-// In AppRoutes:
-<Route path="/" element={
-  <ErrorBoundary title="Errore nel caricamento della dashboard">
-    <Dashboard />
-  </ErrorBoundary>
-} />
+```typescript
+export interface AggregatedHistoricalResult {
+  entries: HistoricalDataEntry[];
+  syntheticDeposits: SyntheticDeposit[];
+  rawEntries?: HistoricalDataEntry[]; // Dati originali per ricalcolo viewMode
+}
 ```
 
 ---
@@ -164,14 +120,31 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 | File | Modifica |
 |------|----------|
-| `src/components/dashboard/Dashboard.tsx` | Spostare inizializzazione `selectedHistoricalDate` in `useEffect`, aggiungere reset su cambio portfolio |
-| `src/hooks/useHistoricalData.ts` | Rimuovere `viewMode` dalla queryKey, calcolare syntheticDeposits in `useMemo` separato |
-| `src/App.tsx` | Aggiungere ErrorBoundary wrapper per Dashboard |
+| `src/types/historicalData.ts` | Aggiungere campo `rawEntries` opzionale a `AggregatedHistoricalResult` |
+| `src/hooks/useHistoricalData.ts` | 1. Salvare dati raw nel risultato aggregazione 2. Usare `rawEntries` nel useMemo per syntheticDeposits |
+
+---
+
+## Flusso Corretto Dopo le Modifiche
+
+```text
+1. Query fetcha dati raw dal DB
+2. aggregateHistoricalWithInterpolation():
+   - Raggruppa per portfolio_id ✓
+   - Calcola syntheticDeposits iniziali (viewMode='base') ✓
+   - Aggrega entries (portfolio_id='AGGREGATED') ✓
+   - SALVA rawEntries (dati originali con portfolio_id veri) ✓
+3. useMemo per syntheticDeposits:
+   - USA rawEntries (non entries aggregate) ✓
+   - Raggruppa per portfolio_id originale ✓
+   - Ricalcola con viewMode attuale ✓
+```
 
 ---
 
 ## Comportamento Atteso
 
-1. **Cambio vista**: La dashboard rimane visibile, i dati storici non vengono refetchati, solo i syntheticDeposits vengono ricalcolati
-2. **Uscita admin mode**: Transizione fluida al portfolio personale, reset dello stato senza crash
-3. **Errori imprevisti**: ErrorBoundary mostra un messaggio invece di schermo nero
+1. **Nessun errore React**: Il useMemo opera su dati stabili e corretti
+2. **Cambio viewMode funziona**: I syntheticDeposits vengono ricalcolati correttamente
+3. **Uscita admin mode**: Transizione pulita senza crash
+4. **Calcoli corretti**: P/L e giacenza media usano i valori giusti per la viewMode selezionata
