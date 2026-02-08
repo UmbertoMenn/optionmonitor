@@ -1,172 +1,132 @@
 
-# Piano: Copia Portfolio Globale per Admin
+# Piano: Correzione Valori Nulli al Cambio Portfolio
 
-## Situazione Attuale
+## Problema Identificato
 
-L'admin può copiare **solo i propri portafogli** su altri utenti. Le limitazioni sono:
+Quando si entra in un portfolio (cambio selezione o uscita da admin mode), la giacenza media e il patrimonio iniziale vengono mostrati come "—" fino al refresh della pagina.
 
-1. **Edge Function** (`admin-copy-portfolio`): verifica che il portafoglio sorgente appartenga all'admin (riga 71-84)
-2. **UI** (`PortfolioManager`): mostra il pulsante "Copia" solo nella sezione "I Miei Portafogli"
-3. **CopyPortfolioDialog**: la lista destinatari esclude l'admin stesso
+### Causa Radice
 
-## Obiettivo
+Il problema è nel flusso di inizializzazione in `Dashboard.tsx`:
 
-Permettere all'admin di:
-- Copiare **qualsiasi portafoglio** (anche di altri utenti)
-- Incollarlo su **qualsiasi utente** (incluso se stesso)
+```typescript
+// Riga 92-98: Reset quando cambia portfolio
+useEffect(() => {
+  setHasInitializedDate(false);        // Reset flag
+  setSelectedHistoricalDate(null);     // Reset data → valori nulli
+  setPlDeposits(0);
+  setAverageBalance(0);
+  setIsManualAverageBalance(false);
+}, [portfolio?.id]);
+
+// Riga 84-89: Inizializza dopo il caricamento dati
+useEffect(() => {
+  if (!hasInitializedDate && earliestEntry && historicalData.length > 0) {
+    setSelectedHistoricalDate(earliestEntry.snapshot_date);
+    setHasInitializedDate(true);
+  }
+}, [earliestEntry, historicalData.length, hasInitializedDate]);
+```
+
+**Sequenza problematica:**
+1. `portfolio?.id` cambia → primo effect si attiva → `selectedHistoricalDate = null`
+2. React fa render → StatsCards vede `selectedHistoricalEntry = null` → mostra "—"
+3. Query `useHistoricalData` termina (o era già in cache)
+4. `earliestEntry` diventa disponibile → secondo effect si attiva → imposta `selectedHistoricalDate`
+5. React fa secondo render → ora i valori sono visibili
+
+Il problema è che tra il passo 1 e il passo 4, c'è almeno un render dove i dati appaiono nulli. Se la query è già in cache, questo flash è brevissimo, ma comunque visibile.
 
 ---
 
-## Modifiche Richieste
+## Soluzione
 
-### 1. Edge Function: Rimuovere Restrizione Proprietà
+### Strategia: Inizializzazione Immediata Senza Reset Distruttivo
 
-**File:** `supabase/functions/admin-copy-portfolio/index.ts`
+Invece di resettare tutto a `null` e poi ri-inizializzare, modifichiamo la logica per:
+1. **NON resettare `selectedHistoricalDate` a null** quando cambia portfolio
+2. Lasciare che l'effect di inizializzazione aggiorni il valore quando i nuovi dati arrivano
+3. In `StatsCards`, se `selectedHistoricalDate` non corrisponde a nessun entry valido, fallback silenzioso
 
-Modificare la verifica del portafoglio sorgente per permettere la copia di qualsiasi portafoglio:
+### Modifiche Necessarie
 
+**File: `src/components/dashboard/Dashboard.tsx`**
+
+1. **Rimuovere il reset di `selectedHistoricalDate` a `null`** dal primo effect:
 ```typescript
-// PRIMA (riga 71-84):
-const { data: sourcePortfolio, error: sourceError } = await supabaseAdmin
-  .from('portfolios')
-  .select('*')
-  .eq('id', sourcePortfolioId)
-  .eq('user_id', user.id)  // ❌ Limita ai propri portafogli
-  .single();
+// PRIMA
+useEffect(() => {
+  setHasInitializedDate(false);
+  setSelectedHistoricalDate(null);  // ← Causa il problema
+  setPlDeposits(0);
+  setAverageBalance(0);
+  setIsManualAverageBalance(false);
+}, [portfolio?.id]);
 
-// DOPO:
-const { data: sourcePortfolio, error: sourceError } = await supabaseAdmin
-  .from('portfolios')
-  .select('*')
-  .eq('id', sourcePortfolioId)
-  // Rimosso: .eq('user_id', user.id) - l'admin può copiare qualsiasi portfolio
-  .single();
+// DOPO - Solo reset flag e valori calcolati, non la data selezionata
+useEffect(() => {
+  setHasInitializedDate(false);
+  // Non resettare selectedHistoricalDate qui!
+  setPlDeposits(0);
+  setAverageBalance(0);
+  setIsManualAverageBalance(false);
+}, [portfolio?.id]);
 ```
 
-Aggiornare anche il messaggio di errore:
+2. **Modificare l'effect di inizializzazione** per aggiornare `selectedHistoricalDate` quando i dati cambiano (anche se non è la prima volta):
 ```typescript
-// PRIMA:
-{ error: 'Source portfolio not found or does not belong to you' }
-
-// DOPO:
-{ error: 'Source portfolio not found' }
-```
-
----
-
-### 2. UI: Aggiungere Pulsante Copia ai Portafogli Utenti
-
-**File:** `src/components/admin/PortfolioManager.tsx`
-
-Aggiungere un pulsante "Copia" anche nella tabella dei portafogli degli altri utenti:
-
-```typescript
-// Nella sezione "Portafogli Utenti" (riga 178-199)
-{userGroup.portfolios.map((portfolio) => (
-  <TableRow key={portfolio.id} ...>
-    {/* ... celle esistenti ... */}
-    <TableCell className="text-right">
-      <div className="flex items-center justify-end gap-2">
-        {/* Nuovo pulsante Copia */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation(); // Evita che si apra il portfolio
-            handleCopyClick(portfolio);
-          }}
-        >
-          <Copy className="w-4 h-4 mr-2" />
-          Copia
-        </Button>
-        {/* Pulsante Apri esistente */}
-        <Button variant="ghost" size="sm">
-          <ExternalLink className="w-4 h-4 mr-2" />
-          Apri
-        </Button>
-      </div>
-    </TableCell>
-  </TableRow>
-))}
-```
-
----
-
-### 3. CopyPortfolioDialog: Includere Tutti gli Utenti
-
-**File:** `src/components/admin/PortfolioManager.tsx`
-
-Modificare la lista utenti per il dialog di copia includendo anche l'admin:
-
-```typescript
-// PRIMA (riga 48-53):
-const allUsersForCopy = otherUsers.map(u => ({
-  userId: u.userId,
-  email: u.email,
-  name: u.name,
-}));
-
-// DOPO:
-const allUsersForCopy = useMemo(() => {
-  // Includi tutti gli utenti, compreso l'admin
-  const users = Object.values(portfoliosByUser).map(u => ({
-    userId: u.userId,
-    email: u.email,
-    name: u.name,
-  }));
-  
-  // Se l'admin non ha portafogli, potrebbe non essere nella lista
-  // Aggiungiamolo manualmente se necessario
-  if (user && !users.find(u => u.userId === user.id)) {
-    // L'admin potrebbe non avere profilo visibile, aggiungiamolo
-    // Nota: questo caso è raro perché il profilo viene creato al signup
+// DOPO - Inizializza quando i dati del nuovo portfolio sono pronti
+useEffect(() => {
+  // Se i dati storici sono vuoti, reset a null
+  if (historicalData.length === 0) {
+    setSelectedHistoricalDate(null);
+    return;
   }
   
-  return users;
-}, [portfoliosByUser, user]);
+  // Se la data selezionata non esiste più nei nuovi dati, o non è mai stata inizializzata
+  const currentDateExists = selectedHistoricalDate && 
+    historicalData.some(h => h.snapshot_date === selectedHistoricalDate);
+  
+  if (!currentDateExists && earliestEntry) {
+    setSelectedHistoricalDate(earliestEntry.snapshot_date);
+  }
+}, [historicalData, earliestEntry, selectedHistoricalDate]);
 ```
 
-Nota: con questa modifica, l'admin può copiare un portafoglio di un altro utente su se stesso, o il proprio su se stesso (creando un duplicato).
+Questa logica:
+- **Se non ci sono dati storici**: `selectedHistoricalDate` diventa `null` (corretto)
+- **Se la data selezionata non esiste nei nuovi dati**: aggiorna alla data più vecchia del nuovo portfolio
+- **Se la data selezionata esiste ancora**: la mantiene (utile se si passa tra portfolii con date in comune)
+
+3. **Rimuovere il flag `hasInitializedDate`** che non è più necessario con questa logica.
 
 ---
 
-### 4. Hook: Esporre portfoliosByUser
-
-**File:** `src/hooks/useAdminPortfolios.ts`
-
-Il hook già espone `portfoliosByUser`, quindi non serve modifica.
-
----
-
-## Riepilogo File da Modificare
+## Riepilogo Modifiche
 
 | File | Modifica |
 |------|----------|
-| `supabase/functions/admin-copy-portfolio/index.ts` | Rimuovere `.eq('user_id', user.id)` dalla query del portafoglio sorgente |
-| `src/components/admin/PortfolioManager.tsx` | 1. Aggiungere pulsante "Copia" ai portafogli degli altri utenti; 2. Includere tutti gli utenti nella lista destinatari |
+| `src/components/dashboard/Dashboard.tsx` | Rimuovere reset di `selectedHistoricalDate` nel primo effect; riscrivere effect di inizializzazione per validare data contro dati correnti |
+
+---
+
+## Flusso Corretto Dopo le Modifiche
+
+```
+1. portfolio?.id cambia
+2. Effect di reset: azzera plDeposits, averageBalance (ma NON selectedHistoricalDate)
+3. Render: selectedHistoricalDate ancora valido dal portfolio precedente
+4. Query useHistoricalData: restituisce dati del nuovo portfolio
+5. Effect di validazione: la data non esiste nei nuovi dati → aggiorna a earliestEntry
+6. Render: dati corretti visualizzati
+```
+
+Se la query è in cache, i passi 3-6 avvengono nello stesso ciclo di render, eliminando il flash.
 
 ---
 
 ## Comportamento Atteso
 
-### Prima
-- Admin vede "Copia su Utente" solo per i propri portafogli
-- La lista destinatari esclude l'admin
-
-### Dopo
-- Admin vede "Copia" su **tutti** i portafogli (propri e altrui)
-- La lista destinatari include **tutti** gli utenti (incluso l'admin stesso)
-- L'admin può:
-  - Copiare il proprio portfolio su un altro utente ✓
-  - Copiare il proprio portfolio su se stesso (duplicato) ✓
-  - Copiare il portfolio di un utente su un altro utente ✓
-  - Copiare il portfolio di un utente su se stesso ✓
-
----
-
-## Considerazioni di Sicurezza
-
-La funzionalità rimane sicura perché:
-1. **Solo admin**: la Edge Function verifica il ruolo admin prima di procedere
-2. **Utente valido**: la Edge Function verifica che l'utente destinatario esista
-3. **Audit trail**: ogni copia crea nuovi record con timestamp aggiornati
+- **Cambio portfolio**: giacenza media e patrimonio iniziale visibili immediatamente (o con minimo ritardo se query in corso)
+- **Uscita admin mode**: transizione fluida senza valori nulli temporanei
+- **Portfolio senza dati storici**: mostra correttamente "—" perché non ci sono entry
