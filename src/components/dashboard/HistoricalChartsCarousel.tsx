@@ -8,6 +8,13 @@ import {
   CarouselNext,
   type CarouselApi,
 } from '@/components/ui/carousel';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
@@ -20,6 +27,7 @@ import { cn } from '@/lib/utils';
 interface HistoricalChartsCarouselProps {
   historicalData: HistoricalDataEntry[];
   viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
   currentValue: number;
   currentDate: string | null;
   deposits: DepositEntry[];
@@ -50,6 +58,7 @@ const slides = [
 export function HistoricalChartsCarousel({
   historicalData,
   viewMode,
+  onViewModeChange,
   currentValue,
   currentDate,
   deposits,
@@ -98,7 +107,7 @@ export function HistoricalChartsCarousel({
       {/* Card Carousel - Evoluzione Rendimento e Patrimonio */}
       <Card className="lg:col-span-2 border-border bg-card">
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between">
             <CardTitle className="text-lg flex items-center gap-2">
               {(() => {
                 const IconComponent = slides[current].icon;
@@ -106,9 +115,17 @@ export function HistoricalChartsCarousel({
               })()}
               {slides[current].title}
             </CardTitle>
-            <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-              {VIEW_MODE_LABELS[viewMode]}
-            </span>
+            <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
+              <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="base">Base</SelectItem>
+                <SelectItem value="netting_ex_cc">Netting ex. CC</SelectItem>
+                <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
+                <SelectItem value="netting_total">Netting Totale</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <p className="text-xs text-muted-foreground">{slides[current].description}</p>
         </CardHeader>
@@ -168,9 +185,17 @@ export function HistoricalChartsCarousel({
               <BarChart3 className="w-5 h-5" />
               Rendimento per Anno
             </CardTitle>
-            <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-              {VIEW_MODE_LABELS[viewMode]}
-            </span>
+            <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
+              <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="base">Base</SelectItem>
+                <SelectItem value="netting_ex_cc">Netting ex. CC</SelectItem>
+                <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
+                <SelectItem value="netting_total">Netting Totale</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <p className="text-xs text-muted-foreground">Rendimento % annuo</p>
         </CardHeader>
