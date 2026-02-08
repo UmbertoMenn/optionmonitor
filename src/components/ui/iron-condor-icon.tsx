@@ -20,17 +20,17 @@ export const IronCondorIcon = React.forwardRef<SVGSVGElement, IronCondorIconProp
         className={className}
         {...props}
       >
-        {/* Iron Condor payoff diagram - correct shape with flat wings */}
-        {/* Left flat wing (max loss zone) */}
-        <path d="M0 18 L5 18" />
+        {/* Iron Condor payoff diagram - correct shape with extended flat wings */}
+        {/* Left flat wing (max loss zone) - extended */}
+        <path d="M0 18 L7 18" />
         {/* Left diagonal (up to plateau) */}
-        <path d="M5 18 L8 6" />
+        <path d="M7 18 L9 6" />
         {/* Upper plateau (max profit zone) */}
-        <path d="M8 6 L16 6" />
+        <path d="M9 6 L15 6" />
         {/* Right diagonal (down from plateau) */}
-        <path d="M16 6 L19 18" />
-        {/* Right flat wing (max loss zone) */}
-        <path d="M19 18 L24 18" />
+        <path d="M15 6 L17 18" />
+        {/* Right flat wing (max loss zone) - extended */}
+        <path d="M17 18 L24 18" />
       </svg>
     );
   }
