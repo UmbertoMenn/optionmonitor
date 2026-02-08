@@ -1,219 +1,197 @@
 
+# Piano: Fix Toggle + Tooltip per Currency Exposure e Sector Allocation
 
-# Piano: Layout Side-by-Side per Currency Exposure e Sector Allocation
+## Problema 1: Toggle Non Funzionanti
 
-## Obiettivo
+### Causa Radice
 
-Applicare lo stesso layout di Equity Exposure (toggle impilati verticalmente a destra, separati da bordo) a:
+I toggle granulari (`includeProtections`, `includeNakedPut`, `includeStrategies`, `includeLeapCall`) sono:
+- ✅ Gestiti nello state di `RiskAnalyzer.tsx`
+- ✅ Passati ai componenti UI (`CurrencyExposureView`, `SectorAllocationView`)
+- ❌ **NON** passati alle funzioni di calcolo
 
-1. **Currency Exposure** - Toggle: Bond, Protezioni, Naked Put, Strategie, Leap Call
-2. **Sector Allocation** - Toggle: Naked Put, Strategie, Leap Call (+ mantenere info box esclusioni)
-
----
-
-## Layout di Riferimento (Equity Exposure - linee 272-349)
-
-```tsx
-<div className="flex justify-between gap-4">
-  {/* Left column: title, value, description */}
-  <div className="flex-1">
-    {/* Icona + Titolo + Tooltip */}
-    {/* Valore totale */}
-    {/* Descrizione */}
-  </div>
-  
-  {/* Right column: toggles stacked vertically */}
-  <div className="flex flex-col gap-2 border-l border-border/50 pl-4">
-    {/* Toggle 1 */}
-    {/* Toggle 2 */}
-    {/* ... */}
-  </div>
-</div>
-```
-
----
-
-## Modifica 1: Currency Exposure
-
-**File**: `src/components/risk/CurrencyExposureView.tsx`
-
-### Props da aggiungere all'interfaccia (linee 19-29)
-
+Le funzioni `calculateCurrencyExposure` e `calculateSectorExposure` accettano solo:
 ```typescript
-interface CurrencyExposureViewProps {
-  // ... esistenti ...
-  includeProtections: boolean;
-  onIncludeProtectionsChange: (value: boolean) => void;
-  includeNakedPut: boolean;
-  onIncludeNakedPutChange: (value: boolean) => void;
-  includeStrategies: boolean;
-  onIncludeStrategiesChange: (value: boolean) => void;
-  includeLeapCall: boolean;
-  onIncludeLeapCallChange: (value: boolean) => void;
+// currencyExposure.ts
+interface CurrencyExposureOptions {
+  includeDerivatives?: boolean;
+  includeBonds?: boolean;
+}
+
+// sectorExposure.ts
+interface SectorExposureOptions {
+  includeDerivatives?: boolean;
+  sectorMappings?: Record<string, SectorMapping>;
 }
 ```
 
-### Ristrutturare CardContent (linee 220-296)
-
-**Prima**: Toggle inline con il titolo (`flex items-center justify-between`)
-
-**Dopo**:
-```tsx
-<CardContent className="pt-6">
-  <div className="flex justify-between gap-4">
-    {/* Left column: title, value, description */}
-    <div className="flex-1">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="p-1.5 rounded bg-primary/20">
-          <Coins className="w-4 h-4 text-primary" />
-        </div>
-        <span className="text-sm font-medium text-primary">Esposizione Valutaria Totale</span>
-        <TooltipProvider>...</TooltipProvider>
-      </div>
-      <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
-      {/* Non-EUR totale */}
-      {/* Info ETF analizzati */}
-      {/* Warning boxes (derivati/bond esclusi) */}
-    </div>
-    
-    {/* Right column: toggles stacked vertically */}
-    <div className="flex flex-col gap-2 border-l border-border/50 pl-4">
-      <div className="flex items-center gap-2">
-        <Switch id="bonds-toggle" checked={includeBonds} onCheckedChange={onIncludeBondsChange} />
-        <Label htmlFor="bonds-toggle" className="text-sm cursor-pointer">Bond</Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Switch id="protections-toggle" checked={includeProtections} onCheckedChange={onIncludeProtectionsChange} />
-        <Label htmlFor="protections-toggle" className="text-sm cursor-pointer">Protezioni</Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Switch id="naked-put-toggle" checked={includeNakedPut} onCheckedChange={onIncludeNakedPutChange} />
-        <Label htmlFor="naked-put-toggle" className="text-sm cursor-pointer">Naked Put</Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Switch id="strategies-toggle" checked={includeStrategies} onCheckedChange={onIncludeStrategiesChange} />
-        <Label htmlFor="strategies-toggle" className="text-sm cursor-pointer">Strategie</Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Switch id="leap-call-toggle" checked={includeLeapCall} onCheckedChange={onIncludeLeapCallChange} />
-        <Label htmlFor="leap-call-toggle" className="text-sm cursor-pointer">Leap Call</Label>
-      </div>
-    </div>
-  </div>
-</CardContent>
-```
-
 ---
 
-## Modifica 2: Sector Allocation
+## Modifiche Tecniche
 
-**File**: `src/components/risk/SectorAllocationView.tsx`
+### 1. `src/lib/currencyExposure.ts` (linee 85-230)
 
-### Props da aggiungere all'interfaccia (linee 26-38)
-
+**Aggiornare interfaccia opzioni** (linee 85-88):
 ```typescript
-interface SectorAllocationViewProps {
-  // ... esistenti (rimuovere includeDerivatives/onIncludeDerivativesChange singoli) ...
-  includeNakedPut: boolean;
-  onIncludeNakedPutChange: (value: boolean) => void;
-  includeStrategies: boolean;
-  onIncludeStrategiesChange: (value: boolean) => void;
-  includeLeapCall: boolean;
-  onIncludeLeapCallChange: (value: boolean) => void;
+export interface CurrencyExposureOptions {
+  includeBonds?: boolean;        // default: true
+  includeProtections?: boolean;  // default: true
+  includeNakedPut?: boolean;     // default: true
+  includeStrategies?: boolean;   // default: true
+  includeLeapCall?: boolean;     // default: true
 }
 ```
 
-### Ristrutturare CardContent (linee 222-298)
+**Aggiornare logica in `calculateCurrencyExposure`**:
+- Linee 122-139: Protezioni → condizionare con `includeProtections` (attualmente usa `includeDerivatives`)
+- Linee 180-195: Naked PUT → condizionare con `includeNakedPut`
+- Linee 197-212: Leap CALL → condizionare con `includeLeapCall`
+- Linee 214-229: Strategie → condizionare con `includeStrategies`
 
-**Dopo**:
-```tsx
-<CardContent className="pt-6">
-  <div className="flex justify-between gap-4">
-    {/* Left column: title, value, description */}
-    <div className="flex-1">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="p-1.5 rounded bg-primary/20">
-          <Building2 className="w-4 h-4 text-primary" />
-        </div>
-        <span className="text-sm font-medium text-primary">Esposizione Settoriale Totale</span>
-        <TooltipProvider>...</TooltipProvider>
-      </div>
-      <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
-      {/* Settore principale */}
-      {/* Info settori identificati / ETF / AI resolving */}
-      
-      {/* INFO BOX - MANTENUTO */}
-      <div className="flex items-center gap-2 mt-3 p-2 rounded-md bg-blue-500/10 border border-blue-500/30">
-        <Info className="w-4 h-4 text-blue-500 flex-shrink-0" />
-        <span className="text-xs text-blue-600 dark:text-blue-400">
-          Commodities, Bond e Protezioni (Long Put) escluse dall'analisi settoriale
-        </span>
-      </div>
-    </div>
-    
-    {/* Right column: toggles stacked vertically (NO Protezioni) */}
-    <div className="flex flex-col gap-2 border-l border-border/50 pl-4">
-      <div className="flex items-center gap-2">
-        <Switch id="naked-put-sector-toggle" checked={includeNakedPut} onCheckedChange={onIncludeNakedPutChange} />
-        <Label htmlFor="naked-put-sector-toggle" className="text-sm cursor-pointer">Naked Put</Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Switch id="strategies-sector-toggle" checked={includeStrategies} onCheckedChange={onIncludeStrategiesChange} />
-        <Label htmlFor="strategies-sector-toggle" className="text-sm cursor-pointer">Strategie</Label>
-      </div>
-      <div className="flex items-center gap-2">
-        <Switch id="leap-call-sector-toggle" checked={includeLeapCall} onCheckedChange={onIncludeLeapCallChange} />
-        <Label htmlFor="leap-call-sector-toggle" className="text-sm cursor-pointer">Leap Call</Label>
-      </div>
-    </div>
-  </div>
-</CardContent>
+---
+
+### 2. `src/lib/sectorExposure.ts` (linee 313-490)
+
+**Aggiornare interfaccia opzioni** (linee 313-316):
+```typescript
+export interface SectorExposureOptions {
+  includeNakedPut?: boolean;     // default: true
+  includeStrategies?: boolean;   // default: true
+  includeLeapCall?: boolean;     // default: true
+  sectorMappings?: Record<string, SectorMapping>;
+}
+```
+
+**Aggiornare logica in `calculateSectorExposure`** (linee 436+):
+- Il blocco `if (includeDerivatives)` deve essere sostituito con controlli granulari:
+  - Naked PUT → `if (includeNakedPut)`
+  - Leap CALL → `if (includeLeapCall)`
+  - Strategie → `if (includeStrategies)`
+
+---
+
+### 3. `src/hooks/useCurrencyExposure.ts` (linee 19-37)
+
+**Aggiornare interfaccia opzioni**:
+```typescript
+export interface UseCurrencyExposureOptions {
+  includeBonds?: boolean;
+  includeProtections?: boolean;
+  includeNakedPut?: boolean;
+  includeStrategies?: boolean;
+  includeLeapCall?: boolean;
+}
+```
+
+**Passare nuovi flag a `calculateCurrencyExposure`** (linea 35-36):
+```typescript
+const baseCurrencyExposure = useMemo(() => 
+  calculateCurrencyExposure(analysis, { 
+    includeBonds, 
+    includeProtections, 
+    includeNakedPut, 
+    includeStrategies, 
+    includeLeapCall 
+  }), 
+  [analysis, includeBonds, includeProtections, includeNakedPut, includeStrategies, includeLeapCall]
+);
 ```
 
 ---
 
-## Modifica 3: Aggiornare i componenti parent
+### 4. `src/pages/RiskAnalyzer.tsx` (linee 45-52 e 122-124)
 
-Bisognerà aggiornare anche i file che usano questi componenti per passare i nuovi props (state + handlers per i toggle aggiuntivi).
+**Passare toggle granulari a `useCurrencyExposure`** (linea 45-52):
+```typescript
+const {
+  exposures: currencyExposure,
+  ...
+} = useCurrencyExposure({ 
+  includeBonds, 
+  includeProtections, 
+  includeNakedPut, 
+  includeStrategies, 
+  includeLeapCall 
+});
+```
 
-**File coinvolti**:
-- `src/pages/RiskAnalyzer.tsx` (o il parent che usa CurrencyExposureView e SectorAllocationView)
+**Passare toggle granulari a `calculateSectorExposure`** (linea 122-124):
+```typescript
+const sectorExposure = useMemo(() => {
+  return calculateSectorExposure(analysis, allocations, { 
+    includeNakedPut, 
+    includeStrategies, 
+    includeLeapCall, 
+    sectorMappings 
+  });
+}, [analysis, allocations, includeNakedPut, includeStrategies, includeLeapCall, sectorMappings]);
+```
 
 ---
 
-## Riepilogo Modifiche
+## Problema 2: Tooltip da Aggiornare
+
+### Tooltip Attuale (Equity Exposure - Riferimento)
+```tsx
+<TooltipContent className="max-w-xs text-sm">
+  <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
+  <ul className="list-disc ml-4 space-y-1">
+    <li><b>Protezioni</b>: calcola azioni al netto delle Long PUT</li>
+    <li><b>Naked Put</b>: include rischio Naked PUT (Strike × Ctr × 100)</li>
+    <li><b>Strategie</b>: include Max Loss delle strategie</li>
+    <li><b>Leap Call</b>: include valore di mercato Leap Call</li>
+  </ul>
+</TooltipContent>
+```
+
+### 5. `src/components/risk/CurrencyExposureView.tsx` (linee 194-209)
+
+**Aggiornare tooltip** (linea ~204):
+```tsx
+<TooltipContent side="bottom" className="max-w-xs text-sm">
+  <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
+  <ul className="list-disc ml-4 space-y-1">
+    <li><b>Bond</b>: include obbligazioni nell'esposizione</li>
+    <li><b>Protezioni</b>: include Long PUT (valorizzate a mercato)</li>
+    <li><b>Naked Put</b>: include rischio Naked PUT</li>
+    <li><b>Strategie</b>: include Max Loss delle strategie</li>
+    <li><b>Leap Call</b>: include valore di mercato Leap Call</li>
+  </ul>
+  <p className="mt-2 text-muted-foreground">Le azioni sono sempre valorizzate al lordo delle protezioni.</p>
+</TooltipContent>
+```
+
+### 6. `src/components/risk/SectorAllocationView.tsx` (linee 244-248)
+
+**Aggiornare tooltip** (linea ~244):
+```tsx
+<TooltipContent side="bottom" className="max-w-xs text-sm">
+  <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
+  <ul className="list-disc ml-4 space-y-1">
+    <li><b>Naked Put</b>: include rischio Naked PUT per settore</li>
+    <li><b>Strategie</b>: include Max Loss delle strategie per settore</li>
+    <li><b>Leap Call</b>: include valore di mercato Leap Call per settore</li>
+  </ul>
+  <p className="mt-2 text-muted-foreground">Commodities, Bond e Protezioni (Long PUT) sono sempre escluse dall'analisi settoriale.</p>
+</TooltipContent>
+```
+
+---
+
+## Riepilogo File da Modificare
 
 | File | Modifiche |
 |------|-----------|
-| `src/components/risk/CurrencyExposureView.tsx` | Layout side-by-side, 5 toggle: Bond, Protezioni, Naked Put, Strategie, Leap Call |
-| `src/components/risk/SectorAllocationView.tsx` | Layout side-by-side, 3 toggle: Naked Put, Strategie, Leap Call + info box |
-| Parent component (RiskAnalyzer o simile) | Nuovi state per i toggle aggiuntivi |
+| `src/lib/currencyExposure.ts` | Interfaccia opzioni granulari + logica condizionale per ogni categoria |
+| `src/lib/sectorExposure.ts` | Interfaccia opzioni granulari + logica condizionale per naked put, leap call, strategie |
+| `src/hooks/useCurrencyExposure.ts` | Interfaccia + passaggio toggle a `calculateCurrencyExposure` |
+| `src/pages/RiskAnalyzer.tsx` | Passaggio toggle granulari a hook e funzione di calcolo |
+| `src/components/risk/CurrencyExposureView.tsx` | Tooltip aggiornato con spiegazione toggle |
+| `src/components/risk/SectorAllocationView.tsx` | Tooltip aggiornato con spiegazione toggle |
 
 ---
 
 ## Risultato Atteso
 
-**Currency Exposure**:
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│ 💰 Esposizione Valutaria Totale  ℹ️             │  [✓] Bond              │
-│                                                 │  [✓] Protezioni        │
-│ 972.999 €                                       │  [✓] Naked Put         │
-│ Non-EUR totale: 596.412 €                       │  [✓] Strategie         │
-│ Rischio aggregato per valuta ✓ 8 ETF analizzati │  [✓] Leap Call         │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-**Sector Allocation**:
-```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│ 🏢 Esposizione Settoriale Totale  ℹ️            │  [✓] Naked Put         │
-│                                                 │  [✓] Strategie         │
-│ 554.748 €                                       │  [✓] Leap Call         │
-│ Settore principale: Technology (65.2%)          │                        │
-│ 13 settori identificati ✓ 8 ETF analizzati      │                        │
-│                                                 │                        │
-│ ℹ️ Commodities, Bond e Protezioni escluse...    │                        │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
+1. **Toggle funzionanti**: Ogni toggle aggiornerà immediatamente i dati visualizzati (totali, grafico, accordion dettagli) nella rispettiva vista
+2. **Tooltip informativi**: L'utente potrà capire il funzionamento dei toggle passando il mouse sull'icona `ℹ️` accanto al titolo
