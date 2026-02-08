@@ -710,6 +710,9 @@ export function isSameHolding(name1: string, name2: string): boolean {
 
 export interface ConsolidatedTopHoldingsOptions {
   includeProtections: boolean;
+  includeNakedPut?: boolean;
+  includeStrategies?: boolean;
+  includeLeapCall?: boolean;
 }
 
 // Extended interface to include source details for breakdown
@@ -915,13 +918,22 @@ export function calculateConsolidatedTopHoldings(
   // Combine both maps
   const allHoldings = [...holdingsByKey.values(), ...holdingsByExactName.values()];
   
-  // Calculate total exposure based on toggle
+  // Calculate total exposure based on toggles
+  const { 
+    includeNakedPut = true, 
+    includeStrategies = true, 
+    includeLeapCall = true 
+  } = options;
+  
   for (const holding of allHoldings) {
     const stockPart = options.includeProtections 
       ? holding.stockRiskWithProtection 
       : holding.stockRisk;
     
-    holding.totalExposure = stockPart + holding.nakedPutRisk + holding.leapCallRisk + holding.strategyRisk;
+    holding.totalExposure = stockPart + 
+      (includeNakedPut ? holding.nakedPutRisk : 0) + 
+      (includeLeapCall ? holding.leapCallRisk : 0) + 
+      (includeStrategies ? holding.strategyRisk : 0);
     
     // Sort sources by exposure
     holding.sources.sort((a, b) => b.exposure - a.exposure);
