@@ -20,19 +20,19 @@ export const IronCondorIcon = React.forwardRef<SVGSVGElement, IronCondorIconProp
         className={className}
         {...props}
       >
-        {/* Iron Condor payoff diagram - stylized trapezoid shape */}
+        {/* Iron Condor payoff diagram - stylized trapezoid shape (enlarged) */}
         {/* Left wing (descending) */}
-        <path d="M2 18 L6 14" />
+        <path d="M1 21 L5 14" />
         {/* Left slope to plateau */}
-        <path d="M6 14 L8 10" />
+        <path d="M5 14 L7 6" />
         {/* Upper plateau (profit zone) */}
-        <path d="M8 10 L16 10" />
+        <path d="M7 6 L17 6" />
         {/* Right slope from plateau */}
-        <path d="M16 10 L18 14" />
+        <path d="M17 6 L19 14" />
         {/* Right wing (descending) */}
-        <path d="M18 14 L22 18" />
+        <path d="M19 14 L23 21" />
         {/* Zero line (break-even reference) */}
-        <path d="M4 14 L20 14" strokeOpacity="0.3" strokeDasharray="2 2" />
+        <path d="M3 14 L21 14" strokeOpacity="0.3" strokeDasharray="2 2" />
       </svg>
     );
   }
