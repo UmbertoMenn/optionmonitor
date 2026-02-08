@@ -1,175 +1,142 @@
 
-# Piano: Funzionalità "Pulisci Dati Portfolio"
+# Piano: Correzione Bug Grafico Evoluzione Rendimento
 
-## Obiettivo
-Permettere all'utente di svuotare tutti i dati visibili del portfolio corrente (posizioni, grafici, statistiche) mantenendo il portfolio stesso e i dati storici.
+## Problema Identificato
 
----
+Dopo l'inserimento di uno snapshot storico con data **precedente** all'ultimo caricato, il grafico mostra date e valori errati sull'asse X.
 
-## Analisi Dati Collegati al Portfolio
+**Causa principale**: Il formato data `'MMM yy'` (es. "gen 26") è troppo generico e crea confusione quando:
+- Ci sono più snapshot nello stesso mese
+- Le date sono vicine temporalmente
 
-Le seguenti tabelle hanno `portfolio_id` come foreign key:
+**Dati attuali nel database** (ordinati correttamente):
+```
+2024-12-31 → dic 24
+2025-07-01 → lug 25
+2025-12-31 → dic 25
+2026-01-30 → gen 26
+2026-02-07 → feb 26
+```
 
-| Tabella | Descrizione | CASCADE? | Azione Proposta |
-|---------|-------------|----------|-----------------|
-| `positions` | Posizioni correnti (azioni, bond, ETF, derivati) | SI | **ELIMINARE** |
-| `derivative_overrides` | Override manuali strategie derivati | Ha FK a positions | **ELIMINARE** (prima di positions) |
-| `strategy_cache` | Cache strategie per avvisi | SI | **ELIMINARE** |
-| `covered_call_premiums` | Premi covered call calcolati | SI | **ELIMINARE** |
-| `historical_data` | Snapshot storici (grafico evoluzione) | SI | **PRESERVARE** (opzionale) |
-| `deposits` | Versamenti e prelievi | SI | **PRESERVARE** (opzionale) |
-| `alert_states` | Stati avvisi (safe/alerted) | SI | **ELIMINARE** (reset) |
-| `alerts` | Cronologia avvisi generati | SI | **ELIMINARE** |
-
----
-
-## Problematiche Identificate
-
-### 1. Ordine di Cancellazione (Foreign Key)
-`derivative_overrides` ha colonne FK che puntano a `positions`:
-- `position_id`, `sold_call_id`, `sold_put_id`, `bought_call_id`, `bought_put_id`, `linked_stock_id`
-
-**Soluzione**: Eliminare `derivative_overrides` **PRIMA** di `positions`.
-
-### 2. Dati Storici e Versamenti
-Questi dati sono inseriti manualmente dall'utente e hanno valore storico. Eliminarli potrebbe causare perdita di informazioni preziose.
-
-**Soluzione**: Offrire due opzioni:
-- **Pulizia Rapida**: Elimina solo posizioni e cache (dati che vengono ricreati con upload)
-- **Reset Completo**: Elimina tutto inclusi dati storici e versamenti
-
-### 3. Stato UI dopo Pulizia
-Dopo la pulizia, la UI mostrera valori a zero o vuoti. Bisogna gestire correttamente:
-- Invalidazione cache React Query
-- Azzeramento valori nel record `portfolios` (`total_value`, `cash_value`, `snapshot_date`)
-
-### 4. Azione Irreversibile
-L'utente deve essere chiaramente avvertito che l'operazione non puo essere annullata.
+Il formato attuale non distingue adeguatamente tra snapshot diversi dello stesso mese o di mesi adiacenti.
 
 ---
 
-## Implementazione
+## Soluzioni Proposte
 
-### 1. Nuovo Hook: `useClearPortfolio`
+### 1. Formato Data Più Preciso
 
-Creare `src/hooks/useClearPortfolio.ts` con:
+Cambiare il formato da `'MMM yy'` a `"dd MMM ''yy"` per includere il giorno:
+
+| Prima | Dopo |
+|-------|------|
+| gen 26 | 30 gen '26 |
+| feb 26 | 07 feb '26 |
+| dic 24 | 31 dic '24 |
+
+### 2. Configurazione Asse X Esplicita
+
+Aggiungere parametri a Recharts per garantire visualizzazione corretta:
 
 ```typescript
-type ClearMode = 'quick' | 'full';
-
-interface ClearResult {
-  positionsDeleted: number;
-  overridesDeleted: number;
-  // ...
-}
-
-function useClearPortfolio() {
-  const clearPortfolioData = async (portfolioId: string, mode: ClearMode) => {
-    // 1. Elimina derivative_overrides (ha FK a positions)
-    await supabase.from('derivative_overrides').delete().eq('portfolio_id', portfolioId);
-    
-    // 2. Elimina positions
-    await supabase.from('positions').delete().eq('portfolio_id', portfolioId);
-    
-    // 3. Elimina cache e stati
-    await supabase.from('strategy_cache').delete().eq('portfolio_id', portfolioId);
-    await supabase.from('covered_call_premiums').delete().eq('portfolio_id', portfolioId);
-    await supabase.from('alert_states').delete().eq('portfolio_id', portfolioId);
-    await supabase.from('alerts').delete().eq('portfolio_id', portfolioId);
-    
-    // 4. Se mode === 'full', elimina anche storici
-    if (mode === 'full') {
-      await supabase.from('historical_data').delete().eq('portfolio_id', portfolioId);
-      await supabase.from('deposits').delete().eq('portfolio_id', portfolioId);
-    }
-    
-    // 5. Azzera valori nel portfolio
-    await supabase.from('portfolios').update({
-      total_value: 0,
-      cash_value: 0,
-      snapshot_date: null,
-    }).eq('id', portfolioId);
-    
-    // 6. Invalida tutte le query
-    queryClient.invalidateQueries();
-  };
-  
-  return { clearPortfolioData, isClearing };
-}
+<XAxis
+  dataKey="formattedDate"
+  interval={0}        // Mostra TUTTI i tick senza saltarne
+  type="category"     // Tratta le date come categorie discrete
+  tick={{ ... }}
+/>
 ```
 
-### 2. Componente Dialog di Conferma
+### 3. Gestione Dinamica dell'Intervallo
 
-Creare `src/components/dashboard/ClearDataDialog.tsx`:
+Per evitare sovrapposizione con molti punti dati, calcolare l'intervallo dinamicamente:
 
-```text
-+-----------------------------------------------+
-|  ⚠️  Pulisci Dati Portfolio                   |
-+-----------------------------------------------+
-|                                               |
-|  Stai per eliminare i dati del portfolio      |
-|  "{Portfolio Principale}".                    |
-|                                               |
-|  Scegli cosa eliminare:                       |
-|                                               |
-|  ○ Pulizia Rapida                             |
-|    Elimina posizioni, strategie e avvisi.     |
-|    Mantiene dati storici e versamenti.        |
-|                                               |
-|  ○ Reset Completo                             |
-|    Elimina TUTTO inclusi dati storici         |
-|    e versamenti. Azione irreversibile!        |
-|                                               |
-+-----------------------------------------------+
-|                    [Annulla]  [Pulisci]       |
-+-----------------------------------------------+
+```typescript
+// Se più di 8 punti, ruota etichette o mostra alternati
+const tickInterval = chartData.length > 8 ? Math.floor(chartData.length / 8) : 0;
 ```
 
-### 3. Posizionamento UI
+---
 
-Aggiungere un pulsante "Pulisci Dati" nella sezione "Gestione Dati" della Dashboard, accanto a FileUploader:
+## Modifiche Tecniche
 
-```text
-┌─ Gestione Dati ───────────────────────────────┐
-│  [📊 Dati Storici]  [💰 Versamenti]           │
-│                                               │
-│  ┌─ Carica Portfolio ─────────────────────┐   │
-│  │  📤 Trascina il file Excel qui...      │   │
-│  └────────────────────────────────────────┘   │
-│                                               │
-│  [🗑️ Pulisci Dati Portfolio]                  │  ← NUOVO
-└───────────────────────────────────────────────┘
+### File: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+
+**Linea 368** - Cambio formato data:
+```typescript
+// PRIMA
+formattedDate: format(parseISO(entry.snapshot_date), 'MMM yy', { locale: it }),
+
+// DOPO  
+formattedDate: format(parseISO(entry.snapshot_date), "dd MMM ''yy", { locale: it }),
 ```
 
-### 4. Modifiche ai File
+**Linea 394** - Stessa modifica per il punto corrente
+
+**Linee 443-448** - Configurazione XAxis:
+```typescript
+<XAxis
+  dataKey="formattedDate"
+  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+  tickLine={false}
+  axisLine={{ stroke: 'hsl(var(--border))' }}
+  interval={0}
+  type="category"
+/>
+```
+
+### File: `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`
+
+**Linea 84** - Cambio formato data:
+```typescript
+formattedDate: format(parseISO(entry.snapshot_date), "dd MMM ''yy", { locale: it }),
+```
+
+**Linea 94** - Stessa modifica per il punto corrente
+
+**Linee 127-131** - Configurazione XAxis:
+```typescript
+<XAxis
+  dataKey="formattedDate"
+  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+  tickLine={false}
+  axisLine={{ stroke: 'hsl(var(--border))' }}
+  interval={0}
+  type="category"
+/>
+```
+
+---
+
+## Comportamento Atteso
+
+### Asse X Prima della Correzione:
+```
+dic 24 | lug 25 | dic 25 | gen 26 | feb 26
+                           ↑        ↑
+                     Confusione visiva
+```
+
+### Asse X Dopo la Correzione:
+```
+31 dic '24 | 01 lug '25 | 31 dic '25 | 30 gen '26 | 07 feb '26
+                                        ↑            ↑
+                              Chiaramente distinti
+```
+
+---
+
+## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `src/hooks/useClearPortfolio.ts` | Nuovo hook per gestire la logica di pulizia |
-| `src/components/dashboard/ClearDataDialog.tsx` | Nuovo dialog con scelta modalita |
-| `src/components/dashboard/Dashboard.tsx` | Aggiungere pulsante e stato dialog |
+| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Formato data + XAxis props |
+| `src/components/dashboard/charts/PortfolioEvolutionChart.tsx` | Formato data + XAxis props |
 
 ---
 
-## Riepilogo Dati Eliminati per Modalita
+## Considerazioni Aggiuntive
 
-| Dato | Pulizia Rapida | Reset Completo |
-|------|:--------------:|:--------------:|
-| Posizioni | ✅ | ✅ |
-| Override derivati | ✅ | ✅ |
-| Cache strategie | ✅ | ✅ |
-| Premi covered call | ✅ | ✅ |
-| Stati avvisi | ✅ | ✅ |
-| Cronologia avvisi | ✅ | ✅ |
-| Dati storici | ❌ | ✅ |
-| Versamenti/Prelievi | ❌ | ✅ |
-| Metadati portfolio | Reset | Reset |
-
----
-
-## Considerazioni UX
-
-1. **Pulsante disabilitato** se non ci sono dati da pulire (positions.length === 0)
-2. **Loading state** durante l'operazione
-3. **Toast di conferma** con riepilogo elementi eliminati
-4. **Colore destructive** per il pulsante e l'azione nel dialog
+1. **Font size ridotto**: Da 11px a 10px per accomodare il formato più lungo
+2. **Gestione overflow**: Se le etichette si sovrappongono con molti punti, si può aggiungere `angle={-45}` per ruotarle
+3. **Consistenza**: Entrambi i grafici useranno lo stesso formato per coerenza visiva
