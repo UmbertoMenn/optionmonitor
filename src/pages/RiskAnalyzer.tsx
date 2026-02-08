@@ -25,12 +25,12 @@ import { calculateSectorExposure } from '@/lib/sectorExposure';
 export function RiskAnalyzer() {
   const { signOut, isAdmin } = useAuth();
   const [viewMode, setViewMode] = useState<RiskViewMode>('equity');
-  // Currency Exposure toggles
+  // Currency Exposure toggles - default: only Bond active
   const [currencyIncludeBonds, setCurrencyIncludeBonds] = useState(true);
-  const [currencyIncludeProtections, setCurrencyIncludeProtections] = useState(true);
-  const [currencyIncludeNakedPut, setCurrencyIncludeNakedPut] = useState(true);
-  const [currencyIncludeStrategies, setCurrencyIncludeStrategies] = useState(true);
-  const [currencyIncludeLeapCall, setCurrencyIncludeLeapCall] = useState(true);
+  const [currencyIncludeProtections, setCurrencyIncludeProtections] = useState(false);
+  const [currencyIncludeNakedPut, setCurrencyIncludeNakedPut] = useState(false);
+  const [currencyIncludeStrategies, setCurrencyIncludeStrategies] = useState(false);
+  const [currencyIncludeLeapCall, setCurrencyIncludeLeapCall] = useState(false);
   
   // Sector Allocation toggles
   const [sectorIncludeNakedPut, setSectorIncludeNakedPut] = useState(true);
