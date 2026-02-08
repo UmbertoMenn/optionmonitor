@@ -68,17 +68,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Verify source portfolio belongs to the admin
+    // Verify source portfolio exists (admin can copy any portfolio)
     const { data: sourcePortfolio, error: sourceError } = await supabaseAdmin
       .from('portfolios')
       .select('*')
       .eq('id', sourcePortfolioId)
-      .eq('user_id', user.id)
       .single();
 
     if (sourceError || !sourcePortfolio) {
       return new Response(
-        JSON.stringify({ error: 'Source portfolio not found or does not belong to you' }),
+        JSON.stringify({ error: 'Source portfolio not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
