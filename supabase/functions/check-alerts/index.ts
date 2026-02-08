@@ -357,10 +357,12 @@ serve(async (req) => {
             const soldCallStrike = strategy.sold_call_strike || 0;
             if (soldCallStrike <= 0) continue;
             
+            // Calculate ITM state FIRST
+            const isITM = underlyingPrice > soldCallStrike;
+            
             // ITM Alert
             const itmConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_COVERED_CALL_ITM, ticker);
             if (itmConfig.enabled) {
-              const isITM = underlyingPrice > soldCallStrike;
               const positionKey = `cc_itm_${strategy.strategy_key}`;
               const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_COVERED_CALL_ITM}`;
               const currentState = statesMap.get(stateKey);
@@ -401,9 +403,9 @@ serve(async (req) => {
               }
             }
             
-            // Distance Alert
+            // Distance Alert - SUPPRESSED if already ITM
             const distConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_COVERED_CALL, ticker);
-            if (distConfig.enabled) {
+            if (distConfig.enabled && !isITM) {
               const distancePct = calcCallDistance(underlyingPrice, soldCallStrike);
               const isInDanger = distancePct < distConfig.threshold_pct;
               const positionKey = `cc_dist_${strategy.strategy_key}`;
@@ -444,6 +446,16 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
+            } else if (isITM) {
+              // Reset distance alert state to 'safe' when ITM (state transition)
+              const distPositionKey = `cc_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_COVERED_CALL}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
+              }
             }
           }
           
@@ -452,10 +464,12 @@ serve(async (req) => {
             const soldPutStrike = strategy.sold_put_strike || 0;
             if (soldPutStrike <= 0) continue;
             
+            // Calculate ITM state FIRST
+            const isITM = underlyingPrice < soldPutStrike;
+            
             // ITM Alert
             const itmConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_NAKED_PUT_ITM, ticker);
             if (itmConfig.enabled) {
-              const isITM = underlyingPrice < soldPutStrike;
               const positionKey = `np_itm_${strategy.strategy_key}`;
               const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_NAKED_PUT_ITM}`;
               const currentState = statesMap.get(stateKey);
@@ -496,9 +510,9 @@ serve(async (req) => {
               }
             }
             
-            // Distance Alert
+            // Distance Alert - SUPPRESSED if already ITM
             const distConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_NAKED_PUT, ticker);
-            if (distConfig.enabled) {
+            if (distConfig.enabled && !isITM) {
               const distancePct = calcPutDistance(underlyingPrice, soldPutStrike);
               const isInDanger = distancePct < distConfig.threshold_pct;
               const positionKey = `np_dist_${strategy.strategy_key}`;
@@ -539,6 +553,16 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
+            } else if (isITM) {
+              // Reset distance alert state to 'safe' when ITM (state transition)
+              const distPositionKey = `np_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_NAKED_PUT}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
+              }
             }
           }
           
@@ -548,17 +572,21 @@ serve(async (req) => {
             const soldCallStrike = strategy.sold_call_strike || 0;
             if (soldPutStrike <= 0 || soldCallStrike <= 0) continue;
             
+            // Calculate OOR state FIRST - distinguishing by side
+            const isOOR_Put = underlyingPrice < soldPutStrike;
+            const isOOR_Call = underlyingPrice > soldCallStrike;
+            const isOOR = isOOR_Put || isOOR_Call;
+            
             // OOR Alert
             const oorConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_DD_IC_OOR, ticker);
             if (oorConfig.enabled) {
-              const isOOR = underlyingPrice < soldPutStrike || underlyingPrice > soldCallStrike;
               const positionKey = `ic_oor_${strategy.strategy_key}`;
               const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_DD_IC_OOR}`;
               const currentState = statesMap.get(stateKey);
               
               if (isOOR && (!currentState || currentState.current_state === 'safe')) {
                 if (cooldownPassed(currentState?.last_alerted_at || null, oorConfig.cooldown_minutes)) {
-                  const side = underlyingPrice < soldPutStrike ? 'PUT' : 'CALL';
+                  const side = isOOR_Put ? 'PUT' : 'CALL';
                   const message = `La strategia è OOR (fuori dal range venduto)`;
                   
                   await supabase.from('alerts').insert({
@@ -593,9 +621,9 @@ serve(async (req) => {
               }
             }
             
-            // Distance alerts for IC PUT
+            // Distance alerts for IC PUT - SUPPRESSED if already OOR on PUT side
             const putDistConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT, ticker);
-            if (putDistConfig.enabled) {
+            if (putDistConfig.enabled && !isOOR_Put) {
               const distancePct = calcPutDistance(underlyingPrice, soldPutStrike);
               const isInDanger = distancePct < putDistConfig.threshold_pct;
               const positionKey = `ic_put_dist_${strategy.strategy_key}`;
@@ -636,11 +664,21 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
+            } else if (isOOR_Put) {
+              // Reset PUT distance alert state to 'safe' when OOR on PUT side
+              const distPositionKey = `ic_put_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
+              }
             }
             
-            // Distance alerts for IC CALL
+            // Distance alerts for IC CALL - SUPPRESSED if already OOR on CALL side
             const callDistConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL, ticker);
-            if (callDistConfig.enabled) {
+            if (callDistConfig.enabled && !isOOR_Call) {
               const distancePct = calcCallDistance(underlyingPrice, soldCallStrike);
               const isInDanger = distancePct < callDistConfig.threshold_pct;
               const positionKey = `ic_call_dist_${strategy.strategy_key}`;
@@ -681,6 +719,16 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
+            } else if (isOOR_Call) {
+              // Reset CALL distance alert state to 'safe' when OOR on CALL side
+              const distPositionKey = `ic_call_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
+              }
             }
           }
           
@@ -690,17 +738,21 @@ serve(async (req) => {
             const soldCallStrike = strategy.sold_call_strike || 0;
             if (soldPutStrike <= 0 || soldCallStrike <= 0) continue;
             
+            // Calculate OOR state FIRST - distinguishing by side
+            const isOOR_Put = underlyingPrice < soldPutStrike;
+            const isOOR_Call = underlyingPrice > soldCallStrike;
+            const isOOR = isOOR_Put || isOOR_Call;
+            
             // OOR Alert
             const oorConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_DD_IC_OOR, ticker);
             if (oorConfig.enabled) {
-              const isOOR = underlyingPrice < soldPutStrike || underlyingPrice > soldCallStrike;
               const positionKey = `dd_oor_${strategy.strategy_key}`;
               const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_DD_IC_OOR}`;
               const currentState = statesMap.get(stateKey);
               
               if (isOOR && (!currentState || currentState.current_state === 'safe')) {
                 if (cooldownPassed(currentState?.last_alerted_at || null, oorConfig.cooldown_minutes)) {
-                  const side = underlyingPrice < soldPutStrike ? 'PUT' : 'CALL';
+                  const side = isOOR_Put ? 'PUT' : 'CALL';
                   const message = `La strategia è OOR (fuori dal range venduto)`;
                   
                   await supabase.from('alerts').insert({
@@ -735,9 +787,9 @@ serve(async (req) => {
               }
             }
             
-            // Distance alerts for DD PUT
+            // Distance alerts for DD PUT - SUPPRESSED if already OOR on PUT side
             const putDistConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_PUT, ticker);
-            if (putDistConfig.enabled) {
+            if (putDistConfig.enabled && !isOOR_Put) {
               const distancePct = calcPutDistance(underlyingPrice, soldPutStrike);
               const isInDanger = distancePct < putDistConfig.threshold_pct;
               const positionKey = `dd_put_dist_${strategy.strategy_key}`;
@@ -778,11 +830,21 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
+            } else if (isOOR_Put) {
+              // Reset PUT distance alert state to 'safe' when OOR on PUT side
+              const distPositionKey = `dd_put_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_PUT}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
+              }
             }
             
-            // Distance alerts for DD CALL
+            // Distance alerts for DD CALL - SUPPRESSED if already OOR on CALL side
             const callDistConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_CALL, ticker);
-            if (callDistConfig.enabled) {
+            if (callDistConfig.enabled && !isOOR_Call) {
               const distancePct = calcCallDistance(underlyingPrice, soldCallStrike);
               const isInDanger = distancePct < callDistConfig.threshold_pct;
               const positionKey = `dd_call_dist_${strategy.strategy_key}`;
@@ -823,6 +885,16 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
+            } else if (isOOR_Call) {
+              // Reset CALL distance alert state to 'safe' when OOR on CALL side
+              const distPositionKey = `dd_call_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_DOUBLE_DIAGONAL_CALL}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
+              }
             }
           }
           
@@ -832,17 +904,21 @@ serve(async (req) => {
             const soldCallStrike = strategy.sold_call_strike || 0;
             if (soldPutStrike <= 0 || soldCallStrike <= 0) continue;
             
+            // Calculate OOR state FIRST - distinguishing by side
+            const isOOR_Put = underlyingPrice < soldPutStrike;
+            const isOOR_Call = underlyingPrice > soldCallStrike;
+            const isOOR = isOOR_Put || isOOR_Call;
+            
             // OOR Alert
             const oorConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_DD_IC_OOR, ticker);
             if (oorConfig.enabled) {
-              const isOOR = underlyingPrice < soldPutStrike || underlyingPrice > soldCallStrike;
               const positionKey = `altdd_oor_${strategy.strategy_key}`;
               const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_DD_IC_OOR}`;
               const currentState = statesMap.get(stateKey);
               
               if (isOOR && (!currentState || currentState.current_state === 'safe')) {
                 if (cooldownPassed(currentState?.last_alerted_at || null, oorConfig.cooldown_minutes)) {
-                  const side = underlyingPrice < soldPutStrike ? 'PUT' : 'CALL';
+                  const side = isOOR_Put ? 'PUT' : 'CALL';
                   const message = `La strategia è OOR (fuori dal range venduto)`;
                   
                   await supabase.from('alerts').insert({
@@ -877,9 +953,9 @@ serve(async (req) => {
               }
             }
             
-            // Distance alerts
+            // Distance alerts for Alt DD PUT - SUPPRESSED if already OOR on PUT side
             const putDistConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_PUT, ticker);
-            if (putDistConfig.enabled && soldPutStrike > 0) {
+            if (putDistConfig.enabled && soldPutStrike > 0 && !isOOR_Put) {
               const distancePct = calcPutDistance(underlyingPrice, soldPutStrike);
               const isInDanger = distancePct < putDistConfig.threshold_pct;
               const positionKey = `altdd_put_dist_${strategy.strategy_key}`;
@@ -920,10 +996,21 @@ serve(async (req) => {
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
               }
+            } else if (isOOR_Put) {
+              // Reset PUT distance alert state to 'safe' when OOR on PUT side
+              const distPositionKey = `altdd_put_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_PUT}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
+              }
             }
             
+            // Distance alerts for Alt DD CALL - SUPPRESSED if already OOR on CALL side
             const callDistConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_CALL, ticker);
-            if (callDistConfig.enabled && soldCallStrike > 0) {
+            if (callDistConfig.enabled && soldCallStrike > 0 && !isOOR_Call) {
               const distancePct = calcCallDistance(underlyingPrice, soldCallStrike);
               const isInDanger = distancePct < callDistConfig.threshold_pct;
               const positionKey = `altdd_call_dist_${strategy.strategy_key}`;
@@ -963,6 +1050,16 @@ serve(async (req) => {
                 await supabase.from('alert_states')
                   .update({ current_state: 'safe' })
                   .eq('id', currentState.id);
+              }
+            } else if (isOOR_Call) {
+              // Reset CALL distance alert state to 'safe' when OOR on CALL side
+              const distPositionKey = `altdd_call_dist_${strategy.strategy_key}`;
+              const distStateKey = `${distPositionKey}:${ALERT_TYPES.DISTANCE_ALTERNATIVE_DD_CALL}`;
+              const distState = statesMap.get(distStateKey);
+              if (distState?.current_state === 'alerted') {
+                await supabase.from('alert_states')
+                  .update({ current_state: 'safe' })
+                  .eq('id', distState.id);
               }
             }
           }
