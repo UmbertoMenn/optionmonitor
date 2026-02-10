@@ -12,7 +12,7 @@ import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle, Menu } from 'lucide-react';
 import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
@@ -24,15 +24,18 @@ import { DynamicPortfolioChart } from '@/components/dashboard/DynamicPortfolioCh
 import { HistoricalChartsCarousel } from '@/components/dashboard/HistoricalChartsCarousel';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { ClearDataDialog } from '@/components/dashboard/ClearDataDialog';
+import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { formatRelativeTime } from '@/lib/formatters';
 import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { DepositEntry } from '@/types/deposits';
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
+  const navigate = useNavigate();
   const { isAggregatedView } = usePortfolioContext();
   const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
@@ -151,81 +154,147 @@ export function Dashboard() {
       {/* Header */}
       <header className="border-b border-border bg-background-secondary/50 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <TrendingUp className="w-6 h-6 text-primary" />
+          <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <IronCondorIcon size={24} className="text-primary" />
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold">Option Tech</h1>
+                  <p className="text-xs text-muted-foreground hidden sm:block">
+                    {portfolio?.last_updated && (
+                      <span>Aggiornato {formatRelativeTime(portfolio.last_updated)}</span>
+                    )}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-lg font-bold">Portfolio Monitor</h1>
-                <p className="text-xs text-muted-foreground hidden sm:block">
-                  {portfolio?.last_updated && (
-                    <span>Aggiornato {formatRelativeTime(portfolio.last_updated)}</span>
-                  )}
-                </p>
+
+              {/* Mobile: single "Indice" dropdown */}
+              <div className="sm:hidden">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Menu className="w-4 h-4 mr-2" />
+                      Indice
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem asChild>
+                      <div className="w-full">
+                        <PortfolioSelector />
+                      </div>
+                    </DropdownMenuItem>
+                    {!isAggregatedView && (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          if (!portfolio?.snapshot_date) {
+                            toast.error('Nessuna data disponibile. Carica prima un file Excel.');
+                            return;
+                          }
+                          upsertHistoricalData({
+                            snapshot_date: portfolio.snapshot_date,
+                            total_value: summary?.totalValue ?? 0,
+                            netting_total: netting.nettingTotal,
+                            netting_ex_cc: netting.nettingExCoveredCall,
+                            netting_ex_cc_np: netting.nettingExCCAndNP,
+                            deposits: 0,
+                            average_balance: 0,
+                            equity_exposure_pct: equityExposurePct,
+                            usd_exposure_pct: usdExposurePct,
+                          });
+                          toast.success('Snapshot salvato nei dati storici');
+                        }}
+                        disabled={isUpserting || !summary}
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Salva Snapshot
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => navigate('/derivatives')}>
+                      <TrendingUp className="w-4 h-4 mr-2" />
+                      Strategie Derivati
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/risk-analyzer')}>
+                      <ShieldAlert className="w-4 h-4 mr-2" />
+                      Risk Analyzer
+                    </DropdownMenuItem>
+                    {isAdmin && (
+                      <DropdownMenuItem onClick={() => navigate('/admin')}>
+                        <Settings className="w-4 h-4 mr-2" />
+                        Admin
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={signOut}>
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Esci
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-            </div>
-            
-            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 sm:flex-1 sm:justify-end">
-              <div className="shrink-0">
-                <PortfolioSelector />
-              </div>
-              {!isAggregatedView && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => {
-                    if (!portfolio?.snapshot_date) {
-                      toast.error('Nessuna data disponibile. Carica prima un file Excel.');
-                      return;
-                    }
-                    upsertHistoricalData({
-                      snapshot_date: portfolio.snapshot_date,
-                      total_value: summary?.totalValue ?? 0,
-                      netting_total: netting.nettingTotal,
-                      netting_ex_cc: netting.nettingExCoveredCall,
-                      netting_ex_cc_np: netting.nettingExCCAndNP,
-                      deposits: 0,
-                      average_balance: 0,
-                      equity_exposure_pct: equityExposurePct,
-                      usd_exposure_pct: usdExposurePct,
-                    });
-                    toast.success('Snapshot salvato nei dati storici');
-                  }}
-                  disabled={isUpserting || !summary}
-                  title="Salva snapshot corrente nei dati storici"
-                  className="shrink-0"
-                >
-                  <Save className="w-4 h-4" />
-                  <span className="hidden sm:inline ml-2">Salva Snapshot</span>
-                </Button>
-              )}
-              <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/derivatives">
-                  <TrendingUp className="w-4 h-4" />
-                  <span className="hidden sm:inline ml-2">Strategie Derivati</span>
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/risk-analyzer">
-                  <ShieldAlert className="w-4 h-4" />
-                  <span className="hidden sm:inline ml-2">Risk Analyzer</span>
-                </Link>
-              </Button>
-              {isAdmin && (
+
+              {/* Desktop: full button bar */}
+              <div className="hidden sm:flex items-center gap-2">
+                <div className="shrink-0">
+                  <PortfolioSelector />
+                </div>
+                {!isAggregatedView && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => {
+                      if (!portfolio?.snapshot_date) {
+                        toast.error('Nessuna data disponibile. Carica prima un file Excel.');
+                        return;
+                      }
+                      upsertHistoricalData({
+                        snapshot_date: portfolio.snapshot_date,
+                        total_value: summary?.totalValue ?? 0,
+                        netting_total: netting.nettingTotal,
+                        netting_ex_cc: netting.nettingExCoveredCall,
+                        netting_ex_cc_np: netting.nettingExCCAndNP,
+                        deposits: 0,
+                        average_balance: 0,
+                        equity_exposure_pct: equityExposurePct,
+                        usd_exposure_pct: usdExposurePct,
+                      });
+                      toast.success('Snapshot salvato nei dati storici');
+                    }}
+                    disabled={isUpserting || !summary}
+                    title="Salva snapshot corrente nei dati storici"
+                    className="shrink-0"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span className="ml-2">Salva Snapshot</span>
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" asChild className="shrink-0">
-                  <Link to="/admin">
-                    <Settings className="w-4 h-4" />
-                    <span className="hidden sm:inline ml-2">Admin</span>
+                  <Link to="/derivatives">
+                    <TrendingUp className="w-4 h-4" />
+                    <span className="ml-2">Strategie Derivati</span>
                   </Link>
                 </Button>
-              )}
-              <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline ml-2">Esci</span>
-              </Button>
+                <Button variant="outline" size="sm" asChild className="shrink-0">
+                  <Link to="/risk-analyzer">
+                    <ShieldAlert className="w-4 h-4" />
+                    <span className="ml-2">Risk Analyzer</span>
+                  </Link>
+                </Button>
+                {isAdmin && (
+                  <Button variant="outline" size="sm" asChild className="shrink-0">
+                    <Link to="/admin">
+                      <Settings className="w-4 h-4" />
+                      <span className="ml-2">Admin</span>
+                    </Link>
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
+                  <LogOut className="w-4 h-4" />
+                  <span className="ml-2">Esci</span>
+                </Button>
+              </div>
             </div>
-          </div>
         </div>
       </header>
 
