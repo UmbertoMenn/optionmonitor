@@ -1,42 +1,24 @@
 
-
-## Fix: Cooldown non persistente a causa di duplicati nel database
+## Fix: Permettere all'admin di copiare un portafoglio su se stesso
 
 ### Problema
-Il vincolo `UNIQUE (user_id, ticker, alert_type)` sulla tabella `alert_configs` **non impedisce i duplicati** quando `ticker` e `NULL`, perche in SQL `NULL != NULL`. Ogni salvataggio crea nuove righe invece di aggiornare quelle esistenti, e alla riapertura del dialog viene letto il primo record (quello vecchio).
+Il pulsante "Copia su Utente" nei portafogli dell'admin e disabilitato quando non ci sono altri utenti (`disabled={otherUsers.length === 0}`). Ma il dropdown del dialog di copia (`allUsersForCopy`) include gia l'admin stesso, quindi basta rimuovere quella condizione.
 
-Nel database di MauroG ci sono gia righe duplicate: per ogni `alert_type` esistono due record con `ticker = NULL`, uno con cooldown 240 e uno con 480.
+Per i portafogli degli altri utenti il pulsante "Copia" e gia sempre abilitato (nessuna prop `disabled`), quindi funziona correttamente.
 
 ### Soluzione
 
-#### Migrazione SQL (un solo step)
+**File: `src/components/admin/PortfolioManager.tsx`** (1 riga)
 
-1. **Rimuovere i duplicati**: per ogni combinazione `(user_id, alert_type)` con `ticker IS NULL`, mantenere solo la riga piu recente (quella con `updated_at` o `id` piu alto)
-2. **Sostituire il vincolo unique** con un indice unico che tratta i NULL come valori uguali:
+Rimuovere la prop `disabled` dal pulsante "Copia su Utente" alla riga 128:
 
-```sql
--- 1. Remove duplicates: keep only the latest row per (user_id, alert_type) where ticker IS NULL
-DELETE FROM alert_configs a
-USING alert_configs b
-WHERE a.user_id = b.user_id
-  AND a.alert_type = b.alert_type
-  AND a.ticker IS NULL
-  AND b.ticker IS NULL
-  AND a.id < b.id;
-
--- 2. Drop old constraint
-ALTER TABLE alert_configs
-  DROP CONSTRAINT alert_configs_user_id_ticker_alert_type_key;
-
--- 3. Create new unique index that treats NULLs as equal
-CREATE UNIQUE INDEX alert_configs_user_id_ticker_alert_type_key
-  ON alert_configs (user_id, COALESCE(ticker, ''), alert_type);
+```diff
+ <Button
+   variant="outline"
+   size="sm"
+   onClick={() => handleCopyClick(portfolio)}
+-  disabled={otherUsers.length === 0}
+ >
 ```
 
-#### Nessuna modifica al codice frontend
-
-Il codice di upsert usa gia `onConflict: 'user_id,ticker,alert_type'` che funzionera correttamente con il nuovo indice. L'unica causa del bug era il vincolo SQL che non gestiva i NULL.
-
-### File coinvolti
-1. **Migrazione SQL** -- pulizia duplicati + nuovo indice unique con COALESCE
-
+Nessuna altra modifica necessaria: il dialog mostra gia tutti gli utenti (admin incluso) nel dropdown.
