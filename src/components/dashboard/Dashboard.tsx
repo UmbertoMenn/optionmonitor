@@ -166,7 +166,7 @@ export function Dashboard() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
+            <div className="flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 flex-1 justify-end">
               <div className="shrink-0">
                 <PortfolioSelector />
               </div>
