@@ -1,24 +1,24 @@
 
 
-## Spostare PortfolioSelector nella barra scrollabile
+## Fix scroll orizzontale header mobile
 
 ### Problema
-Il selettore portafoglio si trova nella sezione sinistra dell'header (insieme al logo e al titolo), che non ha scroll orizzontale. Su mobile, occupa spazio fisso e impedisce la visualizzazione dei pulsanti a destra.
+Il div destro dell'header (che contiene PortfolioSelector + pulsanti) ha `overflow-x-auto` ma non ha un vincolo di larghezza massima. In un layout flex con `justify-between`, il div si espande oltre lo schermo invece di attivare lo scroll interno.
 
 ### Soluzione
-Ristrutturare l'header della Dashboard in modo che:
-- Il logo e il titolo restino fissi a sinistra (compatti)
-- Il `PortfolioSelector` e tutti i pulsanti vengano raggruppati nella stessa sezione scrollabile a destra
 
-### Modifica
+**`src/components/dashboard/Dashboard.tsx`** - riga 169:
 
-**`src/components/dashboard/Dashboard.tsx`** - header (righe 154-170):
-- Rimuovere `PortfolioSelector` dalla sezione sinistra (il div con logo/titolo)
-- Spostarlo come primo elemento nella sezione destra scrollabile (`overflow-x-auto flex-nowrap`), prima dei pulsanti
-- Nascondere il sottotitolo "Aggiornato..." su mobile per risparmiare spazio (`hidden sm:block`)
+Aggiungere `min-w-0 flex-1` al container scrollabile dei pulsanti. Questo forza il browser a vincolare la larghezza del div allo spazio disponibile (dopo il logo), attivando correttamente `overflow-x-auto`.
 
-Struttura risultante:
+Da:
+```tsx
+<div className="flex items-center gap-2 overflow-x-auto flex-nowrap">
 ```
-[Logo + Titolo]  |  [PortfolioSelector] [Salva] [Derivati] [Risk] [Admin] [Esci]  -->
-                    ^--- tutta questa riga scorre orizzontalmente su mobile
+
+A:
+```tsx
+<div className="flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 flex-1 justify-end">
 ```
+
+`min-w-0` sovrascrive il `min-width: auto` di default dei flex items, permettendo al div di restringersi sotto la dimensione del suo contenuto. `flex-1` gli assegna tutto lo spazio rimanente dopo il logo. `justify-end` mantiene i pulsanti allineati a destra su desktop.
