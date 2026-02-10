@@ -1,65 +1,73 @@
 
 
-## Ristrutturazione header Dashboard
+## Header unificato mobile per tutte le pagine
 
-### Modifiche richieste
+### Obiettivo
+Applicare lo stesso pattern dell'header mobile della Dashboard (logo IronCondor + "Option Tech" + pulsante "Indice") alle pagine Strategie Derivati, Risk Analyzer e Admin Panel.
 
-1. **Rinominare "Portfolio Monitor" in "Option Tech"** (mobile e desktop)
-2. **Sostituire l'icona TrendingUp con IronCondorIcon** (il logo dell'Iron Condor gia usato nel login e favicon)
-3. **Su mobile: header minimale** con solo logo, titolo e un pulsante hamburger "Indice" che apre un menu con tutte le voci (Portfolio, Salva Snapshot, Strategie Derivati, Risk Analyzer, Admin, Esci)
-4. **Su desktop: nessun cambiamento funzionale**, resta la barra con tutti i pulsanti visibili
+### Pattern da replicare
+Su mobile (sotto `sm`): logo IronCondor, titolo "Option Tech", e un singolo pulsante "Indice" con dropdown contenente: PortfolioSelector, link di navigazione (Dashboard, Derivati, Risk Analyzer, Admin), e Esci.
 
-### Dettaglio tecnico
+Su desktop (`sm+`): il layout attuale di ciascuna pagina resta invariato, tranne la sostituzione dell'icona e del titolo con IronCondor + "Option Tech".
 
-**File: `src/components/dashboard/Dashboard.tsx`**
+### Modifiche per file
 
-**Imports da aggiungere:**
-- `IronCondorIcon` da `@/components/ui/iron-condor-icon`
-- `DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator` da `@/components/ui/dropdown-menu`
-- `Menu` da `lucide-react` (icona hamburger)
+**1. `src/pages/Derivatives.tsx` (righe 191-257)**
 
-**Imports da rimuovere:**
-- `TrendingUp` non piu necessario nell'header (ma resta usato nel pulsante "Strategie Derivati" desktop, quindi va mantenuto)
+- Sostituire l'icona `TrendingUp` nell'header con `IronCondorIcon`
+- Cambiare titolo da "Strategie Derivati" a "Option Tech"
+- Spostare il sottotitolo e info tooltip come testo secondario
+- Aggiungere imports: `IronCondorIcon`, `DropdownMenu*`, `Menu`, `useNavigate`
+- Mobile (`sm:hidden`): mostrare solo logo + "Option Tech" + pulsante "Indice" con dropdown contenente:
+  - PortfolioSelector
+  - Dashboard (naviga a `/`)
+  - Risk Analyzer (naviga a `/risk-analyzer`)
+  - Admin (se `isAdmin`, naviga a `/admin`)
+  - Separatore + Esci
+- Desktop (`hidden sm:flex`): mantenere la barra pulsanti attuale (Dashboard, Risk Analyzer, Admin, Esci) + PortfolioSelector nel titolo
 
-**Struttura header risultante:**
+**2. `src/pages/RiskAnalyzer.tsx` (righe 126-167)**
+
+- Sostituire l'icona `ShieldAlert` nell'header con `IronCondorIcon`
+- Cambiare titolo da "Risk Analyzer" a "Option Tech"
+- Aggiungere imports: `IronCondorIcon`, `DropdownMenu*`, `Menu`, `Settings`, `useNavigate`
+- Mobile (`sm:hidden`): logo + "Option Tech" + "Indice" dropdown con:
+  - PortfolioSelector
+  - Dashboard (naviga a `/`)
+  - Strategie Derivati (naviga a `/derivatives`)
+  - Admin (se `isAdmin`, naviga a `/admin`)
+  - Separatore + Esci
+- Desktop (`hidden sm:flex`): invariato + PortfolioSelector nel titolo
+
+**3. `src/components/admin/AdminPanel.tsx` (righe 192-213)**
+
+- Sostituire l'icona `Shield` nell'header con `IronCondorIcon`
+- Cambiare titolo da "Pannello Admin" a "Option Tech"
+- Rimuovere il pulsante freccia indietro (sostituito dal menu Indice su mobile)
+- Aggiungere imports: `IronCondorIcon`, `DropdownMenu*`, `Menu`, `TrendingUp`, `ShieldAlert`, `LogOut`, `useNavigate`
+- Aggiungere `signOut` e `useNavigate` nel componente
+- Mobile (`sm:hidden`): logo + "Option Tech" + "Indice" dropdown con:
+  - Dashboard (naviga a `/`)
+  - Strategie Derivati (naviga a `/derivatives`)
+  - Risk Analyzer (naviga a `/risk-analyzer`)
+  - Separatore + Esci
+- Desktop (`hidden sm:flex`): mantenere il pulsante "Aggiungi Utente" + pulsanti navigazione (Dashboard, Derivati, Risk, Esci)
+- Il pulsante "Aggiungi Utente" su mobile viene incluso nel dropdown come prima voce dopo le voci di navigazione
+
+### Struttura mobile comune a tutte le pagine
 
 ```
-MOBILE (< sm):
 [IronCondorIcon] Option Tech    [Indice v]
                                     |
-                                    +-- Seleziona Portfolio (apre PortfolioSelector)
-                                    +-- Salva Snapshot
-                                    +-- Strategie Derivati
-                                    +-- Risk Analyzer
-                                    +-- Admin (se admin)
+                                    +-- Portfolio (PortfolioSelector) *
+                                    +-- Dashboard / [pagina corrente]
+                                    +-- Strategie Derivati / [altre pagine]
+                                    +-- Risk Analyzer / [altre pagine]
+                                    +-- Admin (se admin) *
+                                    +-- Aggiungi Utente (solo Admin page) *
                                     +-- ---
                                     +-- Esci
-
-DESKTOP (>= sm):
-[IronCondorIcon] Option Tech   [PortfolioSelector] [Salva] [Derivati] [Risk] [Admin] [Esci]
-                 Aggiornato...
 ```
 
-**Modifiche nel JSX dell'header (righe 152-229):**
+*PortfolioSelector non presente in Admin. La voce della pagina corrente non viene mostrata (es: su Derivatives non si mostra "Strategie Derivati").
 
-1. Sostituire `<TrendingUp className="w-6 h-6 text-primary" />` con `<IronCondorIcon size={24} className="text-primary" />`
-
-2. Cambiare il testo da `Portfolio Monitor` a `Option Tech`
-
-3. Wrappare la barra pulsanti desktop con `hidden sm:flex` per nasconderla su mobile
-
-4. Aggiungere un `DropdownMenu` visibile solo su mobile (`sm:hidden`) con:
-   - Trigger: pulsante "Indice" con icona `Menu`
-   - Voci del menu:
-     - `PortfolioSelector` inline (o link per aprirlo)
-     - Salva Snapshot (con la stessa logica onClick)
-     - Link a Strategie Derivati (`/derivatives`)
-     - Link a Risk Analyzer (`/risk-analyzer`)
-     - Link a Admin (`/admin`) -- solo se `isAdmin`
-     - Separatore
-     - Esci (onClick `signOut`)
-
-5. Il `PortfolioSelector` su mobile verra incluso come prima voce del dropdown. Se il componente non si adatta bene dentro un `DropdownMenuItem`, verra messo come elemento separato sopra il menu, oppure il dropdown includera un link/azione che apre il selettore.
-
-### File coinvolti
-- `src/components/dashboard/Dashboard.tsx` -- unico file da modificare
