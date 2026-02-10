@@ -1,109 +1,42 @@
 
 
-## Light Mode per Option Tech
+## Fix "undefined" nella descrizione opzione delle notifiche
 
-### Obiettivo
-Aggiungere un toggle per passare tra tema scuro (default) e tema chiaro, accessibile sia da mobile (menu "Indice") che da desktop (barra header).
+### Problema
+Quando vengono generati avvisi di tipo **ITM** (Covered Call ITM, Naked Put ITM) e **OOR** (Iron Condor/Double Diagonal/Alternative DD Out of Range), i campi `option_type` e `option_expiry` non vengono inclusi nell'inserimento nella tabella `alerts`. Di conseguenza, nelle notifiche Telegram ed Email appare "undefined 300" o "undefined 420" al posto di "CALL 300 MAR/26".
 
-### Modifiche
+### Causa radice
+In `check-alerts/index.ts`, gli insert per alert ITM e OOR omettono `option_type` e `option_expiry`. Il fallback in `send-notification` basato su `alertType.includes('_call')` funziona solo per alcuni tipi ma non per `action_dd_ic_oor`.
 
-**1. CSS: definire variabili light mode (`src/index.css`)**
+### Soluzione: doppio intervento
 
-Sostituire il blocco `.light` attualmente disabilitato (righe 100-104) con un set completo di variabili chiare:
-- Background: toni chiari (bianco/grigio chiaro)
-- Foreground: toni scuri
-- Card, popover, muted, accent: palette chiara coerente
-- Profit/loss: stessi colori ma con sfondi adattati
-- Ombre: ridotte e piu morbide (senza glow intensi)
-- Scrollbar: colori chiari
+**1. File: `supabase/functions/check-alerts/index.ts`**
 
-**2. App.tsx: integrare `next-themes` ThemeProvider**
+Aggiungere `option_type` e `option_expiry` a TUTTI gli insert di alert che attualmente li omettono:
 
-Il pacchetto `next-themes` e gia installato (usato da sonner.tsx). Wrappare l'app con `<ThemeProvider>` configurato con:
-- `attribute="class"` (applica classe `dark`/`light` al tag html)
-- `defaultTheme="dark"` (mantiene il tema scuro come default)
-- `storageKey="option-tech-theme"` (persiste la scelta in localStorage)
+- **Covered Call ITM** (~riga 388): aggiungere `option_type: 'call'` e `option_expiry: strategy.sold_call_expiry`
+- **Naked Put ITM** (~riga 500): aggiungere `option_type: 'put'` e `option_expiry: strategy.sold_put_expiry`
+- **Iron Condor OOR** (~riga 598-611): aggiungere `option_type: side === 'PUT' ? 'put' : 'call'` e `option_expiry: side === 'PUT' ? strategy.sold_put_expiry : strategy.sold_call_expiry`
+- **Double Diagonal OOR** (sezione DD): stessa logica del IC OOR
+- **Alternative DD OOR** (sezione Alt DD): stessa logica del IC OOR
 
-**3. Dashboard header: aggiungere toggle tema**
+**2. File: `supabase/functions/send-notification/index.ts`**
 
-File: `src/components/dashboard/Dashboard.tsx`
+Aggiungere un fallback difensivo in `formatOptionDisplay` per gestire i casi in cui `type` rimane `undefined` dopo tutti i tentativi di deduzione:
 
-- **Desktop**: aggiungere un pulsante icona (Sun/Moon da lucide-react) nella barra dei pulsanti, prima del bottone "Esci"
-- **Mobile**: aggiungere una voce nel dropdown "Indice" con icona Sun/Moon e testo "Tema chiaro/scuro"
-- Usare `useTheme()` da next-themes per leggere e cambiare il tema
-
-**4. Pagine secondarie: stesso toggle**
-
-Verificare che Derivatives, RiskAnalyzer e AdminPanel ereditino il tema automaticamente (il ThemeProvider e globale, quindi si). Aggiungere il toggle anche negli header di queste pagine se hanno una propria barra di navigazione.
-
-### Dettagli tecnici
-
-**Variabili light mode (valori principali):**
-```css
-.light {
-  --background: 0 0% 100%;
-  --background-secondary: 220 14% 96%;
-  --background-tertiary: 220 13% 91%;
-  --foreground: 222 47% 11%;
-  --foreground-muted: 215 16% 47%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --card-hover: 220 14% 96%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --primary: 217 91% 60%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 220 14% 96%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 220 14% 96%;
-  --muted-foreground: 215 16% 47%;
-  --accent: 220 14% 96%;
-  --accent-foreground: 222 47% 11%;
-  --border: 220 13% 87%;
-  --border-subtle: 220 13% 91%;
-  --input: 220 13% 87%;
-  --ring: 217 91% 60%;
-  --sidebar-background: 220 14% 96%;
-  --sidebar-foreground: 222 47% 11%;
-  /* profit/loss/warning restano invariati */
-  /* shadow-glow ridotti o rimossi */
+```typescript
+// Dopo tutti i tentativi di determinare type (riga ~86):
+if (!type) {
+  // Se non riusciamo a determinare il tipo, mostriamo solo lo strike
+  return { label: 'Strike', value: `${strikeStr}${expiryStr}` };
 }
 ```
 
-**ThemeProvider in App.tsx:**
-```tsx
-import { ThemeProvider } from "next-themes";
+Questo garantisce che anche se un alert futuro arriva senza `option_type`, non apparira mai "undefined" nel messaggio.
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ThemeProvider attribute="class" defaultTheme="dark" storageKey="option-tech-theme">
-      <TooltipProvider>
-        ...
-      </TooltipProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
-);
-```
-
-**Toggle nel Dashboard header:**
-```tsx
-import { Sun, Moon } from 'lucide-react';
-import { useTheme } from 'next-themes';
-
-// Nel componente:
-const { theme, setTheme } = useTheme();
-
-// Desktop button:
-<Button variant="ghost" size="icon" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-  {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-</Button>
-
-// Mobile dropdown item:
-<DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-  {theme === 'dark' ? <Sun /> : <Moon />}
-  {theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
-</DropdownMenuItem>
-```
-
-**tailwind.config.ts:** gia configurato con `darkMode: ["class"]` - nessuna modifica necessaria.
+### Riepilogo modifiche
+| File | Modifica |
+|------|----------|
+| `check-alerts/index.ts` | Aggiungere `option_type` e `option_expiry` a 5 blocchi di insert (ITM e OOR) |
+| `send-notification/index.ts` | Fallback difensivo quando `type` e `undefined` |
 
