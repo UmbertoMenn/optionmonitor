@@ -1,19 +1,67 @@
 
 
-## Inversione ordine schede nel pannello admin
+## Gestione Notifiche Admin per Portafogli Utenti
 
-Scambiare l'ordine delle due Card nel file `src/components/admin/PortfolioManager.tsx`: la sezione "Portafogli Utenti" verra spostata prima di "I Miei Portafogli".
+### Obiettivo
+Aggiungere nel pannello admin due toggle per controllare se l'admin riceve le copie delle notifiche (email e Telegram) generate dai portafogli degli utenti. Attualmente l'admin riceve SEMPRE tutto senza possibilita di disattivare.
 
-### Modifica
+### Modifiche
 
-**File: `src/components/admin/PortfolioManager.tsx`**
+**1. Database: nuove colonne nella tabella `profiles`**
 
-Spostare il blocco `<Card>` "Portafogli Utenti" (attualmente righe ~168-243) prima del blocco `<Card>` "I Miei Portafogli" (attualmente righe ~87-167). L'ordine nel JSX diventa:
+Aggiungere due colonne booleane:
+- `admin_notify_email` (default `true`) - controlla ricezione email copie admin
+- `admin_notify_telegram` (default `true`) - controlla ricezione Telegram copie admin
 
-1. Card "Portafogli Utenti" (con icona User)
-2. Card "I Miei Portafogli" (con icona Briefcase)
-3. CopyPortfolioDialog (invariato)
-4. Delete Dialog (invariato)
+```sql
+ALTER TABLE public.profiles
+  ADD COLUMN admin_notify_email boolean NOT NULL DEFAULT true,
+  ADD COLUMN admin_notify_telegram boolean NOT NULL DEFAULT true;
+```
 
-Nessuna modifica alla logica, solo riordino dei blocchi JSX.
+**2. UI: nuovo tab "Notifiche" nel pannello admin**
+
+File: `src/components/admin/AdminPanel.tsx`
+
+Aggiungere un quinto tab "Notifiche" (icona Bell) nella TabsList, con contenuto un componente `AdminNotificationSettings`.
+
+File: `src/components/admin/AdminNotificationSettings.tsx` (nuovo)
+
+Una Card con:
+- Titolo "Notifiche Admin"
+- Descrizione che spiega che questi toggle controllano le copie delle notifiche utenti
+- Due righe con Switch:
+  - "Email utenti" - toggle per `admin_notify_email`
+  - "Telegram utenti" - toggle per `admin_notify_telegram`
+- Lettura/scrittura diretta sulla tabella `profiles` dell'admin corrente
+
+**3. Edge Function: rispettare i nuovi toggle**
+
+File: `supabase/functions/send-notification/index.ts`
+
+Nella sezione admin (righe 350-391), modificare la query per includere `admin_notify_email` e `admin_notify_telegram`, e condizionare l'invio:
+- Invia email admin solo se `admin.admin_notify_email === true`
+- Invia Telegram admin solo se `admin.admin_notify_telegram === true`
+
+### Dettagli tecnici
+
+La query admin nella edge function cambiera da:
+```typescript
+.select("email, notify_email, notify_telegram, telegram_chat_id, user_id")
+```
+a:
+```typescript
+.select("email, admin_notify_email, admin_notify_telegram, telegram_chat_id, user_id")
+```
+
+E le condizioni di invio da:
+```typescript
+if (admin.email) { ... }
+if (admin.telegram_chat_id) { ... }
+```
+a:
+```typescript
+if (admin.admin_notify_email && admin.email) { ... }
+if (admin.admin_notify_telegram && admin.telegram_chat_id) { ... }
+```
 
