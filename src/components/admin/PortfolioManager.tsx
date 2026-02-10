@@ -79,72 +79,6 @@ export function PortfolioManager() {
 
   return (
     <div className="space-y-6">
-      {/* Admin's own portfolios - with copy feature */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <Briefcase className="w-5 h-5 text-primary" />
-            <CardTitle>I Miei Portafogli</CardTitle>
-            <Badge variant="secondary">{adminPortfolios.length}</Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Puoi copiare questi portafogli su altri utenti
-          </p>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-background-tertiary">
-                <TableHead>Nome</TableHead>
-                <TableHead className="text-right">Valore</TableHead>
-                <TableHead>Ultimo Agg.</TableHead>
-                <TableHead className="text-right">Azioni</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {adminPortfolios.map((portfolio) => (
-                <TableRow key={portfolio.id} className="border-border hover:bg-background-tertiary">
-                  <TableCell className="font-medium">{portfolio.name}</TableCell>
-                  <TableCell className="text-right">
-                    {formatCurrency(portfolio.total_value || 0)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {portfolio.last_updated ? formatDate(portfolio.last_updated) : '-'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCopyClick(portfolio)}
-                      >
-                        <Copy className="w-4 h-4 mr-2" />
-                        Copia su Utente
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleDeleteClick(portfolio as PortfolioWithOwner)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {adminPortfolios.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                    Non hai ancora creato portafogli personali
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
       {/* Other users' portfolios - grouped by user */}
       <Card className="border-border bg-card">
         <CardHeader>
@@ -251,6 +185,72 @@ export function PortfolioManager() {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Admin's own portfolios - with copy feature */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <Briefcase className="w-5 h-5 text-primary" />
+            <CardTitle>I Miei Portafogli</CardTitle>
+            <Badge variant="secondary">{adminPortfolios.length}</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Puoi copiare questi portafogli su altri utenti
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border hover:bg-background-tertiary">
+                <TableHead>Nome</TableHead>
+                <TableHead className="text-right">Valore</TableHead>
+                <TableHead>Ultimo Agg.</TableHead>
+                <TableHead className="text-right">Azioni</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {adminPortfolios.map((portfolio) => (
+                <TableRow key={portfolio.id} className="border-border hover:bg-background-tertiary">
+                  <TableCell className="font-medium">{portfolio.name}</TableCell>
+                  <TableCell className="text-right">
+                    {formatCurrency(portfolio.total_value || 0)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {portfolio.last_updated ? formatDate(portfolio.last_updated) : '-'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCopyClick(portfolio)}
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copia su Utente
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDeleteClick(portfolio as PortfolioWithOwner)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {adminPortfolios.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                    Non hai ancora creato portafogli personali
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
