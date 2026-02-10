@@ -1,60 +1,65 @@
 
 
-## Fix header mobile - Layout a due righe
+## Ristrutturazione header Dashboard
 
-### Problema reale (analisi approfondita)
+### Modifiche richieste
 
-Il layout flex orizzontale dell'header ha due figli:
-1. Logo + titolo "Portfolio Monitor" con `shrink-0` -- occupa circa 200px fissi
-2. Container scrollabile con `overflow-x-auto min-w-0 flex-1`
+1. **Rinominare "Portfolio Monitor" in "Option Tech"** (mobile e desktop)
+2. **Sostituire l'icona TrendingUp con IronCondorIcon** (il logo dell'Iron Condor gia usato nel login e favicon)
+3. **Su mobile: header minimale** con solo logo, titolo e un pulsante hamburger "Indice" che apre un menu con tutte le voci (Portfolio, Salva Snapshot, Strategie Derivati, Risk Analyzer, Admin, Esci)
+4. **Su desktop: nessun cambiamento funzionale**, resta la barra con tutti i pulsanti visibili
 
-Su mobile (375px), dopo il padding (32px) e il logo (200px), restano solo **143px** per la barra scrollabile. Il `PortfolioSelector` ha `min-w-[180px]` (piu largo dello spazio disponibile), quindi:
-- Il container scrollabile e troppo stretto perche il gesto di swipe venga riconosciuto
-- Il tap sul DropdownMenuTrigger del PortfolioSelector intercetta il tocco prima dello scroll
-- Non c'e indicazione visiva che si possa scorrere
-
-### Soluzione
-
-Cambiare il layout dell'header da una riga a **due righe su mobile**:
-- Riga 1: Logo + titolo (come ora)  
-- Riga 2: Barra scrollabile a **tutta larghezza** (343px invece di 143px)
-
-Su desktop (sm+), il layout resta su una riga come prima.
-
-### Modifica tecnica
+### Dettaglio tecnico
 
 **File: `src/components/dashboard/Dashboard.tsx`**
 
-Cambiare il container dell'header da:
-```tsx
-<div className="flex items-center justify-between">
-  <div className="flex items-center gap-3 shrink-0">
-    <!-- logo -->
-  </div>
-  <div className="flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 flex-1 justify-end">
-    <!-- pulsanti -->
-  </div>
-</div>
+**Imports da aggiungere:**
+- `IronCondorIcon` da `@/components/ui/iron-condor-icon`
+- `DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator` da `@/components/ui/dropdown-menu`
+- `Menu` da `lucide-react` (icona hamburger)
+
+**Imports da rimuovere:**
+- `TrendingUp` non piu necessario nell'header (ma resta usato nel pulsante "Strategie Derivati" desktop, quindi va mantenuto)
+
+**Struttura header risultante:**
+
+```
+MOBILE (< sm):
+[IronCondorIcon] Option Tech    [Indice v]
+                                    |
+                                    +-- Seleziona Portfolio (apre PortfolioSelector)
+                                    +-- Salva Snapshot
+                                    +-- Strategie Derivati
+                                    +-- Risk Analyzer
+                                    +-- Admin (se admin)
+                                    +-- ---
+                                    +-- Esci
+
+DESKTOP (>= sm):
+[IronCondorIcon] Option Tech   [PortfolioSelector] [Salva] [Derivati] [Risk] [Admin] [Esci]
+                 Aggiornato...
 ```
 
-A:
-```tsx
-<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-  <div className="flex items-center gap-3 shrink-0">
-    <!-- logo -->
-  </div>
-  <div className="flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 sm:flex-1 sm:justify-end">
-    <!-- pulsanti -->
-  </div>
-</div>
-```
+**Modifiche nel JSX dell'header (righe 152-229):**
 
-Differenze chiave:
-- `flex-col` su mobile, `sm:flex-row` su desktop: le due sezioni si impilano verticalmente su mobile
-- `gap-3` tra le due righe
-- La barra scrollabile occupa il 100% della larghezza su mobile
-- Su desktop (sm+) il comportamento resta identico a prima con `sm:flex-1 sm:justify-end`
+1. Sostituire `<TrendingUp className="w-6 h-6 text-primary" />` con `<IronCondorIcon size={24} className="text-primary" />`
+
+2. Cambiare il testo da `Portfolio Monitor` a `Option Tech`
+
+3. Wrappare la barra pulsanti desktop con `hidden sm:flex` per nasconderla su mobile
+
+4. Aggiungere un `DropdownMenu` visibile solo su mobile (`sm:hidden`) con:
+   - Trigger: pulsante "Indice" con icona `Menu`
+   - Voci del menu:
+     - `PortfolioSelector` inline (o link per aprirlo)
+     - Salva Snapshot (con la stessa logica onClick)
+     - Link a Strategie Derivati (`/derivatives`)
+     - Link a Risk Analyzer (`/risk-analyzer`)
+     - Link a Admin (`/admin`) -- solo se `isAdmin`
+     - Separatore
+     - Esci (onClick `signOut`)
+
+5. Il `PortfolioSelector` su mobile verra incluso come prima voce del dropdown. Se il componente non si adatta bene dentro un `DropdownMenuItem`, verra messo come elemento separato sopra il menu, oppure il dropdown includera un link/azione che apre il selettore.
 
 ### File coinvolti
-- `src/components/dashboard/Dashboard.tsx` -- unico file da modificare, riga 154
-
+- `src/components/dashboard/Dashboard.tsx` -- unico file da modificare
