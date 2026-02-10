@@ -161,11 +161,44 @@ function getMidPrice(contract: { bid: number; ask: number; lastPrice: number } |
     return mid;
   }
   if (contract.lastPrice > 0) {
-    console.log(`[Price] ${occSymbol}: fallback lastPrice=${contract.lastPrice}`);
+    console.log(`[Price] ${occSymbol}: lastPrice=${contract.lastPrice}`);
     return contract.lastPrice;
   }
-  console.log(`[Price] ${occSymbol}: no valid price`);
+  console.log(`[Price] ${occSymbol}: no mid/lastPrice from chain`);
   return null;
+}
+
+async function fetchFallbackPrice(occSymbol: string, crumb: string, cookie: string): Promise<number | null> {
+  try {
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(occSymbol)}?crumb=${encodeURIComponent(crumb)}`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Cookie': cookie,
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.log(`[Fallback] ${occSymbol}: v8/chart returned ${response.status}: ${body.slice(0, 200)}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const meta = data.chart?.result?.[0]?.meta;
+    const price = meta?.regularMarketPrice;
+
+    if (price && price > 0) {
+      console.log(`[Price] ${occSymbol}: fallback regularMarketPrice=${price}`);
+      return price;
+    }
+
+    console.log(`[Fallback] ${occSymbol}: no regularMarketPrice in v8 response`);
+    return null;
+  } catch (error) {
+    console.error(`[Fallback] ${occSymbol}: error:`, error);
+    return null;
+  }
 }
 
 serve(async (req) => {
@@ -299,7 +332,13 @@ serve(async (req) => {
             const isCall = pos.optionType.toLowerCase() === 'call';
             const contractMap = isCall ? chain.calls : chain.puts;
             const contract = contractMap[pos.occSymbol];
-            const price = getMidPrice(contract, pos.occSymbol);
+            let price = getMidPrice(contract, pos.occSymbol);
+
+            // Fallback: try v8/chart for regularMarketPrice
+            if (price === null) {
+              await delay(DELAY_BETWEEN_CALLS);
+              price = await fetchFallbackPrice(pos.occSymbol, auth.crumb, auth.cookie);
+            }
 
             if (price !== null) {
               const { error: updateError } = await supabase
@@ -315,8 +354,9 @@ serve(async (req) => {
                 updated++;
               }
             } else {
+              console.log(`[Price] ${pos.occSymbol}: FAILED - no price from chain or fallback`);
               failed++;
-              errors.push(`${pos.occSymbol}: no price data`);
+              errors.push(`${pos.occSymbol}: no price data (chain+fallback)`);
             }
           }
 
