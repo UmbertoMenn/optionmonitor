@@ -713,7 +713,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Copertura parziale: {uncoveredContracts} contratti scoperti</p>
+                    <p>Covered Call parziale - numero titoli scoperti: {uncoveredContracts * 100}</p>
                   </TooltipContent>
                 </Tooltip>
               )}
