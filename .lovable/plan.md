@@ -1,24 +1,25 @@
 
+## Modifiche al Disclaimer Dialog
 
-## Informativa bloccante post-login
+### 1. `src/components/auth/DisclaimerDialog.tsx`
+- Cambiare il titolo da "Informativa" a "Disclaimer"
+- Aggiungere una prop `onDecline` per gestire il rifiuto
+- Aggiungere sotto il pulsante principale un pulsante secondario "Non accetto e non voglio proseguire", stilizzato in modo discreto (testo piccolo, variante ghost/link, colore muted)
+- Il pulsante di rifiuto chiamera `onDecline` che effettuera il logout
 
-### Come funziona
-Dopo il login, prima di poter accedere all'app, l'utente vede un dialog modale a schermo intero con il testo dell'informativa. Solo cliccando "Confermo ed accetto quanto sopra" potra proseguire. L'accettazione viene salvata in `sessionStorage` cosi da non ripresentarsi durante la stessa sessione (ma riappare ad ogni nuovo accesso).
+### 2. `src/App.tsx`
+- Passare una nuova prop `onDecline` al `DisclaimerDialog` che chiama `signOut()` dal contesto Auth
+- Questo riporta l'utente alla schermata di login
 
-### Modifiche
+### 3. `src/components/auth/AuthForm.tsx`
+- Spostare il toast "Benvenuto!" dal login handler: rimuoverlo da `handleLogin`
+- Il toast verra invece mostrato dopo l'accettazione del disclaimer
 
-**1. Nuovo componente: `src/components/auth/DisclaimerDialog.tsx`**
-- Dialog modale bloccante (non chiudibile con ESC o click esterno)
-- Testo dell'informativa formattato con paragrafi separati
-- Pulsante "Confermo ed accetto quanto sopra" ben visibile (grande, colore primario)
-- Al click: salva accettazione in `sessionStorage` e chiama callback `onAccept`
+### 4. `src/App.tsx` (handleAcceptDisclaimer)
+- Aggiungere `toast.success('Benvenuto!')` dentro `handleAcceptDisclaimer` cosi che il messaggio appaia solo dopo aver accettato il disclaimer
 
-**2. Modifica: `src/App.tsx`**
-- In `AppRoutes`, dopo il check `user` autenticato, aggiungere uno stato `disclaimerAccepted` (inizializzato da `sessionStorage`)
-- Se l'utente e autenticato ma non ha accettato, mostrare `DisclaimerDialog` invece delle route
-- Al click su "Confermo ed accetto quanto sopra", settare lo stato e salvare in `sessionStorage`
-
-### Dettagli tecnici
-
-Il componente `DisclaimerDialog` utilizzera il componente `AlertDialog` di Radix (gia presente nel progetto) configurato per non essere chiudibile dall'utente se non tramite il pulsante di conferma. L'accettazione viene memorizzata solo per la sessione corrente del browser (`sessionStorage`), quindi ad ogni nuovo login l'informativa riappare.
-
+### Flusso risultante
+1. Utente fa login -> nessun toast
+2. Appare il Disclaimer (titolo "Disclaimer")
+3. Se clicca "Confermo ed accetto quanto sopra" -> toast "Benvenuto!" + accesso all'app
+4. Se clicca "Non accetto e non voglio proseguire" -> logout -> torna al login
