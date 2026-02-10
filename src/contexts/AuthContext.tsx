@@ -104,6 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    sessionStorage.removeItem('disclaimerAccepted');
     await supabase.auth.signOut();
     setIsAdmin(false);
   };
