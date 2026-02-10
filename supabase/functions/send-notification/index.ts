@@ -131,8 +131,6 @@ async function sendEmail(
     );
     const priceLabel = alertData.underlying_price ? 
       `<strong>Prezzo ${alertData.ticker}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
-    const priceLabel = alertData.underlying_price ? 
-      `<strong>Prezzo ${alertData.ticker}</strong>: $${alertData.underlying_price.toFixed(2)}` : '';
     
     await resend.emails.send({
       from: "Portfolio Alerts <noreply@resend.dev>",
@@ -211,8 +209,6 @@ async function sendTelegram(
       alertData.option_expiry,
       alertData.threshold_value
     );
-    const priceLabel = alertData.underlying_price ? 
-      `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     const priceLabel = alertData.underlying_price ? 
       `*Prezzo ${alertData.ticker}*: $${alertData.underlying_price.toFixed(2)}` : '';
     
@@ -368,7 +364,7 @@ serve(async (req: Request): Promise<Response> => {
 
       if (adminProfiles) {
         for (const admin of adminProfiles) {
-          if (admin.notify_email && admin.email) {
+          if (admin.email) {
             const emailResult = await sendEmail(admin.email, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
@@ -379,7 +375,7 @@ serve(async (req: Request): Promise<Response> => {
               emailResult.error
             );
           }
-          if (admin.notify_telegram && admin.telegram_chat_id) {
+          if (admin.telegram_chat_id) {
             const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || userProfile.email);
             await logNotification(
               supabase,
