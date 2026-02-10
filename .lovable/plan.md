@@ -1,23 +1,27 @@
 
 
-## Fix: Disclaimer non riappare dopo logout e nuovo login
+## Fix disclaimer + inversione pulsanti
 
-### Problema
-Il disclaimer non riappare perche `sessionStorage.getItem('disclaimerAccepted')` resta `'true'` anche dopo il logout. Il `sessionStorage` viene pulito solo quando si chiude la tab del browser, non al logout.
+### Problema 1: Disclaimer non riappare dopo logout
+Lo stato `disclaimerAccepted` viene inizializzato una sola volta al mount del componente. Quando l'utente fa logout e rientra, il componente `AppRoutes` non viene smontato e rimontato, quindi lo stato resta `true` anche se `sessionStorage` e stato pulito. Serve un `useEffect` che resetti lo stato quando cambia l'utente.
 
-### Soluzione
-Aggiungere `sessionStorage.removeItem('disclaimerAccepted')` nella funzione `signOut` del contesto di autenticazione (`src/contexts/AuthContext.tsx`), in modo che ad ogni logout il flag venga rimosso.
+### Problema 2: Ordine pulsanti
+Il pulsante "Non accetto" deve apparire prima (sopra) del pulsante "Confermo".
 
-### Modifica
+### Modifiche
 
-**`src/contexts/AuthContext.tsx`** - funzione `signOut`:
+**1. `src/App.tsx`**
+- Aggiungere un `useEffect` che osserva `user`: quando `user` diventa non-null (nuovo login), rileggere `sessionStorage` e resettare `disclaimerAccepted` a `false` se il flag non e presente.
+
 ```typescript
-const signOut = async () => {
-  sessionStorage.removeItem('disclaimerAccepted'); // <-- aggiunta
-  await supabase.auth.signOut();
-  setIsAdmin(false);
-};
+useEffect(() => {
+  if (user) {
+    const accepted = sessionStorage.getItem('disclaimerAccepted') === 'true';
+    setDisclaimerAccepted(accepted);
+  }
+}, [user]);
 ```
 
-Questo garantisce che ogni volta che l'utente esce e rientra, il disclaimer venga nuovamente mostrato.
+**2. `src/components/auth/DisclaimerDialog.tsx`**
+- Invertire l'ordine dei due pulsanti nel footer: prima il pulsante "Non accetto" (discreto), poi il pulsante "Confermo" (principale).
 
