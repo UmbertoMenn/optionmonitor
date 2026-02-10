@@ -1,21 +1,16 @@
 
 
-## Rimozione prefisso [ADMIN] dalle notifiche Email e Telegram
+## Sostituzione emoji sirena con campanella nelle notifiche
 
-### Problema
-Nelle notifiche inviate all'admin, il titolo contiene `[ADMIN]` (es. "🚨 [ADMIN] Avviso Portafoglio"). Questo prefisso va rimosso sia dalle email che da Telegram. Le notifiche admin manterranno comunque la riga "Utente: NomeUtente" per distinguerle.
+### Obiettivo
+Sostituire l'emoji 🚨 (sirena) con 🔔 (campanella) in tutte le notifiche email e Telegram.
 
 ### Modifiche
 
 **File: `supabase/functions/send-notification/index.ts`**
 
-Rimuovere tutte le occorrenze di `adminPrefix`:
+1. **Riga 141** (email header h2): da `🚨 Avviso Portafoglio` a `🔔 Avviso Portafoglio`
+2. **Riga 213** (telegram text): da `🚨 *Avviso Portafoglio*` a `🔔 *Avviso Portafoglio*`
 
-1. **Riga 122** (email): rimuovere `const adminPrefix = isAdmin ? "[ADMIN] " : "";`
-2. **Riga 138** (email subject): da `${adminPrefix}${severityEmoji} Avviso Portfolio:...` a `${severityEmoji} Avviso Portfolio:...`
-3. **Riga 142** (email header h2): da `🚨 ${adminPrefix}Avviso Portafoglio` a `🚨 Avviso Portafoglio`
-4. **Riga 202** (telegram): rimuovere `const adminPrefix = isAdmin ? "*[ADMIN]* " : "";`
-5. **Riga 215** (telegram text): da `🚨 ${adminPrefix}*Avviso Portafoglio*` a `🚨 *Avviso Portafoglio*`
-
-La riga "Utente: NomeUtente" resta visibile nelle notifiche admin per identificare il proprietario del portafoglio.
+Due sole righe da modificare, nessun impatto sulla logica.
 
