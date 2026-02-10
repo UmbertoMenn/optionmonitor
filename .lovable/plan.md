@@ -1,95 +1,62 @@
 
 
-## Aggiornamento prezzi opzioni via Yahoo Finance + Indicatore stale
+## Fix: Calcolo data OCC errato + 128/234 opzioni non aggiornate
 
-### Panoramica
-Due interventi:
-1. **Nuova Edge Function** `update-option-prices-cron` che aggiorna `positions.current_price` per tutti i derivati attivi usando Yahoo Finance con formula `(bid+ask)/2`
-2. **Badge triangolino rosso** accanto al prezzo dell'opzione nella pagina Strategie Derivati (stesso comportamento dell'indicatore sui prezzi sottostanti)
+### Problema identificato
 
----
+Il broker salva la data di scadenza sempre come il **21 del mese** (es. 2026-04-21, 2026-05-21). Ma il formato OCC richiede il **3o venerdi del mese** (la vera data di scadenza delle opzioni USA).
 
-### Parte 1: Edge Function per aggiornamento prezzi opzioni
+Il codice attuale corregge solo sabato e domenica:
+- Feb 21 = sabato -> venerdi 20 (3o venerdi, funziona per caso)
+- Mar 21 = sabato -> venerdi 20 (3o venerdi, funziona per caso)
+- **Apr 21 = martedi -> NON corretto -> 404**
+- **Mag 21 = giovedi -> NON corretto -> 404**
+- **Lug 21 = martedi -> NON corretto -> 404**
+- ...e cosi via per 8 mesi su 13
+
+Risultato: **128 opzioni su 234 (55%) restituiscono 404** da Yahoo Finance.
+
+### Indicatore stale
+
+L'indicatore stale (triangolino rosso) funziona correttamente: appare per le opzioni con `updated_at` vecchio di oltre 10 minuti e per quelle con mercato chiuso. Le opzioni senza triangolino sono quelle aggiornate con successo di recente (Feb/26 e Mar/26).
+
+### Soluzione
 
 **File: `supabase/functions/update-option-prices-cron/index.ts`**
 
-Logica:
-1. Recuperare tutte le posizioni derivative attive (non scadute) con `underlying`, `option_type`, `strike_price`, `expiry_date`
-2. Per ogni posizione, risolvere il ticker tramite `underlying_mappings`
-3. Costruire il simbolo OCC: `{TICKER}{YYMMDD}{C/P}{STRIKE*1000 padded 8 cifre}`
-   - Esempio: AAPL, Call 270, scadenza 2027-12-21 -> `AAPL271217C00270000`
-4. Chiamare Yahoo Finance `v8/finance/chart/{OCC_SYMBOL}` per ottenere bid/ask
-5. Calcolare prezzo = `(bid + ask) / 2` (fallback su `regularMarketPrice` se bid/ask non disponibili)
-6. Aggiornare `positions.current_price` e `positions.updated_at` per la posizione corrispondente
-
-**Rate limiting** (stessa strategia dei sottostanti):
-- ~234 opzioni attive
-- Batch da 50, delay 200ms tra chiamate
-- Pausa 2 secondi tra batch
-- Timeout totale stimato: ~60 secondi
-
-**Rimozione vecchio cron job:**
-- `cron.unschedule(8)` per eliminare il job #8 non funzionante (Alpaca)
-- Eliminare la funzione deployata orfana
-
-**Nuovo cron job:**
-- Schedule: `*/5 8-22 * * 1-5` (identico al cron dei sottostanti)
-- Chiama la nuova edge function
-
-**Config:**
-- Aggiungere in `supabase/config.toml`:
-```
-[functions.update-option-prices-cron]
-verify_jwt = false
-```
-
----
-
-### Parte 2: Badge stale price per opzioni
-
-Per mostrare il triangolino rosso accanto al prezzo dell'opzione servono due modifiche:
-
-**2a. Rendere disponibile `updated_at` delle posizioni nel frontend**
-
-Il campo `positions.updated_at` esiste gia nel DB. Serve verificare che venga selezionato nella query e propagato ai componenti. Se `updated_at` e piu vecchio di 10 minuti O il mercato e chiuso, si mostra l'indicatore.
-
-**2b. Aggiungere `StalePriceIndicator` accanto a ogni prezzo opzione**
-
-In `src/pages/Derivatives.tsx`, accanto a ogni `formatCurrency(option.current_price || 0, 'USD')` nelle righe principali (non nei dettagli espandibili), aggiungere il triangolino con la stessa logica `shouldShowStaleIndicator`:
+Sostituire la logica di aggiustamento sabato/domenica con il calcolo del **3o venerdi del mese di scadenza**:
 
 ```typescript
-// Helper per opzioni (basato su updated_at della posizione)
-function shouldShowOptionStaleIndicator(option: Position, ticker?: string): boolean {
-  if (!option.updated_at) return false;
-  const STALE_MS = 10 * 60 * 1000;
-  const isStale = Date.now() - new Date(option.updated_at).getTime() > STALE_MS;
-  if (isStale) return true;
-  if (ticker && !isMarketOpen(ticker)) return true;
-  return false;
+function getThirdFriday(year: number, month: number): Date {
+  // month is 0-indexed (0=Jan)
+  const firstDay = new Date(year, month, 1);
+  // Find first Friday: dayOfWeek 5 = Friday
+  const firstFriday = 1 + ((5 - firstDay.getDay() + 7) % 7);
+  // Third Friday = first Friday + 14
+  const thirdFriday = firstFriday + 14;
+  return new Date(year, month, thirdFriday);
+}
+
+function buildOCCSymbol(ticker, expiryDate, optionType, strikePrice) {
+  const d = new Date(expiryDate);
+  // Calcola il 3o venerdi del mese di scadenza
+  const thirdFri = getThirdFriday(d.getFullYear(), d.getMonth());
+  const yy = thirdFri.getFullYear().toString().slice(-2);
+  const mm = (thirdFri.getMonth() + 1).toString().padStart(2, '0');
+  const dd = thirdFri.getDate().toString().padStart(2, '0');
+  // ... rest
 }
 ```
 
-Righe interessate (6 tipi di riga):
-- CoveredCallRow (riga ~821)
-- LongPutRow (riga ~993)  
-- NakedPutRow (riga ~1815)
-- LeapCallRow (riga ~1902)
-- IronCondorRow: i prezzi singoli delle gambe nei dettagli espandibili
-- DoubleDiagonalRow: idem
-- GroupedOtherStrategyRow (riga ~2047)
+Questo corregge TUTTI i mesi, non solo quelli dove il 21 cade di sabato/domenica.
 
-Il ticker per determinare il mercato si recupera da `underlyingPrices[option.underlying]?.ticker`.
+### Riepilogo
 
-**Aggiornamento tooltip header:** il testo "Prezzi Opzioni: valori statici caricati dal file Excel" (riga ~229) diventa "Prezzi Opzioni (PO): aggiornati ogni 5 minuti con (bid+ask)/2 da Yahoo Finance".
+| Problema | Causa | Fix |
+|----------|-------|-----|
+| 128/234 opzioni 404 | Data OCC errata (usa il 21 invece del 3o venerdi) | Calcolare il 3o venerdi del mese |
+| Triangolino rosso su alcune opzioni | Funziona correttamente: mostra stale per opzioni non aggiornate | Nessun fix necessario |
+| Nessun triangolino su altre opzioni | Funziona correttamente: opzioni Feb/Mar aggiornate di recente | Nessun fix necessario |
 
----
-
-### Riepilogo modifiche
-
-| File | Modifica |
-|------|----------|
-| `supabase/functions/update-option-prices-cron/index.ts` | Nuova edge function: Yahoo Finance OCC, (bid+ask)/2 |
-| `supabase/config.toml` | Aggiungere sezione `[functions.update-option-prices-cron]` |
-| DB migration | Rimuovere cron job #8, creare nuovo cron job |
-| `src/pages/Derivatives.tsx` | Aggiungere `StalePriceIndicator` accanto ai prezzi opzioni in tutte le righe, aggiornare tooltip header |
+Un solo file da modificare: `supabase/functions/update-option-prices-cron/index.ts`
 
