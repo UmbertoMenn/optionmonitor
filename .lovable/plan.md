@@ -1,42 +1,42 @@
 
 
-## Fix: Mostrare il triangolino rosso quando il mercato e chiuso
+## Fix: Cooldown non persistente a causa di duplicati nel database
 
 ### Problema
-Il triangolino rosso (`StalePriceIndicator`) viene mostrato **solo** quando `isStale === true` (prezzo aggiornato da piu di 10 minuti). Ma il cron job aggiorna i prezzi anche a mercato chiuso (usando il `previousClose` da Finnhub o l'ultimo prezzo Yahoo), quindi `updated_at` viene sempre refreshato e `isStale` resta `false`. Di conseguenza il componente non viene mai renderizzato a mercato chiuso.
+Il vincolo `UNIQUE (user_id, ticker, alert_type)` sulla tabella `alert_configs` **non impedisce i duplicati** quando `ticker` e `NULL`, perche in SQL `NULL != NULL`. Ogni salvataggio crea nuove righe invece di aggiornare quelle esistenti, e alla riapertura del dialog viene letto il primo record (quello vecchio).
 
-Il componente `StalePriceIndicator` contiene gia la logica per distinguere "Mercato chiuso" da "Prezzo non aggiornato" nel tooltip, ma non viene mai montato perche la condizione di rendering lo impedisce.
+Nel database di MauroG ci sono gia righe duplicate: per ogni `alert_type` esistono due record con `ticker = NULL`, uno con cooldown 240 e uno con 480.
 
 ### Soluzione
 
-Modificare la condizione di rendering in `Derivatives.tsx`: mostrare l'indicatore sia quando il prezzo e stale, sia quando il mercato di riferimento e chiuso.
+#### Migrazione SQL (un solo step)
 
-**File: `src/pages/Derivatives.tsx`**
+1. **Rimuovere i duplicati**: per ogni combinazione `(user_id, alert_type)` con `ticker IS NULL`, mantenere solo la riga piu recente (quella con `updated_at` o `id` piu alto)
+2. **Sostituire il vincolo unique** con un indice unico che tratta i NULL come valori uguali:
 
-In tutte le ~8 occorrenze dove compare:
-```tsx
-{underlyingPrices[underlying]?.isStale && (
-  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
-)}
+```sql
+-- 1. Remove duplicates: keep only the latest row per (user_id, alert_type) where ticker IS NULL
+DELETE FROM alert_configs a
+USING alert_configs b
+WHERE a.user_id = b.user_id
+  AND a.alert_type = b.alert_type
+  AND a.ticker IS NULL
+  AND b.ticker IS NULL
+  AND a.id < b.id;
+
+-- 2. Drop old constraint
+ALTER TABLE alert_configs
+  DROP CONSTRAINT alert_configs_user_id_ticker_alert_type_key;
+
+-- 3. Create new unique index that treats NULLs as equal
+CREATE UNIQUE INDEX alert_configs_user_id_ticker_alert_type_key
+  ON alert_configs (user_id, COALESCE(ticker, ''), alert_type);
 ```
 
-Cambiare in:
-```tsx
-{(underlyingPrices[underlying]?.isStale || 
-  (underlyingPrices[underlying]?.ticker && !isMarketOpen(underlyingPrices[underlying]!.ticker!))) && (
-  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
-)}
-```
+#### Nessuna modifica al codice frontend
 
-E aggiungere l'import di `isMarketOpen` da `@/lib/marketHours` in cima al file.
-
-Lo stesso pattern si applica alle righe che usano `option.underlying` come chiave (Covered Call, Naked Put, Protezioni, Leap Call).
-
-### Comportamento risultante
-- **Mercato chiuso**: triangolino rosso con tooltip "Mercato chiuso"
-- **Mercato aperto ma prezzo stale (>10 min)**: triangolino rosso con tooltip "Prezzo non aggiornato"
-- **Mercato aperto e prezzo fresco**: nessun indicatore
+Il codice di upsert usa gia `onConflict: 'user_id,ticker,alert_type'` che funzionera correttamente con il nuovo indice. L'unica causa del bug era il vincolo SQL che non gestiva i NULL.
 
 ### File coinvolti
-1. `src/pages/Derivatives.tsx` -- aggiungere import `isMarketOpen` + modificare ~8 condizioni di rendering
+1. **Migrazione SQL** -- pulizia duplicati + nuovo indice unique con COALESCE
 
