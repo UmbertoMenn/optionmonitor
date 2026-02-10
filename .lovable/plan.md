@@ -1,42 +1,44 @@
 
 
-## Fallback a regularMarketPrice per opzioni senza bid/ask
+## Fix: prezzo con indicatore stale che va a capo
 
 ### Problema
 
-Quando la option chain (`v7/finance/options`) non contiene il contratto cercato oppure restituisce bid/ask/lastPrice tutti a 0, l'opzione viene segnata come "failed" senza alcun prezzo.
+Nell'immagine si vede che il valore "12,53 $" va a capo con il simbolo "$" su una riga separata. Questo accade perche la colonna del prezzo nel CSS Grid e troppo stretta (es. `6rem`) per contenere contemporaneamente il prezzo formattato, l'icona triangolo rosso e la percentuale di variazione.
 
 ### Soluzione
 
-Aggiungere un secondo tentativo: per ogni opzione che fallisce il pricing dalla option chain, chiamare l'endpoint `v8/finance/chart/{OCC_SYMBOL}` per ottenere almeno il `regularMarketPrice` come fallback.
+Applicare due correzioni minimali:
 
-### Modifiche al file `supabase/functions/update-option-prices-cron/index.ts`
+1. **`whitespace-nowrap`** sul contenitore del prezzo (`div` con `flex items-center gap-1 justify-end`) in tutte le righe delle strategie, cosi che il valore monetario (es. "12,53 $") non vada mai a capo
+2. **Allargare la colonna prezzo** da `6rem` a `8rem` nelle definizioni `grid-cols-[...]` di tutte le righe che contengono il prezzo con indicatore stale
 
-1. **Nuova funzione `fetchFallbackPrice(occSymbol, crumb, cookie)`**:
-   - Chiama `https://query2.finance.yahoo.com/v8/finance/chart/{OCC_SYMBOL}?crumb=...` con autenticazione
-   - Estrae `regularMarketPrice` dalla risposta
-   - Ritorna il prezzo o `null`
+### File modificato
 
-2. **Modifica del loop principale** (righe 298-320):
-   - Quando `getMidPrice()` ritorna `null` (contratto non trovato o prezzi a 0), invece di segnare subito come "failed", chiama `fetchFallbackPrice()`
-   - Se il fallback restituisce un prezzo valido, aggiorna il database e logga come "fallback regularMarketPrice"
-   - Solo se anche il fallback fallisce, segna come "failed"
+**`src/pages/Derivatives.tsx`** - Circa 4 punti di modifica:
 
-3. **Logging migliorato**:
-   - Log specifico per distinguere: `[Price] mid`, `[Price] lastPrice`, `[Price] fallback regularMarketPrice`, `[Price] FAILED`
+- **Riga 688**: `6rem` finale diventa `8rem` nel grid template
+- **Riga 831**: aggiunta `whitespace-nowrap` al div del prezzo
+- Stesse modifiche replicate nelle altre sezioni (Naked Put riga 908, Leap Call riga 2131, Individual Options riga 1981) per coerenza
 
-### Flusso di priorita dei prezzi
+### Dettaglio tecnico
 
-```text
-1. (bid + ask) / 2    -- dalla option chain v7
-2. lastPrice           -- dalla option chain v7
-3. regularMarketPrice  -- dal chart endpoint v8 (NUOVO fallback)
-4. FAILED              -- nessun prezzo disponibile
+Grid template attuale (Covered Call):
+```
+grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_6rem]
+```
+Diventa:
+```
+grid-cols-[auto_auto_minmax(8rem,1fr)_auto_auto_auto_auto_8rem_6rem_4.5rem_5rem_8rem]
 ```
 
-### Note tecniche
+E il div del prezzo:
+```html
+<div className="flex items-center gap-1 justify-end">
+```
+Diventa:
+```html
+<div className="flex items-center gap-1 justify-end whitespace-nowrap">
+```
 
-- Il fallback aggiunge chiamate API solo per le opzioni che falliscono (attualmente ~11 su 234), quindi l'impatto sul rate limiting e minimo
-- Delay di 300ms tra ogni chiamata di fallback per rispettare i limiti Yahoo
-- Le chiamate di fallback vengono fatte inline, subito dopo il fallimento del pricing dalla chain
-
+Questo garantisce che prezzo + triangolino + percentuale restino sempre su una riga sola.
