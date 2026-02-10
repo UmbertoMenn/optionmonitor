@@ -10,6 +10,12 @@ import {
 } from './derivativeStrategies';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 
+function formatExpiryKey(expiry: string | null | undefined): string {
+  if (!expiry) return 'noexp';
+  const d = new Date(expiry);
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 interface StrategyRecord {
   portfolio_id: string;
   strategy_key: string;
@@ -71,7 +77,7 @@ export async function saveStrategyCache(
     
     records.push({
       portfolio_id: portfolioId,
-      strategy_key: `cc_${cc.option.id}`,
+      strategy_key: `cc_${underlying}_${cc.option.strike_price || 0}_${formatExpiryKey(cc.option.expiry_date)}`,
       strategy_type: 'Covered Call',
       underlying,
       ticker,
@@ -93,7 +99,7 @@ export async function saveStrategyCache(
     
     records.push({
       portfolio_id: portfolioId,
-      strategy_key: `np_${np.option.id}`,
+      strategy_key: `np_${underlying}_${np.option.strike_price || 0}_${formatExpiryKey(np.option.expiry_date)}`,
       strategy_type: 'Naked Put',
       underlying,
       ticker,
@@ -114,7 +120,7 @@ export async function saveStrategyCache(
     
     records.push({
       portfolio_id: portfolioId,
-      strategy_key: `ic_${ic.soldPut.id}_${ic.soldCall.id}`,
+      strategy_key: `ic_${ic.underlying}_${ic.soldPut.strike_price || 0}_${ic.soldCall.strike_price || 0}_${formatExpiryKey(ic.soldCall.expiry_date)}`,
       strategy_type: 'Iron Condor',
       underlying: ic.underlying,
       ticker,
@@ -135,7 +141,7 @@ export async function saveStrategyCache(
     
     records.push({
       portfolio_id: portfolioId,
-      strategy_key: `dd_${dd.soldPut.id}_${dd.soldCall.id}`,
+      strategy_key: `dd_${dd.underlying}_${dd.soldPut.strike_price || 0}_${dd.soldCall.strike_price || 0}_${formatExpiryKey(dd.soldCall.expiry_date)}`,
       strategy_type: 'Double Diagonal',
       underlying: dd.underlying,
       ticker,
@@ -157,7 +163,7 @@ export async function saveStrategyCache(
     
     records.push({
       portfolio_id: portfolioId,
-      strategy_key: `leap_${lc.option.id}`,
+      strategy_key: `leap_${underlying}_${lc.option.strike_price || 0}_${formatExpiryKey(lc.option.expiry_date)}`,
       strategy_type: 'LEAP Call',
       underlying,
       ticker,
@@ -226,7 +232,7 @@ export async function saveStrategyCache(
     
     records.push({
       portfolio_id: portfolioId,
-      strategy_key: `other_${positionIds.sort().join('_')}`,
+      strategy_key: `other_${gs.underlying}_${[soldPutStrike, soldCallStrike].filter(Boolean).sort().join('_')}_${formatExpiryKey(soldCallExpiry || soldPutExpiry)}`,
       strategy_type: gs.strategyName || 'Altre Strategie',
       underlying: gs.underlying,
       ticker,
