@@ -69,7 +69,8 @@ export function FileUploader() {
       } else {
         console.log('[FileUploader] Portfolio updated successfully');
         // Force refresh portfolio query to get the new snapshot_date
-        await queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+        await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+        await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       }
 
       // Passa targetPortfolioId alla mutation per garantire coerenza
