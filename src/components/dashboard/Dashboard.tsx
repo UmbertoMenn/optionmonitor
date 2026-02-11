@@ -12,7 +12,8 @@ import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle, Menu, Sun, Moon } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, Save, ShieldAlert, Trash2, AlertTriangle, Menu, Sun, Moon, Info } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
@@ -320,7 +321,22 @@ export function Dashboard() {
         )}
 
         {/* Unified View Mode Selector */}
-        <ViewModeSelector viewMode={viewMode} onViewModeChange={setViewMode} />
+        <div className="relative flex items-center justify-center">
+          <div className="absolute left-0">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
+                  <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>
+                  <p className="mt-1"><strong>Strategie Derivati:</strong> prezzi opzioni delayed 15 min, prezzi sottostanti aggiornati ogni 5 min.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <ViewModeSelector viewMode={viewMode} onViewModeChange={setViewMode} />
+        </div>
 
         {/* Stats */}
         {summary && (
