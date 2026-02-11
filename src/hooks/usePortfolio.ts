@@ -236,6 +236,7 @@ export function usePortfolio() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['positions'] });
       queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
       queryClient.invalidateQueries({ queryKey: ['derivative-overrides'] });
       toast.success('Portfolio aggiornato!');
     },
