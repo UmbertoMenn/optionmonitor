@@ -1,34 +1,45 @@
 
 
-## Fix: esclusione conto liquidita non funziona in modalita admin
+## Rimuovere emoji dai messaggi Telegram (tranne campanella e severity)
 
-### Problema
+### Stato attuale
 
-Nella riga 42 di `FileUploader.tsx`, il lookup usa `user?.id` che e l'ID dell'admin loggato, non quello dell'utente impersonificato (MauroG). Quindi la mappa `EXCLUDED_CASH_ACCOUNTS` non trova corrispondenza e il conto `0652278918440` viene incluso nella liquidita.
+Il messaggio Telegram contiene queste emoji:
+- 🔔 nel titolo "Avviso Portafoglio" -- **da mantenere**
+- Severity emoji (🔴/🟡/🔵) -- **da mantenere**
+- 👤 davanti a "Utente" -- da rimuovere
+- 📈 davanti a "Ticker" -- da rimuovere
+- 📊 davanti a "Strategia" -- da rimuovere
+- 📝 davanti a "Messaggio" -- da rimuovere
+- 📋 davanti a "Opzione/Breakeven" -- da rimuovere
 
-### Soluzione
+### Modifiche
 
-**File: `src/components/dashboard/FileUploader.tsx`**
+**File: `supabase/functions/send-notification/index.ts`**
 
-1. Importare `usePortfolioContext` e ottenere `isAdminMode` e `adminViewUserId`
-2. Calcolare l'ID utente effettivo (come fanno gia `useAlerts`, `usePriceAlerts`, ecc.):
-   ```typescript
-   const effectiveUserId = isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
-   ```
-3. Usare `effectiveUserId` al posto di `user?.id` nella riga 42:
-   ```typescript
-   const excludedCashAccounts = EXCLUDED_CASH_ACCOUNTS[effectiveUserId || ''] || [];
-   ```
+Nella funzione `sendTelegram` (righe 218-228), sostituire il template del messaggio rimuovendo le emoji decorative:
 
-### Dettaglio modifiche
+```
+Da:
+👤 *Utente:* ...
+📈 *Ticker:* ...
+📊 *Strategia:* ...
+📝 *Messaggio:* ...
+📋 *Opzione:* ...
 
-- Aggiungere import: `import { usePortfolioContext } from '@/contexts/PortfolioContext';`
-- Aggiungere nel componente: `const { isAdminMode, adminViewUserId } = usePortfolioContext();`
-- Calcolare: `const effectiveUserId = isAdminMode && adminViewUserId ? adminViewUserId : user?.id;`
-- Sostituire `user?.id` con `effectiveUserId` nella riga 42
+A:
+*Utente:* ...
+*Ticker:* ...
+*Strategia:* ...
+*Messaggio:* ...
+*Opzione:* ...
+```
+
+Anche nell'email (riga 171) rimuovere 📋 dal label dell'opzione.
 
 ### Cosa NON cambia
-- Nessuna modifica al parser Excel
-- Nessuna modifica alla logica di upload
-- Nessun impatto su utenti non-admin (per loro `effectiveUserId === user?.id`)
+- La 🔔 nel titolo resta
+- Le emoji di severity (🔴🟡🔵) restano
+- Nessuna modifica alla logica di invio
+- Nessuna modifica al formato email (tranne 📋)
 
