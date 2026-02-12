@@ -382,8 +382,11 @@ serve(async (req: Request): Promise<Response> => {
   }
 
   try {
+    const body = await req.json().catch(() => ({}));
+    const force = body?.force === true;
+
     // Smart guard: only run at exactly 12:00 Italian time
-    if (!isItalianNoon()) {
+    if (!force && !isItalianNoon()) {
       console.log("Not 12:00 Italian time, skipping briefing");
       return new Response(
         JSON.stringify({ skipped: true, reason: "not_italian_noon" }),
