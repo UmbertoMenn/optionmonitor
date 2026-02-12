@@ -67,7 +67,7 @@ function isETF(description: string, isin?: string): boolean {
   return false;
 }
 
-export async function parsePortfolioExcel(file: File): Promise<{
+export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[] }): Promise<{
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
   snapshotDate: string | null;
@@ -88,7 +88,7 @@ export async function parsePortfolioExcel(file: File): Promise<{
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
         
         const snapshotDate = extractSnapshotDate(jsonData);
-        const result = parsePortfolioData(jsonData);
+        const result = parsePortfolioData(jsonData, options);
         resolve({ ...result, snapshotDate });
       } catch (error) {
         reject(error);
@@ -179,7 +179,7 @@ function extractSnapshotDate(rows: any[][]): string | null {
   return null;
 }
 
-function parsePortfolioData(rows: any[][]): {
+function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[] }): {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
 } {
@@ -234,6 +234,12 @@ function parsePortfolioData(rows: any[][]): {
     
     // Parse data row based on section
     if (currentSection === 'cash') {
+      // Check if this account should be excluded
+      const accountId = String(row[0] || '').trim();
+      if (options?.excludedCashAccounts?.some(acc => accountId.includes(acc))) {
+        console.log(`[ExcelParser] Excluding cash account: ${accountId}`);
+        continue;
+      }
       const value = findColumnValue(row, headerRow, ['VALORIZZAZIONE EUR', 'VALORIZZAZIONE IN DIVISA']);
       if (value) {
         cashValue += parseExcelNumber(value);
