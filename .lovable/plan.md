@@ -1,72 +1,64 @@
 
 
-## Fix logica Naked Call e matching nel briefing giornaliero
+## Uniformare i prezzi sottostanti a quelli live (Yahoo/cron) in tutte le strategie
 
-### Problema identificato
+### Problema attuale
 
-La logica del briefing nella Edge Function `daily-briefing` ha un errore fondamentale nel calcolo delle **Naked Call**: le azioni in portafoglio NON hanno il campo `ticker` compilato (e sempre `null`), hanno solo la descrizione (es. `"AZ.NVIDIA CORP"`). La `strategy_cache` invece ha i ticker risolti (es. `"NVDA"`).
+I badge ITM/OTM/IR/OOR/IB/OOB/G/L usano sorgenti dati diverse a seconda della strategia:
 
-Il risultato: il matching per ticker non funziona mai, e tutte le call vendute risultano scoperte.
-
-### Come funziona il frontend (correttamente)
-
-La card "Posizioni da monitorare" (`DerivativesSummaryCard.tsx`) usa le `categories` gia classificate dal motore di strategie. NON ricalcola la classificazione — la riceve pronta. Per le Naked Call, usa `normalizeForMatching()` sulle descrizioni delle azioni e delle opzioni per trovare corrispondenze.
+| Strategia | Sorgente attuale | Si aggiorna col cron? |
+|---|---|---|
+| Iron Condor | `underlyingPrices[underlying].price` (Yahoo) | SI |
+| Double Diagonal | `underlyingPrices[underlying].price` (Yahoo) | SI |
+| Covered Call | `underlying.current_price` (Excel) | NO |
+| Long Put | `underlying.current_price` (Excel) | NO |
+| Naked Put | Excel con fallback Yahoo | Parzialmente |
+| Leap Call | Excel con fallback Yahoo | Parzialmente |
+| Altre Strategie (riga principale) | Excel con fallback Yahoo | Parzialmente |
+| Altre Strategie (gambe singole) | `underlying.current_price` (Excel) | NO |
 
 ### Soluzione
 
-Riscrivere completamente la logica Naked Call nella Edge Function usando un approccio ibrido:
+Uniformare TUTTE le righe per usare **sempre** `underlyingPrices[...].price` (il prezzo live da Yahoo, aggiornato ogni 5 minuti dal cron job), come gia fanno Iron Condor e Double Diagonal.
 
-1. **Per il matching stock-strategia**: usare la tabella `underlying_mappings` (che contiene la mappatura `underlying_name` -> `ticker`) per risolvere i nomi delle azioni al ticker corretto, lo stesso usato in `strategy_cache`
-2. **Inoltre**: applicare la stessa normalizzazione del frontend (rimozione prefisso "AZ.", suffissi corporate, etc.) come fallback
+### Modifiche al file `src/pages/Derivatives.tsx`
 
-### Dettaglio tecnico
+**1. CoveredCallRow** (linea 678)
+- Da: `const underlyingPrice = underlying.current_price || 0;`
+- A: `const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;`
+- Stessa modifica per la prop `underlyingPrice` del `CallPremiumCalculatorDialog` (linea 911)
 
-**File: `supabase/functions/daily-briefing/index.ts`**
+**2. LongPutRow** (linea 927)
+- Da: `const underlyingPrice = underlying?.current_price || 0;`
+- A: `const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;`
 
-**1. Aggiungere funzione di normalizzazione** (replica del frontend):
-```typescript
-function normalizeForMatching(str: string): string {
-  return str
-    .toUpperCase()
-    .replace(/\s+(INC|CORP|LTD|PLC|AG|SA|SPA|ADR|CLASS\s*[A-Z]?)\.?$/gi, '')
-    .replace(/^AZ\.\s*/i, '')
-    .trim();
-}
-```
+**3. NakedPutRow** (linee 2009-2011)
+- Da: logica con `portfolioPrice > 0 ? portfolioPrice : yahooPrice`
+- A: `const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;`
+- Rimuovere le variabili `portfolioPrice` e `yahooPrice`
 
-**2. Caricare `underlying_mappings`** dalla tabella per avere la mappatura nome -> ticker:
-```typescript
-const { data: mappings } = await supabase
-  .from('underlying_mappings')
-  .select('underlying_name, ticker');
-```
+**4. LeapCallRow** (linee 2163-2165)
+- Da: logica con `portfolioPrice > 0 ? portfolioPrice : yahooPrice`
+- A: `const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;`
+- Rimuovere le variabili `portfolioPrice` e `yahooPrice`
 
-**3. Riscrivere la logica Naked Call** nel `buildBriefingSections`:
-- Per ogni azione (position con `asset_type === 'stock'`):
-  - Normalizzare la descrizione
-  - Cercare il ticker corrispondente in `underlying_mappings` (matching fuzzy per nome)
-  - Contare le azioni possedute
-- Per ogni strategia in `strategy_cache`:
-  - Covered Call: conta come 1 sold call per il ticker
-  - Iron Condor / Double Diagonal: conta 1 sold + 1 bought (netto 0)
-  - LEAP Call: conta come 1 bought call
-  - Altre strategie: controlla option_type e quantita dalle posizioni originali
-- Il confronto avviene per **ticker risolto**, non per nome grezzo
+**5. GroupedOtherStrategyRow** (linee 1559-1561)
+- Da: logica con `portfolioPrice > 0 ? portfolioPrice : yahooPrice`
+- A: `const underlyingPrice = underlyingPrices[underlying]?.price || 0;` (come Iron Condor)
+- Rimuovere le variabili `portfolioPrice` e `yahooPrice`
 
-**4. Aggiungere anche il matching per "Call da rivendere"** con la stessa logica di normalizzazione, dato che soffre dello stesso problema.
+**6. GroupedOptionLegRow** (linea 1814)
+- Da: `const underlyingPrice = underlying?.current_price || 0;`
+- A: riceve `underlyingPrices` come prop e usa `underlyingPrices[option.underlying || '']?.price || 0;`
+- Aggiornare anche la chiamata al componente (linea 1790) per passare `underlyingPrices`
 
-### Dati coinvolti (dal database reale)
-- Azioni: `ticker = null`, `description = "AZ.NVIDIA CORP"` (qty 100)
-- Strategy cache: `ticker = "NVDA"`, `strategy_type = "LEAP Call"`
-- Underlying mappings: `underlying_name = "NVIDIA CORP"` -> `ticker = "NVDA"`
+### Risultato
 
-### Cosa cambia
-- Riscrittura della funzione `buildBriefingSections` in `daily-briefing/index.ts`
-- Aggiunta query per `underlying_mappings`
-- Aggiunta funzione `normalizeForMatching`
-- Logica di matching stock->ticker basata su `underlying_mappings` + normalizzazione
+Dopo questa modifica, tutti i badge (ITM/OTM/IR/OOR/IB/OOB/G/L) si aggiorneranno in tempo reale con il cron job ogni 5 minuti, garantendo coerenza tra tutte le sezioni della pagina Strategie Derivati.
 
-### Cosa NON cambia
-- Logica ITM, OOR, OOB per le altre sezioni (usano gia `strategy_cache.ticker` e `underlying_prices` correttamente)
-- Nessuna modifica al frontend o ad altre Edge Function
+### Nessun impatto su
+
+- Dashboard e Risk Analyzer (continuano a usare i prezzi snapshot Excel, come da politica sorgenti dati)
+- Edge Function `check-alerts` e `daily-briefing` (usano `underlying_prices` dal DB)
 - Nessuna modifica al database
+
