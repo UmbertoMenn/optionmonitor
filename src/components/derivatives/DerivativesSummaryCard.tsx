@@ -222,7 +222,7 @@ export function DerivativesSummaryCard({
     
     categories.coveredCalls.forEach(cc => {
       const strikePrice = cc.option.strike_price || 0;
-      const underlyingPrice = cc.underlying.current_price || 0;
+      const underlyingPrice = (cc.option.underlying ? underlyingPrices[cc.option.underlying]?.price : 0) || 0;
       
       if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
         result.push({
@@ -310,7 +310,7 @@ export function DerivativesSummaryCard({
     
     categories.nakedPuts.forEach(np => {
       const strikePrice = np.option.strike_price || 0;
-      const underlyingPrice = np.underlying?.current_price || 0;
+      const underlyingPrice = (np.option.underlying ? underlyingPrices[np.option.underlying]?.price : 0) || 0;
       const isITM = underlyingPrice > 0 && strikePrice > underlyingPrice;
       
       if (isITM) {
