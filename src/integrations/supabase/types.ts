@@ -795,6 +795,33 @@ export type Database = {
         }
         Relationships: []
       }
+      strategy_alert_toggles: {
+        Row: {
+          created_at: string | null
+          enabled: boolean
+          id: string
+          strategy_key: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          enabled?: boolean
+          id?: string
+          strategy_key: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          enabled?: boolean
+          id?: string
+          strategy_key?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       strategy_cache: {
         Row: {
           bought_call_strike: number | null

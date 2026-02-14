@@ -323,15 +323,33 @@ serve(async (req) => {
         
         const strategies: StrategyCache[] = strategiesCache;
         
+        // ============ FETCH STRATEGY ALERT TOGGLES ============
+        const { data: strategyTogglesData } = await supabase
+          .from('strategy_alert_toggles')
+          .select('strategy_key, enabled')
+          .eq('user_id', userId)
+          .eq('enabled', false);
+        
+        const disabledStrategyKeys = new Set<string>(
+          (strategyTogglesData || []).map((t: any) => t.strategy_key)
+        );
+        
+        // Filter out disabled strategies
+        const activeStrategies = strategies.filter(s => !disabledStrategyKeys.has(s.strategy_key));
+        
+        if (activeStrategies.length < strategies.length) {
+          console.log(`[${portfolioId}] Filtered ${strategies.length - activeStrategies.length} disabled strategies`);
+        }
+        
         // Build set of position IDs used in strategies
         const usedPositionIds = new Set<string>();
-        for (const s of strategies) {
+        for (const s of activeStrategies) {
           for (const posId of s.position_ids) {
             usedPositionIds.add(posId);
           }
         }
         
-        console.log(`[${portfolioId}] Loaded ${strategies.length} strategies from cache`);
+        console.log(`[${portfolioId}] Loaded ${activeStrategies.length}/${strategies.length} active strategies from cache`);
         
         // Get positions for this portfolio (for LEAP gain calculations)
         const { data: positions, error: positionsError } = await supabase
@@ -345,7 +363,7 @@ serve(async (req) => {
         }
         
         // Get underlying prices from database
-        const allTickers = [...new Set(strategies.map(s => s.ticker).filter(Boolean) as string[])];
+        const allTickers = [...new Set(activeStrategies.map(s => s.ticker).filter(Boolean) as string[])];
         const underlyingPrices: Record<string, number> = {};
         
         if (allTickers.length > 0) {
@@ -380,7 +398,7 @@ serve(async (req) => {
         });
         
         // ============ PROCESS STRATEGIES FROM CACHE ============
-        for (const strategy of strategies) {
+        for (const strategy of activeStrategies) {
           const ticker = strategy.ticker || 'N/A';
           const underlyingPrice = strategy.ticker ? (underlyingPrices[strategy.ticker] || 0) : 0;
           const strategyType = strategy.strategy_type;
