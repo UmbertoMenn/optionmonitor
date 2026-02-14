@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAdminPortfolios } from '@/hooks/useAdminPortfolios';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -29,7 +31,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check, Users, X } from 'lucide-react';
+import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check, Users, X, User } from 'lucide-react';
 import { formatCurrency } from '@/lib/formatters';
 
 export function PortfolioSelector() {
@@ -45,7 +47,9 @@ export function PortfolioSelector() {
     isAdminMode,
     isAggregatedView,
     exitAdminMode,
+    setAdminViewPortfolio,
   } = usePortfolioContext();
+  const { otherUsers } = useAdminPortfolios();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -138,7 +142,7 @@ export function PortfolioSelector() {
               <ChevronDown className="w-4 h-4 ml-2 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[280px]">
+          <DropdownMenuContent align="start" className="w-[280px] max-h-[400px] overflow-y-auto">
             {/* Aggregated option for admin */}
             {isAdmin && (
               <>
@@ -220,6 +224,49 @@ export function PortfolioSelector() {
               <Plus className="w-4 h-4 mr-2" />
               Nuovo Portfolio
             </DropdownMenuItem>
+            {/* Client portfolios section (admin only) */}
+            {isAdmin && otherUsers.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs text-muted-foreground uppercase tracking-wider">
+                  Portafogli Clienti
+                </DropdownMenuLabel>
+                {otherUsers.map((client) => (
+                  <div key={client.userId}>
+                    <DropdownMenuLabel className="text-xs font-medium py-1">
+                      {client.name || client.email}
+                      {client.name && (
+                        <span className="text-muted-foreground font-normal ml-1">({client.email})</span>
+                      )}
+                    </DropdownMenuLabel>
+                    {client.portfolios.map((p) => (
+                      <DropdownMenuItem
+                        key={p.id}
+                        className="flex items-center justify-between cursor-pointer pl-6"
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          setAdminViewPortfolio(p.id, client.userId);
+                        }}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {p.id === selectedPortfolio?.id && isAdminMode ? (
+                            <Check className="w-4 h-4 text-warning shrink-0" />
+                          ) : (
+                            <User className="w-3 h-3 text-muted-foreground shrink-0" />
+                          )}
+                          <span className="truncate">{p.name}</span>
+                        </div>
+                        {p.total_value && p.total_value > 0 && (
+                          <span className="text-xs text-muted-foreground ml-2">
+                            {formatCurrency(p.total_value)}
+                          </span>
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                ))}
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
