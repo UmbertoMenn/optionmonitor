@@ -1,21 +1,56 @@
 
 
-## Fix: TypeError "Cannot read properties of undefined (reading 'netting_total')"
+## Accesso rapido ai portafogli clienti dal selettore
 
-### Causa
+### Obiettivo
 
-In `StatsCards.tsx`, la variabile `selectedHistoricalEntry` viene calcolata con `historicalData.find(...)`, che restituisce `undefined` quando non trova corrispondenza. Il controllo alla riga 122 usa `!== null`, ma `undefined !== null` e' `true`, quindi `hasHistoricalData` risulta erroneamente vero. Il codice accede poi a `selectedHistoricalEntry!.netting_total` su un valore `undefined`, causando il crash.
+Aggiungere una sezione "Portafogli Clienti" direttamente nel dropdown del selettore portafoglio, visibile solo per gli admin. Questo permette di passare al portafoglio di un cliente con un click, senza navigare al pannello admin.
 
-Questo accade quando si esce dalla vista aggregata: `selectedHistoricalDate` contiene ancora una data dei dati aggregati che non esiste nello storico del singolo portafoglio.
+### Approccio
 
-### Fix
+Utilizzare l'hook `useAdminPortfolios` (gia esistente) nel componente `PortfolioSelector` per ottenere i portafogli degli altri utenti, raggruppati per cliente. Il dropdown mostrera prima i portafogli dell'admin, poi un separatore, e infine i portafogli dei clienti raggruppati per nome/email.
 
-**File: `src/components/dashboard/StatsCards.tsx`**
+### Modifiche
 
-Riga 122 - cambiare il controllo da strict null a truthiness check:
+**File: `src/components/portfolio/PortfolioSelector.tsx`**
 
-- Da: `const hasHistoricalData = selectedHistoricalEntry !== null;`
-- A: `const hasHistoricalData = !!selectedHistoricalEntry;`
+1. **Import** di `useAdminPortfolios` e del metodo `setAdminViewPortfolio` dal context
+2. **Sezione clienti nel dropdown**: dopo i portafogli dell'admin e il pulsante "Nuovo Portfolio", aggiungere:
+   - Un separatore con label "Portafogli Clienti"
+   - Per ogni cliente (otherUsers da `useAdminPortfolios`): un sotto-header con nome/email del cliente, seguito dai suoi portafogli come voci selezionabili
+   - Ogni voce mostra nome portafoglio e valore totale (se disponibile)
+   - Click su un portafoglio cliente chiama `setAdminViewPortfolio(portfolioId, ownerUserId)` per entrare in modalita admin
+3. **Scroll**: aggiungere `max-h-[400px] overflow-y-auto` al `DropdownMenuContent` per gestire liste lunghe
+4. **Check visivo**: i portafogli dei clienti hanno un'icona utente per distinguerli dai propri
 
-Questo gestisce correttamente sia `null` che `undefined`, prevenendo l'accesso a proprieta' su valori non definiti.
+### Layout del dropdown (solo admin)
+
+```text
+[v] Aggregato - Tutti gli Utenti
+---
+[ ] Mio Portfolio 1          €XX.XXX
+[v] Mio Portfolio 2          €XX.XXX
+---
++ Nuovo Portfolio
+---
+PORTAFOGLI CLIENTI
+  Mario Rossi (mario@...)
+    [ ] Portfolio Trading     €XX.XXX
+    [ ] Portfolio Long Term   €XX.XXX
+  Anna Bianchi (anna@...)
+    [ ] Portfolio Principale  €XX.XXX
+```
+
+### Dettagli tecnici
+
+- `useAdminPortfolios` viene chiamato solo se `isAdmin` e' true (la query interna ha gia `enabled: isAdmin`)
+- `setAdminViewPortfolio` e' gia esposto dal `PortfolioContext` e gestisce l'invalidazione delle query
+- I portafogli clienti usano `DropdownMenuLabel` per i nomi utente (non cliccabili) e `DropdownMenuItem` per i singoli portafogli
+- Nessuna modifica al database o al context necessaria
+
+### Riepilogo
+
+| File | Modifica |
+|---|---|
+| `src/components/portfolio/PortfolioSelector.tsx` | Aggiunta sezione "Portafogli Clienti" nel dropdown con dati da `useAdminPortfolios` |
 
