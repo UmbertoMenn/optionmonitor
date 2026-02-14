@@ -119,7 +119,7 @@ export function StatsCards({
   const selectedHistoricalEntry = selectedHistoricalDate 
     ? historicalData.find(h => h.snapshot_date === selectedHistoricalDate) 
     : null;
-  const hasHistoricalData = selectedHistoricalEntry !== null;
+  const hasHistoricalData = !!selectedHistoricalEntry;
 
   // Get the snapshot date from portfolio (extracted from Excel)
   const snapshotDate = portfolio?.snapshot_date;
