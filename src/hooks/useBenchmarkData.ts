@@ -227,41 +227,32 @@ export function useBenchmarkData(
       return { price: null, matchedDate: null, isStale: true, daysDiff: -1 };
     };
 
-    // Calculate cumulative returns from the first snapshot
-    const firstEntry = sortedHistory[0];
-    const firstDate = firstEntry.snapshot_date;
-    
-    // Get base prices for all benchmarks
-    const basePrices: Record<string, number> = {};
-    ALL_TICKERS.forEach(ticker => {
-      const result = getClosestPrice(ticker, firstDate);
-      if (result.price) basePrices[ticker] = result.price;
-    });
-
-    // Helper to calculate EUR/USD variation for currency adjustment
-    // Formula: variazione_EURUSD = ((EURUSD_current / EURUSD_base) - 1) * 100
-    // If EUR appreciates (EURUSD goes up), USD assets lose value in EUR terms
-    const calculateEurusdVariation = (targetDate: string): number => {
-      const eurusdBase = basePrices[EURUSD_TICKER];
-      const eurusdResult = getClosestPrice(EURUSD_TICKER, targetDate);
-      
-      if (!eurusdBase || !eurusdResult.price) return 0;
-      
-      // Variation in percentage: if EURUSD goes from 1.10 to 1.15, variation is ~4.5%
-      return ((eurusdResult.price / eurusdBase) - 1) * 100;
+    // Helper to get equity/USD pct with correct fallback (0 is valid, only null/undefined triggers fallback)
+    const getEquityPct = (entry: typeof sortedHistory[0]): number => {
+      const val = entry.equity_exposure_pct;
+      return val != null && val >= 0 ? val : (equityExposurePct ?? 0.6);
+    };
+    const getUsdPct = (entry: typeof sortedHistory[0]): number => {
+      const val = entry.usd_exposure_pct;
+      return val != null && val >= 0 ? val : (usdExposurePct ?? 0.8);
     };
 
-    // Calculate returns for each historical snapshot using HISTORICAL equity exposure
-    // IMPORTANT: The equity exposure at point N determines the benchmark return from N to N+1
+    // Calculate returns using PERIOD-BY-PERIOD multiplicative composition
     const returns: Array<{
       date: string;
       equityReturn: number;
       bondReturn: number;
       scaledReturn: number;
       eurusdVariation?: number;
-      equityPctUsed?: number; // Track which equity % was used for debugging
-      usdPctUsed?: number; // Track which USD % was used for currency adjustment
+      equityPctUsed?: number;
+      usdPctUsed?: number;
     }> = [];
+
+    let cumulativeFactor = 1.0;
+    // Track cumulative equity/bond returns from first point for tooltip display
+    let cumulativeEquityFactor = 1.0;
+    let cumulativeBondFactor = 1.0;
+    let cumulativeEurusdFactor = 1.0;
 
     sortedHistory.forEach((entry, index) => {
       if (index === 0) {
@@ -276,180 +267,161 @@ export function useBenchmarkData(
         return;
       }
 
-      // Calculate equity benchmark return (average of available equity benchmarks)
-      const equityReturns: number[] = [];
+      const prevEntry = sortedHistory[index - 1];
+      const prevDate = prevEntry.snapshot_date;
+      const currDate = entry.snapshot_date;
       const missingTickers: string[] = [];
       const staleTickers: string[] = [];
       const staleDetails: Record<string, StaleTickerDetail> = {};
-      
+
+      // Calculate PERIOD equity returns (not cumulative)
+      const equityPeriodReturns: number[] = [];
       EQUITY_BENCHMARKS.forEach(ticker => {
-        const basePrice = basePrices[ticker];
-        const result = getClosestPrice(ticker, entry.snapshot_date);
-        if (basePrice && result.price) {
-          equityReturns.push(((result.price - basePrice) / basePrice) * 100);
-          if (result.isStale && result.matchedDate) {
+        const prevResult = getClosestPrice(ticker, prevDate);
+        const currResult = getClosestPrice(ticker, currDate);
+        if (prevResult.price && currResult.price) {
+          equityPeriodReturns.push((currResult.price - prevResult.price) / prevResult.price);
+          if (currResult.isStale && currResult.matchedDate) {
             staleTickers.push(ticker);
-            staleDetails[ticker] = { lastDate: result.matchedDate, daysDiff: result.daysDiff };
+            staleDetails[ticker] = { lastDate: currResult.matchedDate, daysDiff: currResult.daysDiff };
           }
         } else {
           missingTickers.push(ticker);
         }
       });
 
-      // Also check bond ticker
-      const aggResult = getClosestPrice(BOND_TICKER, entry.snapshot_date);
-      if (!aggResult.price) {
-        missingTickers.push(BOND_TICKER);
-      } else if (aggResult.isStale && aggResult.matchedDate) {
-        staleTickers.push(BOND_TICKER);
-        staleDetails[BOND_TICKER] = { lastDate: aggResult.matchedDate, daysDiff: aggResult.daysDiff };
-      }
-      
-      if (missingTickers.length > 0 || staleTickers.length > 0) {
-        gaps.push({ date: entry.snapshot_date, missingTickers, staleTickers, staleDetails });
-      }
-
-      const avgEquityReturn = equityReturns.length > 0 
-        ? equityReturns.reduce((a, b) => a + b, 0) / equityReturns.length 
+      const avgEquityPeriodReturn = equityPeriodReturns.length > 0
+        ? equityPeriodReturns.reduce((a, b) => a + b, 0) / equityPeriodReturns.length
         : 0;
 
-      // Calculate bond return (AGG)
-      const aggBase = basePrices[BOND_TICKER];
-      let bondReturn = 0;
-      if (aggBase && aggResult.price) {
-        bondReturn = ((aggResult.price - aggBase) / aggBase) * 100;
+      // Calculate PERIOD bond return
+      const bondPrevResult = getClosestPrice(BOND_TICKER, prevDate);
+      const bondCurrResult = getClosestPrice(BOND_TICKER, currDate);
+      let bondPeriodReturn = 0;
+      if (bondPrevResult.price && bondCurrResult.price) {
+        bondPeriodReturn = (bondCurrResult.price - bondPrevResult.price) / bondPrevResult.price;
+        if (bondCurrResult.isStale && bondCurrResult.matchedDate) {
+          staleTickers.push(BOND_TICKER);
+          staleDetails[BOND_TICKER] = { lastDate: bondCurrResult.matchedDate, daysDiff: bondCurrResult.daysDiff };
+        }
+      } else if (!bondCurrResult.price) {
+        missingTickers.push(BOND_TICKER);
       }
 
-      // CRITICAL: Use the PREVIOUS point's equity exposure for this period's benchmark
-      // The equity exposure at point N determines the benchmark return from N to N+1
-      const prevEntry = sortedHistory[index - 1];
-      const historicalEquityPct = prevEntry.equity_exposure_pct;
-      
-      // Use historical equity exposure if available (> 0), otherwise fallback
-      // Note: 0 is treated as "not set" and falls back to current or 60%
-      const equityPct = historicalEquityPct && historicalEquityPct > 0 
-        ? historicalEquityPct 
-        : (equityExposurePct ?? 0.6);
-      
-      let scaledReturn = equityPct * avgEquityReturn + (1 - equityPct) * bondReturn;
+      if (missingTickers.length > 0 || staleTickers.length > 0) {
+        gaps.push({ date: currDate, missingTickers, staleTickers, staleDetails });
+      }
 
-      // Apply currency adjustment if enabled using HISTORICAL USD exposure
-      // Same logic as equity: use previous point's USD exposure for this period's adjustment
-      let eurusdVariation = 0;
-      if (currencyAdjusted) {
-        const historicalUsdPct = prevEntry.usd_exposure_pct;
-        const usdPct = historicalUsdPct && historicalUsdPct > 0 
-          ? historicalUsdPct 
-          : (usdExposurePct ?? 0.8);
-        
-        if (usdPct > 0) {
-          eurusdVariation = calculateEurusdVariation(entry.snapshot_date);
-          // If EUR appreciates (positive variation), USD assets lose value → reduce benchmark
-          scaledReturn = scaledReturn - (usdPct * eurusdVariation);
+      // Weight from PREVIOUS point (determines benchmark allocation for this period)
+      const equityPct = getEquityPct(prevEntry);
+
+      // Weighted period return
+      let periodReturn = equityPct * avgEquityPeriodReturn + (1 - equityPct) * bondPeriodReturn;
+
+      // Currency adjustment per-period
+      let eurusdPeriodVariation = 0;
+      const usdPct = getUsdPct(prevEntry);
+      if (currencyAdjusted && usdPct > 0) {
+        const eurusdPrevResult = getClosestPrice(EURUSD_TICKER, prevDate);
+        const eurusdCurrResult = getClosestPrice(EURUSD_TICKER, currDate);
+        if (eurusdPrevResult.price && eurusdCurrResult.price) {
+          eurusdPeriodVariation = (eurusdCurrResult.price / eurusdPrevResult.price) - 1;
+          periodReturn = periodReturn - (usdPct * eurusdPeriodVariation);
         }
       }
 
-      // Track the USD exposure used for this period
-      const historicalUsdPct = prevEntry.usd_exposure_pct;
-      const usdPctForTracking = currencyAdjusted && historicalUsdPct && historicalUsdPct > 0 
-        ? historicalUsdPct 
-        : (currencyAdjusted ? (usdExposurePct ?? 0.8) : undefined);
+      // Multiplicative composition
+      cumulativeFactor *= (1 + periodReturn);
+      cumulativeEquityFactor *= (1 + avgEquityPeriodReturn);
+      cumulativeBondFactor *= (1 + bondPeriodReturn);
+      cumulativeEurusdFactor *= (1 + eurusdPeriodVariation);
 
       returns.push({
-        date: entry.snapshot_date,
-        equityReturn: avgEquityReturn,
-        bondReturn,
-        scaledReturn,
-        eurusdVariation,
+        date: currDate,
+        equityReturn: (cumulativeEquityFactor - 1) * 100,
+        bondReturn: (cumulativeBondFactor - 1) * 100,
+        scaledReturn: (cumulativeFactor - 1) * 100,
+        eurusdVariation: (cumulativeEurusdFactor - 1) * 100,
         equityPctUsed: equityPct,
-        usdPctUsed: usdPctForTracking,
+        usdPctUsed: currencyAdjusted ? usdPct : undefined,
       });
     });
 
     // Add current date point if provided and not already in returns
     if (currentDate && !returns.find(r => r.date === currentDate)) {
-      const equityReturnsCurrent: number[] = [];
+      const lastEntry = sortedHistory[sortedHistory.length - 1];
+      const lastDate = lastEntry.snapshot_date;
       const missingTickers: string[] = [];
       const staleTickers: string[] = [];
       const staleDetails: Record<string, StaleTickerDetail> = {};
 
+      // Period equity returns from last snapshot to current
+      const equityPeriodReturns: number[] = [];
       EQUITY_BENCHMARKS.forEach(ticker => {
-        const basePrice = basePrices[ticker];
-        const result = getClosestPrice(ticker, currentDate);
-        if (basePrice && result.price) {
-          equityReturnsCurrent.push(((result.price - basePrice) / basePrice) * 100);
-          if (result.isStale && result.matchedDate) {
+        const prevResult = getClosestPrice(ticker, lastDate);
+        const currResult = getClosestPrice(ticker, currentDate);
+        if (prevResult.price && currResult.price) {
+          equityPeriodReturns.push((currResult.price - prevResult.price) / prevResult.price);
+          if (currResult.isStale && currResult.matchedDate) {
             staleTickers.push(ticker);
-            staleDetails[ticker] = { lastDate: result.matchedDate, daysDiff: result.daysDiff };
+            staleDetails[ticker] = { lastDate: currResult.matchedDate, daysDiff: currResult.daysDiff };
           }
         } else {
           missingTickers.push(ticker);
         }
       });
 
-      // Also check bond ticker for current date
-      const aggResultCurrent = getClosestPrice(BOND_TICKER, currentDate);
-      if (!aggResultCurrent.price) {
+      const avgEquityPeriodReturn = equityPeriodReturns.length > 0
+        ? equityPeriodReturns.reduce((a, b) => a + b, 0) / equityPeriodReturns.length
+        : 0;
+
+      // Period bond return
+      const bondPrevResult = getClosestPrice(BOND_TICKER, lastDate);
+      const bondCurrResult = getClosestPrice(BOND_TICKER, currentDate);
+      let bondPeriodReturn = 0;
+      if (bondPrevResult.price && bondCurrResult.price) {
+        bondPeriodReturn = (bondCurrResult.price - bondPrevResult.price) / bondPrevResult.price;
+        if (bondCurrResult.isStale && bondCurrResult.matchedDate) {
+          staleTickers.push(BOND_TICKER);
+          staleDetails[BOND_TICKER] = { lastDate: bondCurrResult.matchedDate, daysDiff: bondCurrResult.daysDiff };
+        }
+      } else if (!bondCurrResult.price) {
         missingTickers.push(BOND_TICKER);
-      } else if (aggResultCurrent.isStale && aggResultCurrent.matchedDate) {
-        staleTickers.push(BOND_TICKER);
-        staleDetails[BOND_TICKER] = { lastDate: aggResultCurrent.matchedDate, daysDiff: aggResultCurrent.daysDiff };
       }
 
       if (missingTickers.length > 0 || staleTickers.length > 0) {
         gaps.push({ date: currentDate, missingTickers, staleTickers, staleDetails });
       }
 
-      const avgEquityReturnCurrent = equityReturnsCurrent.length > 0 
-        ? equityReturnsCurrent.reduce((a, b) => a + b, 0) / equityReturnsCurrent.length 
-        : 0;
+      // Use last snapshot's exposure
+      const equityPct = getEquityPct(lastEntry);
+      const usdPct = getUsdPct(lastEntry);
 
-      // Calculate bond return for current date
-      const aggBase = basePrices[BOND_TICKER];
-      let bondReturnCurrent = 0;
-      if (aggBase && aggResultCurrent.price) {
-        bondReturnCurrent = ((aggResultCurrent.price - aggBase) / aggBase) * 100;
-      }
+      let periodReturn = equityPct * avgEquityPeriodReturn + (1 - equityPct) * bondPeriodReturn;
 
-      // Calculate scaled return using the LAST historical point's equity exposure
-      // This represents the equity exposure from the last snapshot to current date
-      const lastEntry = sortedHistory[sortedHistory.length - 1];
-      const historicalEquityPct = lastEntry?.equity_exposure_pct;
-      
-      const equityPct = historicalEquityPct && historicalEquityPct > 0 
-        ? historicalEquityPct 
-        : (equityExposurePct ?? 0.6);
-        
-      let scaledReturnCurrent = equityPct * avgEquityReturnCurrent + (1 - equityPct) * bondReturnCurrent;
-
-      // Apply currency adjustment if enabled using last historical USD exposure
-      let eurusdVariationCurrent = 0;
-      if (currencyAdjusted) {
-        const historicalUsdPct = lastEntry?.usd_exposure_pct;
-        const usdPct = historicalUsdPct && historicalUsdPct > 0 
-          ? historicalUsdPct 
-          : (usdExposurePct ?? 0.8);
-        
-        if (usdPct > 0) {
-          eurusdVariationCurrent = calculateEurusdVariation(currentDate);
-          scaledReturnCurrent = scaledReturnCurrent - (usdPct * eurusdVariationCurrent);
+      let eurusdPeriodVariation = 0;
+      if (currencyAdjusted && usdPct > 0) {
+        const eurusdPrevResult = getClosestPrice(EURUSD_TICKER, lastDate);
+        const eurusdCurrResult = getClosestPrice(EURUSD_TICKER, currentDate);
+        if (eurusdPrevResult.price && eurusdCurrResult.price) {
+          eurusdPeriodVariation = (eurusdCurrResult.price / eurusdPrevResult.price) - 1;
+          periodReturn = periodReturn - (usdPct * eurusdPeriodVariation);
         }
       }
 
-      // Track the USD exposure used for current point
-      const historicalUsdPct = lastEntry?.usd_exposure_pct;
-      const usdPctForTrackingCurrent = currencyAdjusted && historicalUsdPct && historicalUsdPct > 0 
-        ? historicalUsdPct 
-        : (currencyAdjusted ? (usdExposurePct ?? 0.8) : undefined);
+      const finalFactor = cumulativeFactor * (1 + periodReturn);
+      const finalEquityFactor = cumulativeEquityFactor * (1 + avgEquityPeriodReturn);
+      const finalBondFactor = cumulativeBondFactor * (1 + bondPeriodReturn);
+      const finalEurusdFactor = cumulativeEurusdFactor * (1 + eurusdPeriodVariation);
 
       returns.push({
         date: currentDate,
-        equityReturn: avgEquityReturnCurrent,
-        bondReturn: bondReturnCurrent,
-        scaledReturn: scaledReturnCurrent,
-        eurusdVariation: eurusdVariationCurrent,
+        equityReturn: (finalEquityFactor - 1) * 100,
+        bondReturn: (finalBondFactor - 1) * 100,
+        scaledReturn: (finalFactor - 1) * 100,
+        eurusdVariation: (finalEurusdFactor - 1) * 100,
         equityPctUsed: equityPct,
-        usdPctUsed: usdPctForTrackingCurrent,
+        usdPctUsed: currencyAdjusted ? usdPct : undefined,
       });
     }
 
@@ -465,7 +437,6 @@ export function useBenchmarkData(
           const target = new Date(targetDate);
           const last = new Date(lastDate);
           const daysDiff = Math.floor((target.getTime() - last.getTime()) / (1000 * 60 * 60 * 24));
-          // Report if more than 2 days old (considering weekends)
           if (daysDiff > 2) {
             summary.push({ ticker, lastDate, daysDiff });
           }
