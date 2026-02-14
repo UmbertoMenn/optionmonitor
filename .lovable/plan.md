@@ -1,115 +1,50 @@
 
 
-## Vista Aggregata per-utente: implementazione
+## Fix: Valuta hardcoded a USD nelle Strategie Derivati
 
-### Obiettivo
+### Problema
 
-1. Ogni utente con 2+ portafogli vede "Il Mio Aggregato" nel selettore
-2. L'admin vede anche un "Aggregato" per ogni cliente con 2+ portafogli
-3. I grafici storici funzionano correttamente per gli aggregati per-utente, riutilizzando la stessa logica di interpolazione gia in uso per l'aggregato globale
+Tutte le righe delle strategie derivati (Covered Call, Long Put, Naked Put, Iron Condor, ecc.) utilizzano `'USD'` come valuta hardcoded per la formattazione dei prezzi. Per titoli italiani come ENI (che operano in EUR), questo causa:
 
-### Architettura: ID speciale
+1. **Strike price con "$"** nella descrizione (es. "Eni - Stock CALL $15" invece di "CALL 15")
+2. **PS (Prezzo Sottostante) mostrato come "0,00 $"** perche il sistema cerca il prezzo in USD
+3. **PMC e prezzo opzione formattati con "$"** invece di "EUR"
 
-- Nuovo prefisso: `AGGREGATED_USER:` seguito dallo userId
-- Esempio: `AGGREGATED_USER:abc123` = aggregato dei portafogli dell'utente abc123
-- L'attuale `AGGREGATED` resta invariato per l'aggregato globale admin
+### Causa tecnica
 
-### Modifiche per file
+- `formatOptionDescription()` in `derivativeStrategies.ts` usa `$${option.strike_price}` hardcoded
+- Tutte le ~211 occorrenze di `formatCurrency(..., 'USD')` in `Derivatives.tsx` ignorano la valuta reale della posizione (`option.currency`)
 
-#### 1. `src/contexts/PortfolioContext.tsx`
+### Soluzione
 
-- Esportare `AGGREGATED_USER_PREFIX = 'AGGREGATED_USER:'`
-- Esportare helper: `isUserAggregatedId(id)` e `getUserIdFromAggregatedId(id)`
-- Aggiornare `isAggregatedView` per riconoscere anche `AGGREGATED_USER:*`
-- Nella logica di auto-selezione, trattare gli ID `AGGREGATED_USER:` come validi (come gia avviene per `AGGREGATED`)
-- Nella query `admin-view-portfolio`, escludere anche gli ID che iniziano con `AGGREGATED_USER:`
+**File 1: `src/lib/derivativeStrategies.ts`**
 
-#### 2. `src/components/portfolio/PortfolioSelector.tsx`
+- Nella funzione `formatOptionDescription`: rimuovere il prefisso `$` dallo strike price e mostrare solo il valore numerico (es. "Eni - Stock CALL 15"). Lo strike e' gia contestualizzato dalla valuta dell'opzione, il simbolo e' ridondante e scorretto per le opzioni EUR.
 
-- Importare le nuove costanti e l'hook `useAuth` per ottenere `user.id`
-- Se l'utente (admin o non) ha 2+ portafogli propri, mostrare "Il Mio Aggregato" con ID `AGGREGATED_USER:<userId>` in cima, con icona `Layers`
-- Per admin, nella sezione clienti: per ogni cliente con 2+ portafogli, aggiungere voce "Aggregato" con ID `AGGREGATED_USER:<clientUserId>` prima dei singoli portafogli
-- Il click su un aggregato per-utente di un cliente chiama `setAdminViewPortfolio(AGGREGATED_USER:<clientId>, clientId)` per entrare in admin mode
+**File 2: `src/pages/Derivatives.tsx`**
 
-#### 3. `src/hooks/usePortfolio.ts`
-
-- Importare i nuovi helper
-- Aggiornare `allPortfoliosQuery`: abilitarla anche per aggregati per-utente; filtrare i portafogli per `user_id` quando e un aggregato per-utente
-- Aggiornare `positionsQuery`: quando l'ID e `AGGREGATED_USER:<userId>`, fetchare le posizioni filtrate per `portfolio_id IN (...)` dei portafogli di quell'utente
-- Aggiornare `aggregatedPortfolio`: usare il nome "Il Mio Aggregato" o "Aggregato - NomeCliente"
-- Aggiornare `isReadOnly` per includere gli aggregati per-utente
-
-#### 4. `src/hooks/useHistoricalData.ts`
-
-- Importare i nuovi helper
-- Riconoscere `AGGREGATED_USER:` come aggregato
-- Quando e un aggregato per-utente: fetchare i dati storici con filtro `.in('portfolio_id', [...userPortfolioIds])` invece di tutti
-- Applicare la stessa funzione `aggregateHistoricalWithInterpolation` gia usata per l'aggregato globale
-- Questo garantisce che i grafici (Evoluzione Rendimento, Evoluzione Patrimonio, Rendimento Annuo) funzionino identicamente
-
-#### 5. `src/hooks/useDeposits.ts`
-
-- Importare i nuovi helper
-- Per aggregati per-utente: fetchare depositi con `.in('portfolio_id', [...userPortfolioIds])`
-
-#### 6. `src/hooks/useDerivativeOverrides.ts`
-
-- Importare i nuovi helper
-- Per aggregati per-utente: fetchare override con `.in('portfolio_id', [...userPortfolioIds])`
-
-#### 7. `src/hooks/useCoveredCallPremiums.ts`
-
-- Importare i nuovi helper
-- Per aggregati per-utente: fetchare premiums con `.in('portfolio_id', [...userPortfolioIds])`
-
-### Come si ottengono i portfolio_id dell'utente
-
-Per gli aggregati per-utente, ogni hook che necessita della lista di portfolio_id eseguira una query preliminare:
+- Creare un helper locale che determina la valuta corretta per una posizione derivata:
 
 ```text
-supabase.from('portfolios').select('id').eq('user_id', targetUserId)
+function getOptionCurrency(option: Position): string {
+  return option.currency || 'USD';
+}
 ```
 
-Questa query verra gestita tramite una query React Query condivisa con chiave `['user-portfolio-ids', targetUserId]` per evitare duplicazioni.
+- Sostituire tutte le occorrenze di `formatCurrency(valore, 'USD')` con `formatCurrency(valore, getOptionCurrency(option))` nelle seguenti righe/componenti:
+  - `CoveredCallRow`: PS, PMC, prezzo opzione (righe 831, 852, 863, 893)
+  - `LongPutRow`: PS, PMC, prezzo opzione
+  - `NakedPutRow`: PS, PMC, prezzo opzione
+  - `IronCondorRow`: PS, GP, ML, prezzi gambe
+  - `DoubleDiagonalRow`: PS, prezzi gambe
+  - `LeapCallRow`: PS, PMC, prezzo opzione
+  - `GroupedOtherStrategyRow`: PS, GP, ML, prezzi gambe
+- Per il campo "UNIT" (net per share) nella CoveredCallRow: usare la valuta dell'opzione invece di `$` hardcoded
 
-### Layout finale del dropdown
-
-```text
--- Utente normale (2+ portafogli) --
-[ ] Il Mio Aggregato
----
-[v] Portfolio 1               EUR XX.XXX
-[ ] Portfolio 2               EUR XX.XXX
----
-+ Nuovo Portfolio
-
--- Admin --
-[ ] Aggregato - Tutti gli Utenti
-[ ] Il Mio Aggregato
----
-[v] Mio Portfolio 1           EUR XX.XXX
-[ ] Mio Portfolio 2           EUR XX.XXX
----
-+ Nuovo Portfolio
----
-PORTAFOGLI CLIENTI
-  Mario Rossi (mario@...)
-    [ ] Aggregato              EUR XX.XXX
-    [ ] Portfolio Trading      EUR XX.XXX
-    [ ] Portfolio Long Term    EUR XX.XXX
-  Anna Bianchi (anna@...)
-    [ ] Portfolio Principale   EUR XX.XXX
-```
-
-### Riepilogo modifiche
+### Riepilogo
 
 | File | Modifica |
 |---|---|
-| `PortfolioContext.tsx` | Nuove costanti/helper, aggiornamento isAggregatedView e auto-selezione |
-| `PortfolioSelector.tsx` | Voce "Il Mio Aggregato" per tutti, voce "Aggregato" per-cliente per admin |
-| `usePortfolio.ts` | Supporto fetch posizioni/portafogli per aggregato per-utente |
-| `useHistoricalData.ts` | Supporto aggregato per-utente con stessa logica di interpolazione |
-| `useDeposits.ts` | Supporto aggregato per-utente |
-| `useDerivativeOverrides.ts` | Supporto aggregato per-utente |
-| `useCoveredCallPremiums.ts` | Supporto aggregato per-utente |
+| `src/lib/derivativeStrategies.ts` | Rimuovere `$` hardcoded dallo strike in `formatOptionDescription` |
+| `src/pages/Derivatives.tsx` | Sostituire tutte le occorrenze `'USD'` con la valuta reale della posizione (`option.currency`) |
 
