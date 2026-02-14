@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { 
@@ -48,8 +48,9 @@ import {
   DEFAULT_DISTANCE_THRESHOLD_PCT,
   DEFAULT_COOLDOWN_MINUTES,
 } from '@/types/alerts';
-import { DerivativeCategories } from '@/lib/derivativeStrategies';
+import { DerivativeCategories, CoveredCallPosition, NakedPutPosition, IronCondorPosition, DoubleDiagonalPosition, LeapCallPosition, GroupedOtherStrategy } from '@/lib/derivativeStrategies';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { useStrategyAlertToggles, useUpsertStrategyAlertToggle, useBatchUpsertStrategyAlertToggles } from '@/hooks/useStrategyAlertToggles';
 
 interface AlertSettingsDialogProps {
   open: boolean;
@@ -136,6 +137,11 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const initializeDefaultsMutation = useInitializeDefaultConfigs();
   const resetAlertSystemMutation = useResetAlertSystem();
   
+  // Strategy alert toggles hooks
+  const { data: strategyToggles = [], isLoading: isLoadingToggles } = useStrategyAlertToggles();
+  const upsertToggleMutation = useUpsertStrategyAlertToggle();
+  const batchUpsertTogglesMutation = useBatchUpsertStrategyAlertToggles();
+  
   // Price alerts hooks
   const { data: priceAlerts = [], isLoading: isLoadingPriceAlerts } = usePriceAlerts();
   const createPriceAlertMutation = useCreatePriceAlert();
@@ -168,7 +174,178 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
     extractUniqueTickers(categories, underlyingPrices),
     [categories, underlyingPrices]
   );
-  
+
+  // Build strategy items for "Per Strategia" tab using same key logic as strategyCache.ts
+  const strategyItems = useMemo(() => {
+    const formatExpiryKey = (expiry: string | null | undefined): string => {
+      if (!expiry) return 'noexp';
+      const d = new Date(expiry);
+      return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+    const formatExpiryLabel = (expiry: string | null | undefined): string => {
+      if (!expiry) return '';
+      const d = new Date(expiry);
+      const months = ['GEN','FEB','MAR','APR','MAG','GIU','LUG','AGO','SET','OTT','NOV','DIC'];
+      return `${months[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`;
+    };
+    const resolveTicker = (underlying: string): string | null => {
+      const tickerMatch = underlying.match(/^[A-Z]{1,5}$/);
+      if (tickerMatch) return underlying;
+      const priceData = underlyingPrices[underlying];
+      if (priceData?.ticker) return priceData.ticker;
+      const upperUnderlying = underlying.toUpperCase();
+      for (const [key, value] of Object.entries(underlyingPrices)) {
+        const upperKey = key.toUpperCase();
+        if (upperKey === upperUnderlying || upperKey.includes(upperUnderlying) || upperUnderlying.includes(upperKey)) {
+          if (value.ticker) return value.ticker;
+        }
+      }
+      return null;
+    };
+
+    interface StrategyItem {
+      strategyKey: string;
+      strategyType: string;
+      label: string;
+      groupOrder: number;
+    }
+
+    const items: StrategyItem[] = [];
+
+    // Covered Calls
+    categories.coveredCalls.forEach((cc) => {
+      const underlying = cc.option.underlying || cc.option.description || '';
+      const ticker = resolveTicker(underlying) || underlying;
+      const key = `cc_${underlying}_${cc.option.strike_price || 0}_${formatExpiryKey(cc.option.expiry_date)}`;
+      items.push({
+        strategyKey: key,
+        strategyType: 'Covered Call',
+        label: `${ticker} CALL ${cc.option.strike_price} ${formatExpiryLabel(cc.option.expiry_date)}`,
+        groupOrder: 1,
+      });
+    });
+
+    // Naked Puts
+    categories.nakedPuts.forEach((np) => {
+      const underlying = np.option.underlying || np.option.description || '';
+      const ticker = resolveTicker(underlying) || underlying;
+      const key = `np_${underlying}_${np.option.strike_price || 0}_${formatExpiryKey(np.option.expiry_date)}`;
+      items.push({
+        strategyKey: key,
+        strategyType: 'Naked Put',
+        label: `${ticker} PUT ${np.option.strike_price} ${formatExpiryLabel(np.option.expiry_date)}`,
+        groupOrder: 2,
+      });
+    });
+
+    // Iron Condors
+    categories.ironCondors.forEach((ic) => {
+      const ticker = resolveTicker(ic.underlying) || ic.underlying;
+      const key = `ic_${ic.underlying}_${ic.soldPut.strike_price || 0}_${ic.soldCall.strike_price || 0}_${formatExpiryKey(ic.soldCall.expiry_date)}`;
+      items.push({
+        strategyKey: key,
+        strategyType: 'Iron Condor',
+        label: `${ticker} P${ic.soldPut.strike_price}/C${ic.soldCall.strike_price} ${formatExpiryLabel(ic.soldCall.expiry_date)}`,
+        groupOrder: 3,
+      });
+    });
+
+    // Double Diagonals
+    categories.doubleDiagonals.forEach((dd) => {
+      const ticker = resolveTicker(dd.underlying) || dd.underlying;
+      const key = `dd_${dd.underlying}_${dd.soldPut.strike_price || 0}_${dd.soldCall.strike_price || 0}_${formatExpiryKey(dd.soldCall.expiry_date)}`;
+      items.push({
+        strategyKey: key,
+        strategyType: 'Double Diagonal',
+        label: `${ticker} P${dd.soldPut.strike_price}/C${dd.soldCall.strike_price} ${formatExpiryLabel(dd.soldCall.expiry_date)}`,
+        groupOrder: 4,
+      });
+    });
+
+    // LEAP Calls
+    categories.leapCalls.forEach((lc) => {
+      const underlying = lc.option.underlying || lc.option.description || '';
+      const ticker = resolveTicker(underlying) || underlying;
+      const key = `leap_${underlying}_${lc.option.strike_price || 0}_${formatExpiryKey(lc.option.expiry_date)}`;
+      items.push({
+        strategyKey: key,
+        strategyType: 'LEAP Call',
+        label: `${ticker} CALL ${lc.option.strike_price} ${formatExpiryLabel(lc.option.expiry_date)}`,
+        groupOrder: 5,
+      });
+    });
+
+    // Grouped Other Strategies
+    categories.groupedOtherStrategies.forEach((gs) => {
+      const ticker = resolveTicker(gs.underlying) || gs.underlying;
+      let soldPutStrike: number | null = null;
+      let soldCallStrike: number | null = null;
+      let soldCallExpiry: string | null = null;
+      let soldPutExpiry: string | null = null;
+
+      for (const opt of gs.options) {
+        const o = opt.option;
+        if (o.quantity < 0) {
+          if (o.option_type === 'put' && o.strike_price) {
+            if (!soldPutStrike || o.strike_price > soldPutStrike) {
+              soldPutStrike = o.strike_price;
+              soldPutExpiry = o.expiry_date || null;
+            }
+          }
+          if (o.option_type === 'call' && o.strike_price) {
+            if (!soldCallStrike || o.strike_price < soldCallStrike) {
+              soldCallStrike = o.strike_price;
+              soldCallExpiry = o.expiry_date || null;
+            }
+          }
+        }
+      }
+
+      const key = `other_${gs.underlying}_${[soldPutStrike, soldCallStrike].filter(Boolean).sort().join('_')}_${formatExpiryKey(soldCallExpiry || soldPutExpiry)}`;
+      const strikesLabel = [soldPutStrike ? `P${soldPutStrike}` : null, soldCallStrike ? `C${soldCallStrike}` : null].filter(Boolean).join('/');
+      items.push({
+        strategyKey: key,
+        strategyType: gs.strategyName || 'Altre Strategie',
+        label: `${ticker} ${strikesLabel} ${formatExpiryLabel(soldCallExpiry || soldPutExpiry)}`.trim(),
+        groupOrder: 6,
+      });
+    });
+
+    return items.sort((a, b) => a.groupOrder - b.groupOrder || a.label.localeCompare(b.label));
+  }, [categories, underlyingPrices]);
+
+  // Build toggles map for quick lookup
+  const togglesMap = useMemo(() => {
+    const map = new Map<string, boolean>();
+    strategyToggles.forEach(t => map.set(t.strategy_key, t.enabled));
+    return map;
+  }, [strategyToggles]);
+
+  const isStrategyEnabled = useCallback((key: string) => {
+    return togglesMap.get(key) ?? true; // default enabled
+  }, [togglesMap]);
+
+  const handleToggleStrategy = useCallback(async (strategyKey: string, enabled: boolean) => {
+    try {
+      await upsertToggleMutation.mutateAsync({ strategy_key: strategyKey, enabled });
+    } catch {
+      toast.error('Errore nell\'aggiornamento del toggle');
+    }
+  }, [upsertToggleMutation]);
+
+  const handleToggleAll = useCallback(async (enabled: boolean) => {
+    try {
+      const toggles = strategyItems.map(item => ({
+        strategy_key: item.strategyKey,
+        enabled,
+      }));
+      await batchUpsertTogglesMutation.mutateAsync(toggles);
+      toast.success(enabled ? 'Tutti gli avvisi attivati' : 'Tutti gli avvisi disattivati');
+    } catch {
+      toast.error('Errore nell\'aggiornamento');
+    }
+  }, [strategyItems, batchUpsertTogglesMutation]);
+
   // Ref to prevent multiple initialization attempts (fixes infinite loop)
   const initAttemptedRef = useRef(false);
   
@@ -462,9 +639,10 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
           </div>
         ) : (
           <Tabs defaultValue="distance" className="w-full">
-            <TabsList className={`grid w-full ${isAdminMode ? 'grid-cols-5' : 'grid-cols-6'}`}>
+            <TabsList className={`grid w-full ${isAdminMode ? 'grid-cols-6' : 'grid-cols-7'}`}>
               <TabsTrigger value="distance">Distanza</TabsTrigger>
               <TabsTrigger value="ticker">Per Ticker</TabsTrigger>
+              <TabsTrigger value="strategy">Strategia</TabsTrigger>
               <TabsTrigger value="price">Prezzo</TabsTrigger>
               <TabsTrigger value="action">Stato</TabsTrigger>
               <TabsTrigger value="cooldown">Cooldown</TabsTrigger>
@@ -986,7 +1164,78 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
                 e solo se è passato il tempo di cooldown.
               </p>
             </TabsContent>
-            
+
+            {/* Tab: Per Strategia */}
+            <TabsContent value="strategy" className="mt-4">
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Attiva o disattiva gli avvisi per singola strategia. Le strategie non più presenti dopo un ricaricamento Excel spariscono automaticamente.
+                </p>
+                
+                {strategyItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Nessuna strategia presente. Visita la pagina Strategie Derivati per caricare le posizioni.
+                  </p>
+                ) : (
+                  <>
+                    {/* Toggle All */}
+                    <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
+                      <div>
+                        <p className="text-sm font-medium">Tutte le strategie</p>
+                        <p className="text-xs text-muted-foreground">{strategyItems.length} strategie</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleToggleAll(true)}
+                          disabled={batchUpsertTogglesMutation.isPending}
+                        >
+                          Attiva tutte
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleToggleAll(false)}
+                          disabled={batchUpsertTogglesMutation.isPending}
+                        >
+                          Disattiva tutte
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Strategy list grouped by type */}
+                    <div className="space-y-1 max-h-[400px] overflow-y-auto">
+                      {(() => {
+                        let lastType = '';
+                        return strategyItems.map((item) => {
+                          const showHeader = item.strategyType !== lastType;
+                          lastType = item.strategyType;
+                          return (
+                            <div key={item.strategyKey}>
+                              {showHeader && (
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pt-3 pb-1 px-1">
+                                  {item.strategyType}
+                                </p>
+                              )}
+                              <div className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50">
+                                <span className="text-sm">{item.label}</span>
+                                <Switch
+                                  checked={isStrategyEnabled(item.strategyKey)}
+                                  onCheckedChange={(checked) => handleToggleStrategy(item.strategyKey, checked)}
+                                  disabled={upsertToggleMutation.isPending}
+                                />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </>
+                )}
+              </div>
+            </TabsContent>
+
             {/* Tab 5: Notification Settings (hidden in admin mode) */}
             {!isAdminMode && (
               <TabsContent value="notifications" className="mt-4">
