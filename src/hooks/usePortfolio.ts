@@ -21,7 +21,7 @@ export function usePortfolio() {
 
   // Fetch portfolio IDs for user-level aggregation
   const userPortfolioIdsQuery = useQuery({
-    queryKey: ['user-portfolio-ids', targetUserId],
+    queryKey: ['user-portfolio-meta', targetUserId],
     queryFn: async () => {
       if (!targetUserId) return [];
       const { data, error } = await supabase
