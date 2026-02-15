@@ -50,6 +50,8 @@ import {
 } from '@/types/alerts';
 import { DerivativeCategories, CoveredCallPosition, NakedPutPosition, IronCondorPosition, DoubleDiagonalPosition, LeapCallPosition, GroupedOtherStrategy } from '@/lib/derivativeStrategies';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { usePortfolio } from '@/hooks/usePortfolio';
+import { Position } from '@/types/portfolio';
 import { useStrategyAlertToggles, useUpsertStrategyAlertToggle, useBatchUpsertStrategyAlertToggles } from '@/hooks/useStrategyAlertToggles';
 
 interface AlertSettingsDialogProps {
@@ -63,7 +65,8 @@ interface AlertSettingsDialogProps {
 // Uses underlyingPrices directly since it already contains resolved tickers
 function extractUniqueTickers(
   categories: DerivativeCategories,
-  underlyingPrices: Record<string, UnderlyingPrice>
+  underlyingPrices: Record<string, UnderlyingPrice>,
+  positions: Position[]
 ): { 
   resolved: Array<{ underlying: string; ticker: string }>;
   unresolved: string[];
@@ -88,7 +91,6 @@ function extractUniqueTickers(
   categories.groupedOtherStrategies.forEach(g => allCategoryUnderlyings.add(g.underlying));
   
   // 2. Use underlyingPrices DIRECTLY for resolved tickers
-  //    (keys are original underlyings, values contain .ticker)
   const resolvedTickersSet = new Set<string>();
   const resolved: Array<{ underlying: string; ticker: string }> = [];
   
@@ -99,15 +101,24 @@ function extractUniqueTickers(
     }
   }
   
-  // 3. Find unresolved underlyings
-  //    (those in categories but without an entry in underlyingPrices)
+  // 3. Add stock tickers from portfolio positions (deduplicated)
+  positions
+    .filter(p => p.asset_type === 'stock' && p.ticker)
+    .forEach(p => {
+      const ticker = p.ticker!.toUpperCase();
+      if (!resolvedTickersSet.has(ticker)) {
+        resolvedTickersSet.add(ticker);
+        resolved.push({ underlying: p.description, ticker });
+      }
+    });
+  
+  // 4. Find unresolved underlyings
   const resolvedUnderlyings = new Set(Object.keys(underlyingPrices));
   const unresolved: string[] = [];
   
   for (const underlying of allCategoryUnderlyings) {
     if (!underlying) continue;
     
-    // Check if there's a matching key (exact or partial match)
     let found = false;
     for (const priceKey of resolvedUnderlyings) {
       if (priceKey === underlying || 
@@ -131,6 +142,7 @@ function extractUniqueTickers(
 
 export function AlertSettingsDialog({ open, onOpenChange, categories, underlyingPrices }: AlertSettingsDialogProps) {
   const { isAdminMode } = usePortfolioContext();
+  const { positions } = usePortfolio();
   const { data: configs = [], isLoading } = useAlertConfigs();
   const batchUpsertMutation = useBatchUpsertAlertConfigs();
   const deleteConfigMutation = useDeleteAlertConfig();
@@ -169,10 +181,10 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const [validatingTicker, setValidatingTicker] = useState(false);
   const [tickerValidation, setTickerValidation] = useState<{ valid: boolean; price?: number; currency?: string } | null>(null);
   
-  // Extract available tickers from strategies
+  // Extract available tickers from strategies + stock positions
   const { resolved: availableTickers, unresolved: unresolvedUnderlyings } = useMemo(() => 
-    extractUniqueTickers(categories, underlyingPrices),
-    [categories, underlyingPrices]
+    extractUniqueTickers(categories, underlyingPrices, positions),
+    [categories, underlyingPrices, positions]
   );
 
   // Build strategy items for "Per Strategia" tab using same key logic as strategyCache.ts
