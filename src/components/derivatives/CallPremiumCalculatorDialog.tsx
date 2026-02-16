@@ -409,7 +409,7 @@ export function CallPremiumCalculatorDialog({
                       </span>
                     </AccordionTrigger>
                     <AccordionContent>
-                      <div className="max-h-[250px] overflow-y-auto">
+                      <div>
                         <Table>
                           <TableHeader>
                             <TableRow>
