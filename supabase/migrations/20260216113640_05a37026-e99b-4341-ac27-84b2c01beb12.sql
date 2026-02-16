@@ -1,0 +1,1 @@
+ALTER TABLE covered_call_premiums DROP CONSTRAINT IF EXISTS covered_call_premiums_portfolio_ticker_key;
