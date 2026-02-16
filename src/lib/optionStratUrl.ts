@@ -295,9 +295,12 @@ export function buildOptionStratUrlFromOrders(
   ticker: string,
   strategyName: string | null
 ): string {
-  // Group orders by symbol
+  // Reverse to chronological order (oldest first)
+  const chronological = [...orders].reverse();
+
+  // Group by symbol
   const groups = new Map<string, ParsedOrder[]>();
-  for (const order of orders) {
+  for (const order of chronological) {
     const key = order.symbol;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(order);
@@ -306,28 +309,39 @@ export function buildOptionStratUrlFromOrders(
   const legs: string[] = [];
 
   for (const [, group] of groups) {
-    // Last in array = opening trade (oldest), first = closing trade (newest)
-    const openingTrade = group[group.length - 1];
-    const closingTrade = group.length > 1 ? group[0] : null;
+    // FIFO matching: pair opening with next opposite-direction trade
+    const remaining = [...group];
 
-    const parsed = parseSymbolTypeAndStrike(openingTrade.symbol);
-    if (!parsed) continue;
+    while (remaining.length > 0) {
+      const opening = remaining.shift()!;
+      const parsed = parseSymbolTypeAndStrike(opening.symbol);
+      if (!parsed) continue;
 
-    const expiry = expiryDateToYYMMDD(openingTrade.expiryDate);
-    const isSold = openingTrade.operation === 'sell';
-    const prefix = isSold ? '-' : '';
-    const qty = openingTrade.quantity;
-    const qtyDisplay = isSold ? -qty : qty;
-    const openPrice = formatStrike(openingTrade.avgPrice);
+      const expiry = expiryDateToYYMMDD(opening.expiryDate);
+      const isSold = opening.operation === 'sell';
+      const prefix = isSold ? '-' : '';
+      const openPrice = formatStrike(opening.avgPrice);
 
-    let leg = `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}x${qtyDisplay}@${openPrice}`;
+      // Quantity: only include if > 1
+      let qtyPart = '';
+      if (opening.quantity > 1) {
+        qtyPart = isSold ? `x-${opening.quantity}` : `x${opening.quantity}`;
+      }
 
-    if (closingTrade) {
-      const closePrice = formatStrike(closingTrade.avgPrice);
-      leg += `@${closePrice}`;
+      // Look for closing trade (opposite direction)
+      const oppositeOp = isSold ? 'buy' : 'sell';
+      const closeIdx = remaining.findIndex(o => o.operation === oppositeOp);
+
+      let leg = `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}${qtyPart}@${openPrice}`;
+
+      if (closeIdx !== -1) {
+        const closing = remaining.splice(closeIdx, 1)[0];
+        const closePrice = formatStrike(closing.avgPrice);
+        leg += `@${closePrice}`;
+      }
+
+      legs.push(leg);
     }
-
-    legs.push(leg);
   }
 
   const slug = (strategyName && STRATEGY_SLUG_MAP[strategyName]) || 'custom';
