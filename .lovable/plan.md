@@ -1,58 +1,43 @@
 
 
-## Fix: Matching Covered Call ITM per ID posizione
+## Rimozione vista "Netting ex. Covered Call" dalla Dashboard
 
-### Problema
+### Cosa cambia
 
-In `getBreakdownForViewMode`, il ricalcolo del valore intrinseco delle Covered Call ITM (e Naked Put ITM) usa `.find()` con matching per stringa ticker. Quando esistono piu' covered call sullo stesso sottostante (es. due CALL GOOGL a strike diversi), il `.find()` restituisce sempre la prima, causando il calcolo errato o la perdita della seconda.
+La vista `netting_ex_cc` viene eliminata dal selettore e da tutti i componenti della dashboard. Restano tre viste: **Base**, **Netting ex. Covered Call e Naked Put OTM**, **Netting Totale**.
 
-### Soluzione
-
-Aggiungere il campo `positionId` a `NettingBreakdownDetail` e usarlo per il matching diretto in `getBreakdownForViewMode`.
+I dati storici nel database (`netting_ex_cc` column) restano invariati -- non serve alcuna migrazione. Il campo continua a essere salvato nello snapshot per compatibilita', ma non e' piu' navigabile come vista.
 
 ### Dettaglio tecnico
 
-**File: `src/hooks/useDerivativeNetting.ts`**
+**1. `src/components/dashboard/ViewModeSelector.tsx`**
+- Rimuovere `netting_ex_cc` dal tipo `ViewMode` (diventa `'base' | 'netting_total' | 'netting_ex_cc_np'`)
+- Rimuovere la voce `netting_ex_cc` da `VIEW_LABELS`
+- Rimuovere `netting_ex_cc` dall'array `VIEWS`
 
-1. **Aggiungere `positionId` all'interfaccia `NettingBreakdownDetail`** (riga 9):
-   ```typescript
-   export interface NettingBreakdownDetail {
-     positionId: string;  // <-- nuovo campo
-     ticker: string;
-     description: string;
-     value: number;
-     strike?: number;
-     expiry?: string;
-   }
-   ```
+**2. `src/components/dashboard/StatsCards.tsx`**
+- Rimuovere il case `netting_ex_cc` da `VIEW_TITLES`
+- Rimuovere i rami `case 'netting_ex_cc'` nei vari switch (patrimonio, P/L, rendimento annuale)
+- Nei fallback dove `netting_ex_cc_np` usa `?? netting_ex_cc`, mantenere un fallback ragionevole (es. usare `netting_total` o il valore diretto)
 
-2. **Popolare `positionId` nella creazione del detail** (riga ~88):
-   ```typescript
-   const detail: NettingBreakdownDetail = {
-     positionId: derivative.id,  // <-- aggiunto
-     ticker,
-     description: derivative.description,
-     value: 0,
-     strike: derivative.strike_price ?? undefined,
-     expiry: derivative.expiry_date ?? undefined,
-   };
-   ```
+**3. `src/components/dashboard/DynamicPortfolioChart.tsx`**
+- Rimuovere `netting_ex_cc` dai titoli del grafico
+- Rimuovere `netting_ex_cc` dal tipo nel calcolo breakdown
 
-3. **Fix matching CC ITM in `getBreakdownForViewMode`** (righe 249-252): sostituire il matching per ticker con matching per position ID tramite `coveredCallMap` (che e' gia' indicizzata per `option.id`):
-   ```typescript
-   const ccEntry = coveredCallMap.get(det.positionId);
-   ```
+**4. `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`**
+- Rimuovere il `case 'netting_ex_cc'` dallo switch di selezione valore
 
-4. **Fix matching NP ITM in `getBreakdownForViewMode`** (righe 292-295): stesso approccio:
-   ```typescript
-   const npEntry = nakedPutMap.get(det.positionId);
-   ```
+**5. `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
+- Rimuovere il `case 'netting_ex_cc'` dallo switch di selezione valore
 
-5. **Aggiungere `positionId` nell'aggregazione "other by ticker"** (riga ~177): l'aggregazione per ticker puo' preservare un positionId arbitrario dato che il campo serve solo per il matching CC/NP:
-   ```typescript
-   otherByTicker.set(key, { ...d, strike: undefined, expiry: undefined });
-   // positionId viene portato avanti dal primo detail del gruppo
-   ```
+**6. `src/components/dashboard/HistoricalChartsCarousel.tsx`**
+- Rimuovere `netting_ex_cc` dalle label del dropdown
+- Rimuovere i `<SelectItem value="netting_ex_cc">` dai due dropdown (evoluzione rendimento e evoluzione patrimonio)
 
-Queste modifiche garantiscono un matching univoco per ogni posizione derivata, eliminando il problema delle covered call multiple sullo stesso sottostante.
+**7. `src/components/dashboard/Dashboard.tsx`**
+- Il valore `currentValue` nel carousel usa uno switch su `viewMode`: rimuovere il ramo `netting_ex_cc`
 
+**8. `src/components/dashboard/charts/YearlyReturnChart.tsx`** (se presente riferimento)
+- Verificare e rimuovere eventuali riferimenti a `netting_ex_cc`
+
+**Nota**: il campo `netting_ex_cc` continua a essere salvato negli snapshot storici e nel form dati storici per preservare la completezza dei dati. Solo la navigazione della vista viene rimossa.
