@@ -68,6 +68,7 @@ import {
   buildLeapCallUrl,
   buildLongPutUrl,
   buildGroupedStrategyUrl,
+  buildOptionStratUrlFromOrders,
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
@@ -742,7 +743,13 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             <span className="font-medium truncate">{formatOptionDescription(option)}</span>
             
             {/* Col 4: OptionStrat */}
-            <OptionStratButton url={ticker ? buildCoveredCallUrl(ticker, option) : null} />
+            <OptionStratButton url={
+              ticker
+                ? (savedPremium?.orders_json?.length
+                    ? buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, null)
+                    : buildCoveredCallUrl(ticker, option))
+                : null
+            } />
             
             {/* Col 5: Badges (P!, Override) - larghezza fissa per allineamento */}
             <div className="flex items-center gap-1 w-12 justify-end">
@@ -1160,7 +1167,13 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           
           {/* Col 4: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildIronCondorUrl(underlyingPrices[underlying].ticker, boughtPut, soldPut, soldCall, boughtCall) : null} />
+            <OptionStratButton url={
+              ticker
+                ? (savedPremium?.orders_json?.length
+                    ? buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, 'Iron Condor')
+                    : buildIronCondorUrl(ticker, boughtPut, soldPut, soldCall, boughtCall))
+                : null
+            } />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
