@@ -523,6 +523,47 @@ export function extractStrikeFromSymbol(symbol: string): number | null {
  * Filter orders for a specific ticker's CALL options and calculate premiums
  * Optionally filters out LEAP calls (buy-only with high strike)
  */
+/**
+ * Filter orders for Iron Condor: all executed orders matching ticker (CALL + PUT)
+ * Sells = positive, Buys = negative → net = Gain Potenziale
+ */
+export function filterAndCalculateIronCondorPremiums(
+  orders: ParsedOrder[],
+  ticker: string
+): OrderParseResult {
+  const filteredOrders = orders.filter(order => {
+    const isExecuted = order.status.toLowerCase() === 'eseguito';
+    const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
+    return isExecuted && matchesTicker;
+  });
+
+  let totalBuys = 0;
+  let totalSells = 0;
+  let netPremium = 0;
+
+  filteredOrders.forEach(order => {
+    if (order.operation === 'sell') {
+      totalSells++;
+      netPremium += order.orderValue;
+    } else {
+      totalBuys++;
+      netPremium -= order.orderValue;
+    }
+  });
+
+  const firstOperationDate = findFirstOperationDate(filteredOrders.map(o => o.validityDate));
+
+  return {
+    allOrders: orders,
+    filteredOrders,
+    totalBuys,
+    totalSells,
+    netPremium,
+    grossPremium: Math.abs(netPremium),
+    firstOperationDate,
+  };
+}
+
 export function filterAndCalculateCallPremiums(
   orders: ParsedOrder[],
   ticker: string,

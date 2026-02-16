@@ -11,7 +11,8 @@ import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Sa
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   parseOrderFile, 
-  filterAndCalculateCallPremiums, 
+  filterAndCalculateCallPremiums,
+  filterAndCalculateIronCondorPremiums,
   calculatePremiumMetrics,
   findFirstOperationDate,
   findLastOperationDate,
@@ -26,6 +27,8 @@ import { useCoveredCallPremiums } from '@/hooks/useCoveredCallPremiums';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { toast } from 'sonner';
 
+export type CalculatorStrategyType = 'covered_call' | 'iron_condor';
+
 interface CallPremiumCalculatorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -34,6 +37,7 @@ interface CallPremiumCalculatorDialogProps {
   optionSymbol: string;
   contractsInPortfolio: number;
   underlyingPrice: number;
+  strategyType?: CalculatorStrategyType;
 }
 
 export function CallPremiumCalculatorDialog({
@@ -44,7 +48,9 @@ export function CallPremiumCalculatorDialog({
   optionSymbol,
   contractsInPortfolio,
   underlyingPrice,
+  strategyType = 'covered_call',
 }: CallPremiumCalculatorDialogProps) {
+  const isIronCondor = strategyType === 'iron_condor';
   const { portfolio } = usePortfolio();
   const { getPremiumByTickerAndSymbol, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
   
@@ -119,7 +125,7 @@ export function CallPremiumCalculatorDialog({
     if (!file) return;
 
     if (!ticker) {
-      setError('Ticker non disponibile per questa Covered Call');
+      setError(isIronCondor ? 'Ticker non disponibile per questo Iron Condor' : 'Ticker non disponibile per questa Covered Call');
       return;
     }
 
@@ -128,7 +134,9 @@ export function CallPremiumCalculatorDialog({
 
     try {
       const orders = await parseOrderFile(file);
-      const result = filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
+      const result = isIronCondor
+        ? filterAndCalculateIronCondorPremiums(orders, ticker)
+        : filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
       
       // Merge with existing orders (cumulative)
       const mergedOrders = mergeOrders(filteredOrders, result.filteredOrders);
@@ -234,7 +242,7 @@ export function CallPremiumCalculatorDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calculator className="w-5 h-5" />
-            Calcola Premi CALL
+            {isIronCondor ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'}
           </DialogTitle>
           <DialogDescription>
             Sottostante: <span className="font-semibold">{underlying}</span>
@@ -282,8 +290,10 @@ export function CallPremiumCalculatorDialog({
             <Card className="border-primary/20 bg-primary/5">
               <CardContent className="pt-4 space-y-4">
                 {/* Primary: Net per share */}
-                <div className="text-center pb-3 border-b border-border/50">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Netto Unitario</p>
+                 <div className="text-center pb-3 border-b border-border/50">
+                   <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                     {isIronCondor ? 'Gain Potenziale' : 'Netto Unitario'}
+                   </p>
                   <p className="text-3xl font-bold text-primary">
                     {formatCurrency(metrics.netPerShare, 'USD')}
                   </p>

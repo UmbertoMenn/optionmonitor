@@ -1094,6 +1094,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
 
 function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondorPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
   const { underlying, expiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = ironCondor;
   
   const expiryFormatted = formatExpiryMMY(expiryDate);
@@ -1133,7 +1134,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_2rem_3rem_3rem_5rem_6rem_7rem_4.5rem_6rem_6.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_2rem_4rem_3rem_3rem_5rem_6rem_7rem_4.5rem_6rem_6.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -1150,8 +1151,28 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
             IC
           </Badge>
           
-          {/* Col 4: OptionStrat */}
-          <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildIronCondorUrl(underlyingPrices[underlying].ticker, boughtPut, soldPut, soldCall, boughtCall) : null} />
+          {/* Col 4: OptionStrat + Calculator */}
+          <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            <OptionStratButton url={underlyingPrices[underlying]?.ticker ? buildIronCondorUrl(underlyingPrices[underlying].ticker, boughtPut, soldPut, soldCall, boughtCall) : null} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCalculator(true);
+                  }}
+                >
+                  <Calculator className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Calcola gain potenziale</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
           
           {/* Col 5: IR/OOR */}
           <div className="flex justify-center">
@@ -1335,6 +1356,17 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
           </div>
         </div>
       </CollapsibleContent>
+      
+      <CallPremiumCalculatorDialog
+        open={showCalculator}
+        onOpenChange={setShowCalculator}
+        underlying={underlying}
+        ticker={underlyingPrices[underlying]?.ticker}
+        optionSymbol={`IC_${expiryDate || 'unknown'}`}
+        contractsInPortfolio={contracts}
+        underlyingPrice={underlyingPrice}
+        strategyType="iron_condor"
+      />
     </Collapsible>
   );
 }
