@@ -1,67 +1,61 @@
 
 
-## Mostrare ticker non risolti + link admin per override manuale
+## Fix: Mostrare ticker non risolti delle azioni nella sezione admin Ticker
 
-### Problema attuale
+### Problema
 
-1. La lista `unresolved` nella funzione `extractUniqueTickers` traccia solo i sottostanti dei **derivati** non risolti (righe 146-166). Le azioni con `ticker: null` che non hanno corrispondenza in `underlying_mappings` vengono semplicemente ignorate -- non appaiono ne' come risolte ne' come non risolte.
-
-2. Non c'e' alcun collegamento diretto dal dialog degli avvisi alla sezione admin "Gestione Mapping Ticker" per risolvere i ticker mancanti.
+L'hook `useUnderlyingMappings` (riga 34-60) cerca i sottostanti non risolti solo tra le posizioni con `asset_type IN ('OPTION', 'WARRANT', 'derivative')`. Le azioni (`asset_type = 'stock'`) non vengono mai considerate, quindi nella sezione admin "Ticker Non Risolti" non appaiono mai.
 
 ### Soluzione
 
-**File: `src/components/derivatives/AlertSettingsDialog.tsx`**
+**File: `src/hooks/useUnderlyingMappings.ts`**
 
-1. **Includere le azioni non risolte nella lista `unresolved`**: nella funzione `extractUniqueTickers`, dopo il loop sulle posizioni stock (riga 124-144), aggiungere le azioni che non hanno ne' ticker diretto ne' corrispondenza in `underlying_mappings` alla lista `unresolved`, usando la descrizione pulita (senza prefisso "AZ.").
+Modificare la `unresolvedQuery` per includere anche le posizioni stock:
 
-2. **Mostrare la sezione "ticker non risolti" anche nei tab Prezzo e Ticker**: attualmente il box amber con i badge non risolti e' visibile solo nel tab Distanza (riga 849). Aggiungere la stessa sezione anche nel tab **Prezzo** (dopo i badge dei ticker disponibili, riga 971) e nel tab **Ticker** (dopo i badge cliccabili, riga 847).
-
-3. **Aggiungere un pulsante "Gestisci Mapping" per admin**: dentro il box amber dei ticker non risolti, se `isAdminMode` e' true, mostrare un pulsante che naviga alla sezione admin Gestione Mapping Ticker (`/admin` con tab `tickers`), oppure un link informativo. Questo permette all'admin di aggiungere rapidamente i mapping mancanti.
+1. Aggiungere una query per le posizioni stock con `ticker IS NULL`
+2. Estrarre le descrizioni, pulirle (rimuovere prefisso "AZ.", trim)
+3. Verificare quali non hanno corrispondenza in `underlying_mappings`
+4. Unire i risultati con gli underlying dei derivati non risolti (deduplicando)
 
 ### Dettaglio tecnico
 
 ```text
-// In extractUniqueTickers, DOPO il loop stock positions (riga 144):
+// Dentro unresolvedQuery queryFn, DOPO il blocco derivati:
 
-// Track unresolved stocks
-positions
-  .filter(p => p.asset_type === 'stock')
-  .forEach(p => {
-    // Skip if already resolved (had direct ticker or found mapping)
-    if (p.ticker) return;
-    const descCleaned = p.description.replace(/^AZ\./i, '').trim();
-    const descNormalized = normalizeName(descCleaned);
-    const hasMapping = allMappings.some(m => normalizeName(m.underlying) === descNormalized);
-    if (!hasMapping) {
-      unresolved.push(descCleaned);
-    }
-  });
+// Fetch stock positions without ticker
+const { data: stocks, error: stocksError } = await supabase
+  .from('positions')
+  .select('description')
+  .eq('asset_type', 'stock')
+  .is('ticker', null);
 
-// Nella sezione unresolved del tab Ticker + Prezzo (per admin):
-{isAdminMode && unresolvedUnderlyings.length > 0 && (
-  <Button variant="outline" size="sm" onClick={() => { onOpenChange(false); navigate('/admin?tab=tickers'); }}>
-    <Link2 className="w-4 h-4 mr-2" />
-    Gestisci Mapping Ticker
-  </Button>
-)}
+if (stocksError) throw stocksError;
+
+// Clean stock descriptions and add unique ones
+const stockNames = [...new Set(
+  stocks
+    ?.map(s => s.description?.replace(/^AZ\./i, '').trim())
+    .filter((d): d is string => Boolean(d))
+)];
+
+// Merge with derivative underlyings, check against mappings
+const allUnresolved = [...uniqueUnderlyings, ...stockNames];
+const mappedUnderlyings = new Set(mappings?.map(m => m.underlying));
+
+return allUnresolved.filter(u => !mappedUnderlyings.has(u)).sort();
 ```
 
-### Sezioni UI modificate
-
-| Sezione | Modifica |
-|---|---|
-| Tab **Distanza** (esistente) | Aggiungere pulsante admin "Gestisci Mapping" nel box amber |
-| Tab **Prezzo** | Aggiungere box amber con ticker non risolti + pulsante admin |
-| Tab **Ticker** | Il box amber gia' presente -- aggiungere pulsante admin |
+Bisogna anche verificare la corrispondenza normalizzata (non solo esatta) per evitare falsi positivi.
 
 ### File da modificare
 
 | File | Modifica |
 |---|---|
-| `src/components/derivatives/AlertSettingsDialog.tsx` | (1) Aggiungere azioni non risolte a `unresolved` in `extractUniqueTickers`; (2) Mostrare box amber anche nel tab Prezzo; (3) Aggiungere pulsante admin per navigare a Gestione Mapping Ticker in tutti i box amber |
+| `src/hooks/useUnderlyingMappings.ts` | Aggiungere posizioni stock alla `unresolvedQuery` per mostrare azioni senza mapping nella sezione admin |
 
 ### Risultato atteso
 
-- Le azioni senza ticker mappato appaiono nella lista "Ticker non risolti" con la descrizione pulita
-- L'admin vede un pulsante per andare direttamente alla gestione mapping e risolvere i ticker mancanti
-- Una volta risolti i mapping (nella sezione admin), i ticker appaiono automaticamente nei badge cliccabili alla riapertura del dialog
+- La sezione admin "Ticker Non Risolti" mostra sia i sottostanti dei derivati che le descrizioni delle azioni senza mapping
+- L'admin puo' risolvere i mapping mancanti direttamente dalla sezione Ticker
+- I ticker risolti appaiono automaticamente nel dialog Gestione Avvisi
+
