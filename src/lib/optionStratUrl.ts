@@ -295,21 +295,39 @@ export function buildOptionStratUrlFromOrders(
   ticker: string,
   strategyName: string | null
 ): string {
+  // Group orders by symbol
+  const groups = new Map<string, ParsedOrder[]>();
+  for (const order of orders) {
+    const key = order.symbol;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(order);
+  }
+
   const legs: string[] = [];
 
-  for (const order of orders) {
-    const parsed = parseSymbolTypeAndStrike(order.symbol);
+  for (const [, group] of groups) {
+    // Last in array = opening trade (oldest), first = closing trade (newest)
+    const openingTrade = group[group.length - 1];
+    const closingTrade = group.length > 1 ? group[0] : null;
+
+    const parsed = parseSymbolTypeAndStrike(openingTrade.symbol);
     if (!parsed) continue;
 
-    const expiry = expiryDateToYYMMDD(order.expiryDate);
-    const isSold = order.operation === 'sell';
+    const expiry = expiryDateToYYMMDD(openingTrade.expiryDate);
+    const isSold = openingTrade.operation === 'sell';
     const prefix = isSold ? '-' : '';
-    const qty = isSold ? -order.quantity : order.quantity;
-    const price = formatStrike(order.avgPrice);
+    const qty = openingTrade.quantity;
+    const qtyDisplay = isSold ? -qty : qty;
+    const openPrice = formatStrike(openingTrade.avgPrice);
 
-    legs.push(
-      `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}x${qty}@${price}`
-    );
+    let leg = `${prefix}.${ticker}${expiry}${parsed.type}${formatStrike(parsed.strike)}x${qtyDisplay}@${openPrice}`;
+
+    if (closingTrade) {
+      const closePrice = formatStrike(closingTrade.avgPrice);
+      leg += `@${closePrice}`;
+    }
+
+    legs.push(leg);
   }
 
   const slug = (strategyName && STRATEGY_SLUG_MAP[strategyName]) || 'custom';
