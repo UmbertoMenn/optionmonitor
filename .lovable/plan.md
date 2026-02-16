@@ -1,76 +1,53 @@
 
 
-## Risoluzione automatica dei ticker non risolti dalla sezione admin
+## Fix: Allineare la normalizzazione tra hook e Edge Function
 
 ### Problema
 
-La sezione admin mostra 56 ticker non risolti, ma richiede l'inserimento manuale di ciascuno. Il sistema ha gia' tutte le capacita' per risolvere i ticker automaticamente (mapping statici, Yahoo Finance, AI inference) tramite la Edge Function `fetch-underlying-prices`, ma questa logica non viene invocata dalla sezione admin.
+La Edge Function `fetch-underlying-prices` salva i mapping con nomi normalizzati che rimuovono suffissi corporate (`INC`, `CORP`, `LTD`, `LLC`, `PLC`, `CO`, `THE`). Ma l'hook `useUnderlyingMappings` usa una normalizzazione diversa (solo lowercase + rimuove caratteri speciali) per confrontare i candidati con i mapping esistenti.
+
+Esempio concreto dai log:
+- Posizione nel DB: `"SOFI TECHNOLOGIES INC"`
+- Mapping salvato dalla Edge Function: `"SOFI TECHNOLOGIES"` (senza INC)
+- Normalizzazione hook: `"sofitechnologiesinc"` vs `"sofitechnologies"` -- **non corrispondono**
+
+Questo succede per tutti i 10 ticker risolti: la Edge Function li salva correttamente, ma l'hook non li riconosce come risolti perche' la funzione di normalizzazione e' diversa.
 
 ### Soluzione
 
-Aggiungere un pulsante **"Risolvi Automaticamente"** nella sezione admin "Ticker Non Risolti" che:
+**File: `src/hooks/useUnderlyingMappings.ts`**
 
-1. Prende tutti i nomi non risolti
-2. Li invia alla Edge Function `fetch-underlying-prices` (che gia' implementa il flusso completo: mapping statici -> Yahoo Finance -> AI inference -> salvataggio in `underlying_mappings`)
-3. Mostra il progresso e il risultato (quanti risolti vs quanti ancora irrisolti)
-4. Aggiorna automaticamente la lista
-
-### Dettaglio tecnico
-
-**File: `src/components/admin/TickerMappingManager.tsx`**
-
-1. Aggiungere uno stato `isAutoResolving` e una funzione `handleAutoResolve`
-2. La funzione chiama `supabase.functions.invoke('fetch-underlying-prices', { body: { underlyings: unresolvedUnderlyings } })`
-3. Dopo la risposta, esegue `refetch()` per aggiornare la lista
-4. Mostra un toast con il risultato: "Risolti X su Y ticker"
-5. Il pulsante viene posizionato accanto al titolo della sezione "Ticker Non Risolti", con icona di magic wand o simile
+Aggiornare la funzione `normalize` nella `unresolvedQuery` per replicare la stessa logica della Edge Function:
 
 ```text
-// Pseudo-codice della funzione:
-const handleAutoResolve = async () => {
-  setIsAutoResolving(true);
-  try {
-    const { data, error } = await supabase.functions.invoke('fetch-underlying-prices', {
-      body: { underlyings: unresolvedUnderlyings }
-    });
-    
-    if (error) throw error;
-    
-    const resolvedCount = Object.keys(data?.prices || {}).length;
-    toast.success(`Risolti automaticamente ${resolvedCount} su ${unresolvedUnderlyings.length} ticker`);
-    
-    // Refresh the lists
-    refetch();
-  } catch (err) {
-    toast.error('Errore nella risoluzione automatica');
-  } finally {
-    setIsAutoResolving(false);
-  }
-};
+// PRIMA (attuale):
+const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// DOPO (allineata con Edge Function):
+const normalize = (s: string) =>
+  s.toUpperCase()
+    .replace(/[.,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\bINC\b/g, '')
+    .replace(/\bCORP\b/g, '')
+    .replace(/\bLTD\b/g, '')
+    .replace(/\bLLC\b/g, '')
+    .replace(/\bPLC\b/g, '')
+    .replace(/\bCO\b/g, '')
+    .replace(/\bTHE\b/g, '')
+    .replace(/[^A-Z0-9]/g, '')
+    .trim();
 ```
 
-6. Il pulsante nella UI:
-```text
-<Button onClick={handleAutoResolve} disabled={isAutoResolving}>
-  {isAutoResolving ? <Loader2 className="animate-spin" /> : <Wand2 />}
-  Risolvi Automaticamente
-</Button>
-```
-
-### Comportamento atteso
-
-- L'admin clicca "Risolvi Automaticamente"
-- La Edge Function tenta di risolvere ogni underlying tramite:
-  - Mapping statici (NVIDIA -> NVDA, PAYPAL -> PYPL, ecc.)
-  - Yahoo Finance search
-  - AI inference (Lovable AI) con validazione Yahoo
-- I ticker risolti vengono salvati automaticamente in `underlying_mappings`
-- La lista si aggiorna mostrando solo quelli rimasti irrisolti
-- Quelli che non possono essere risolti restano nella lista per override manuale
+Questo assicura che `"SOFI TECHNOLOGIES INC"` e `"SOFI TECHNOLOGIES"` producano lo stesso valore normalizzato (`"SOFITECHNOLOGIES"`), permettendo al confronto di funzionare correttamente.
 
 ### File da modificare
 
 | File | Modifica |
 |---|---|
-| `src/components/admin/TickerMappingManager.tsx` | Aggiungere pulsante "Risolvi Automaticamente" che invoca la Edge Function `fetch-underlying-prices` con tutti gli underlying non risolti |
+| `src/hooks/useUnderlyingMappings.ts` | Aggiornare la funzione `normalize` (riga 80) per rimuovere anche i suffissi corporate (INC, CORP, LTD, LLC, PLC, CO, THE) prima del confronto |
 
+### Risultato atteso
+
+- Dopo aver cliccato "Risolvi Automaticamente", i ticker risolti scompaiono dalla lista "Non Risolti"
+- I mapping salvati dalla Edge Function vengono riconosciuti correttamente anche se il nome nel DB contiene suffissi come INC, CORP, ecc.
