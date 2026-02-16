@@ -1,70 +1,62 @@
 
 
-## Link OptionStrat Avanzato dalla Calcolatrice
+## Link OptionStrat Avanzato dalla Calcolatrice (Corretto)
 
 ### Obiettivo
 
-Generare un link OptionStrat basato sulle operazioni caricate nella calcolatrice, con supporto per:
-- Quantita' multiple: `.CLS250718P90x2@1.5`
-- Operazioni vendute: `-.CLS250718P95x-2@2.8`
-- Posizioni chiuse (con prezzo chiusura): `-.CLS250718P95x-2@2.8@1.5`
+Generare un link OptionStrat dalle operazioni della calcolatrice con supporto per quantita' multiple, operazioni vendute e posizioni chiuse.
 
-### Nota importante: ordine cronologico invertito
+### Correzione critica
 
-Nel file Excel le operazioni sono ordinate dalla piu' recente (in cima) alla piu' vecchia (in basso). Quindi nell'array `filteredOrders`:
-- Indice 0 = operazione piu' recente
-- Ultimo indice = operazione piu' vecchia
+La data di scadenza (YYMMDD) per ogni gamba viene estratta dal campo `expiryDate` del `ParsedOrder`, che corrisponde alla colonna "Data Scadenza" del file Excel. **NON** dal parsing del simbolo dell'opzione.
 
-Per determinare apertura/chiusura di una posizione sullo stesso simbolo, l'**ultima** nell'array e' l'apertura, la **prima** e' la chiusura.
+Il campo `expiryDate` e' gia' disponibile nell'interfaccia `ParsedOrder` (formato DD/MM/YYYY italiano). Verra' convertito in YYMMDD usando `toIsoDateFromIT` e poi `optionsExpirationDate` per ottenere il 3rd Friday corretto.
 
 ### Modifiche
 
-**1. `src/lib/optionStratUrl.ts`** -- Nuova funzione
+**1. `src/lib/optionStratUrl.ts`** -- Nuova funzione `buildOptionStratUrlFromOrders`
 
-Aggiungere `buildOptionStratUrlFromOrders(orders: ParsedOrder[], ticker: string, strategyName: string | null): string`
-
-Logica:
-1. Raggruppare gli ordini per `symbol`
-2. Per ogni gruppo con piu' di un ordine sullo stesso simbolo:
-   - L'ultimo nell'array (indice piu' alto) e' l'apertura
-   - Il primo nell'array (indice piu' basso) e' la chiusura
-3. Parsing del simbolo (es. `CLSG6P90`):
-   - Estrarre ticker, month-code (A=Gen...L=Dic), year-digit, C/P, strike
-   - Calcolare YYMMDD con `optionsExpirationDate(year, month)`
-4. Formattare ogni gamba:
+- Input: `ParsedOrder[]`, `ticker: string`, `strategyName: string | null`
+- Logica:
+  1. Raggruppare gli ordini per `symbol`
+  2. Per ogni gruppo con piu' ordini sullo stesso simbolo: ultimo nell'array = apertura, primo = chiusura (ordine cronologico invertito nell'Excel)
+  3. Per ogni gamba:
+     - Estrarre tipo (C/P) e strike dal simbolo (es. `CLSG6P90` -> P, 90)
+     - Estrarre la scadenza dal campo `expiryDate` del ParsedOrder (es. `18/07/2025`)
+     - Convertire in YYMMDD passando per `toIsoDateFromIT` -> `optionsExpirationDate(year, month)` -> formato `YYMMDD`
+  4. Formattare ogni gamba:
 
 | Caso | Formato |
 |---|---|
 | Venduto, aperta | `-.{TICKER}{YYMMDD}{C/P}{STRIKE}x{-N}@{prezzo}` |
 | Comprato, aperta | `.{TICKER}{YYMMDD}{C/P}{STRIKE}x{N}@{prezzo}` |
-| Chiusa (apertura + chiusura) | `[prefix].{TICKER}{YYMMDD}{C/P}{STRIKE}x{qty}@{prezzoApertura}@{prezzoChiusura}` |
+| Chiusa | `[prefix].{TICKER}{YYMMDD}{C/P}{STRIKE}x{qty}@{prezzoApertura}@{prezzoChiusura}` |
 
-5. Comporre URL: `https://optionstrat.com/build/{slug}/{TICKER}/{legs}`
+  5. Comporre URL: `https://optionstrat.com/build/{slug}/{TICKER}/{legs}`
 
 **2. `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
 
 - Importare `buildOptionStratUrlFromOrders`
-- Aggiungere un pulsante con icona `ExternalLink` nella barra dei pulsanti (accanto a Salva/Reset)
+- Aggiungere pulsante con icona `ExternalLink` accanto a Salva/Reset
 - Visibile solo quando `filteredOrders.length > 0`
 - Al click: genera URL e apre in nuova tab
 
-### Dettaglio: parsing simbolo
+### Dettaglio: estrazione dati
 
-```text
-Esempio: CLSG6P90
-- CLS   = ticker
-- G     = mese 7 (Luglio) -- A=1, B=2, ..., L=12
-- 6     = anno 2026
-- P     = Put
-- 90    = strike
-```
+Dal **simbolo** si estraggono solo:
+- Tipo opzione (C o P) -- dalla lettera dopo la cifra dell'anno
+- Strike -- dal numero finale
+
+Dalla **colonna Excel "Data Scadenza"** (`expiryDate`):
+- La data di scadenza effettiva (es. `18/07/2025`)
+- Convertita in YYMMDD tramite le funzioni gia' esistenti
 
 ### Dettaglio: raggruppamento open/close (ordine invertito)
 
 ```text
 filteredOrders (dall'Excel, piu' recente in cima):
-  [0] CLSG6P95, buy,  qty=2, price=1.5  <-- chiusura (piu' recente)
-  [1] CLSG6P95, sell, qty=2, price=2.8  <-- apertura (piu' vecchia)
+  [0] CLSG6P95, buy,  qty=2, price=1.5, expiryDate=18/07/2025  <-- chiusura
+  [1] CLSG6P95, sell, qty=2, price=2.8, expiryDate=18/07/2025  <-- apertura
 
 Risultato gamba: -.CLS250718P95x-2@2.8@1.5
 ```
