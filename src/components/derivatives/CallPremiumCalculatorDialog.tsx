@@ -198,7 +198,7 @@ export function CallPremiumCalculatorDialog({
         underlying,
         orders_json: filteredOrders,
         transaction_cost: transactionCost,
-        net_per_share: metrics.netPerShare,
+        net_per_share: isIronCondor ? metrics.grossPremium : metrics.netPerShare,
         first_operation_date: metrics.firstOperationDate,
         last_operation_date: lastOperationDate,
         contracts_count: contractsInPortfolio,
@@ -295,14 +295,20 @@ export function CallPremiumCalculatorDialog({
                      {isIronCondor ? 'Gain Potenziale' : 'Netto Unitario'}
                    </p>
                   <p className="text-3xl font-bold text-primary">
-                    {formatCurrency(metrics.netPerShare, 'USD')}
+                    {isIronCondor 
+                      ? formatCurrency(metrics.grossPremium, 'USD')
+                      : formatCurrency(metrics.netPerShare, 'USD')
+                    }
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    su {contractsInPortfolio} contratti ({contractsInPortfolio * 100} azioni)
-                  </p>
+                  {!isIronCondor && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      su {contractsInPortfolio} contratti ({contractsInPortfolio * 100} azioni)
+                    </p>
+                  )}
                 </div>
 
-                {/* Secondary: Yields */}
+                {/* Secondary: Yields (only for covered calls) */}
+                {!isIronCondor && (
                 <div className="grid grid-cols-2 gap-4 text-center">
                   <div>
                     <p className="text-xs text-muted-foreground">Rendimento</p>
@@ -323,6 +329,7 @@ export function CallPremiumCalculatorDialog({
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/* First operation date - always visible under yields */}
                 <div className="text-center text-xs text-muted-foreground pt-1">
