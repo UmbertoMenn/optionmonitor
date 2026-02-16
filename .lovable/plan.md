@@ -1,32 +1,81 @@
 
 
-## Fix: i flussi di cassa salvati per Iron Condor, Double Diagonal e Altre Strategie vengono cancellati
+## Visualizzazione Waterfall del Netting con Breakdown per Categoria e Ticker
 
-### Causa del problema
-In `src/lib/strategyCache.ts` (righe 285-334), la funzione di pulizia dei dati orfani costruisce la lista delle chiavi attive (`activeCCKeys`) partendo **solo** da `categories.coveredCalls`. Tutti i record salvati nella tabella `covered_call_premiums` che non corrispondono a una Covered Call attiva vengono cancellati. Questo include i flussi di cassa salvati per Iron Condor, Double Diagonal e Altre Strategie.
+### Cosa cambia
+Il grafico a barre nelle viste Netting della dashboard verra' sostituito con un **grafico waterfall** che mostra come ogni componente del netting contribuisce (positivamente o negativamente) al valore finale del portafoglio. In fondo, le singole posizioni piu' costose saranno elencate come dettaglio espandibile.
 
-### Soluzione
-Estendere la logica di costruzione di `activeCCKeys` per includere anche le chiavi (ticker, option_symbol) provenienti da:
-- `categories.ironCondors`
-- `categories.doubleDiagonals`
-- `categories.otherStrategies`
+### Struttura del Waterfall
 
-### Dettaglio tecnico
+Per ogni vista, le barre del waterfall saranno diverse:
 
-**File: `src/lib/strategyCache.ts`** (dopo riga 295)
+**Netting Totale:**
+- Valore Assets (grigio, base)
+- Covered Call ITM (rosso, costo intrinseco)
+- Covered Call OTM (rosso, costo riacquisto)
+- Naked Put ITM (rosso, costo riacquisto)
+- Naked Put OTM (rosso, costo riacquisto)
+- Protezioni / Long Put (verde, valore di vendita)
+- Leap Call (verde, valore di vendita)
+- Altre Strategie (rosso/verde, netto)
+- **Totale Nettato** (blu, barra finale)
 
-Aggiungere l'estrazione delle chiavi attive anche dalle altre categorie di strategie multi-leg, utilizzando lo stesso pattern gia' presente per le Covered Call. Per ciascuna strategia (Iron Condor, Double Diagonal, Altre Strategie), iterare sulle gambe e aggiungere le coppie `(ticker, option_symbol)` alla lista `activeCCKeys`, in modo che il cleanup non le consideri orfane.
+**Netting ex. CC:** come sopra, ma CC OTM escluse e CC ITM valorizzate a intrinseco.
 
-In pratica, bisogna aggiungere dopo il blocco `categories.coveredCalls.forEach(...)`:
+**Netting ex. CC e NP OTM:** come sopra, ma CC OTM e NP OTM escluse; NP ITM valorizzate a intrinseco.
 
-1. **Iron Condors**: iterare su `categories.ironCondors`, estrarre il ticker e aggiungere le 4 option_symbol delle gambe (soldPut, boughtPut, soldCall, boughtCall), usando la chiave composita salvata dalla calcolatrice.
+Le barre con valore zero non verranno mostrate.
 
-2. **Double Diagonals**: iterare su `categories.doubleDiagonals`, stessa logica.
+### Top Costose
+Sotto il waterfall, un elenco compatto (massimo 5 righe) mostra le singole posizioni derivative piu' costose da chiudere, ordinate per impatto assoluto decrescente. Ogni riga mostra: ticker, tipo (CC/NP/LP/LC/Altro), strike, scadenza, e costo di chiusura in EUR.
 
-3. **Altre Strategie**: iterare su `categories.otherStrategies`, estrarre ticker e option_symbol di ogni gamba.
+### Dettaglio Tecnico
 
-Inoltre, per queste strategie multi-leg il `option_symbol` salvato nella calcolatrice non corrisponde al formato `C{strike}_{expiry}` delle Covered Call, ma utilizza un formato diverso (es. `C110_2026-06-21`). Servira' verificare quale formato viene usato al salvataggio nel dialog `CallPremiumCalculatorDialog` e assicurarsi che la chiave nel cleanup corrisponda.
+**File: `src/hooks/useDerivativeNetting.ts`**
 
-### Rischio
-Nessun rischio: si tratta solo di aggiungere chiavi alla lista di quelle da preservare. Nessun dato verra' cancellato che non dovrebbe esserlo.
+1. Estendere `NettingResult` con un nuovo campo `breakdown`:
+```typescript
+export interface NettingBreakdownItem {
+  category: string;        // es. "Covered Call ITM", "Naked Put OTM"
+  label: string;           // Label per il grafico
+  value: number;           // Valore netto (negativo = costo, positivo = guadagno)
+  color: string;           // Colore della barra
+  details: {               // Dettaglio per ticker
+    ticker: string;
+    description: string;
+    value: number;
+    strike?: number;
+    expiry?: string;
+  }[];
+}
+
+export interface NettingResult {
+  nettingExCoveredCall: number;
+  nettingTotal: number;
+  nettingExCCAndNP: number;
+  breakdown: NettingBreakdownItem[];  // NUOVO
+}
+```
+
+2. Durante il loop sui derivati, accumulare i valori per categoria e per singola posizione, costruendo l'array `breakdown` con i dettagli per ticker.
+
+3. Aggiungere una funzione `getBreakdownForViewMode(breakdown, viewMode)` che filtra le categorie in base alla vista selezionata (es. per `netting_ex_cc` esclude CC OTM).
+
+**File: `src/components/dashboard/DynamicPortfolioChart.tsx`**
+
+4. Sostituire il componente `NettingChart` con un nuovo `NettingWaterfallChart` che:
+   - Riceve `baseValue`, `breakdown` filtrato per vista, e `finalValue`
+   - Usa un `BarChart` verticale di Recharts con barre colorate per categoria
+   - Ogni barra parte dal punto dove finisce la precedente (waterfall)
+   - La barra base (Assets) e quella finale (Totale) sono a colori distinti
+   - Le barre negative (costi) sono in rosso/arancione, le positive in verde
+   - Tooltip ricco che mostra il dettaglio per ticker al passaggio del mouse
+
+5. Sotto il waterfall, aggiungere una sezione "Top posizioni piu' costose" con un elenco compatto delle prime 5 posizioni ordinate per `|value|` decrescente, con ticker, tipo, strike e importo formattato.
+
+6. Le props di `DynamicPortfolioChart` saranno estese per ricevere il `breakdown` (gia' parte di `NettingResult`).
+
+### Aspetto Visivo
+
+Il waterfall partira' dalla barra grigia "Assets" in alto e scendera' con barre rosse (costi di chiusura) e verdi (ricavi di vendita), per terminare con una barra blu "Valore Nettato" in basso. Compatto, leggibile e immediatamente chiaro su cosa costa di piu'.
 
