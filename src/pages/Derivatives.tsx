@@ -1195,7 +1195,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Calcola gain potenziale</p>
+                <p>Calcola flussi di cassa</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -1822,7 +1822,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Calcola gain potenziale</p>
+                <p>Calcola flussi di cassa</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -1940,11 +1940,17 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           </div>
           
           {/* Colonna 9: P/L */}
-          <div className="text-right">
-            <span className={`text-sm ${combinedPL >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-              {formatCurrency(combinedPL, legCurrency)}
-            </span>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${combinedPL >= 0 ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
+                <span className="text-xs text-muted-foreground">P/L:</span>
+                <span className="text-sm">{formatCurrency(combinedPL, legCurrency)}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Profit/Loss: somma dei P/L delle {options.length} gambe{hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
+            </TooltipContent>
+          </Tooltip>
       </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 space-y-2">
