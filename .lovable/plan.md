@@ -1,31 +1,55 @@
 
 
-## Eliminare la barra di scorrimento orizzontale allargando la finestra del calcolatore premi
+## Calcolatrice Gain Potenziale per Iron Condor
 
-### Problema
+### Obiettivo
 
-La finestra del dialog "Calcolatrice Premi" utilizza `max-w-lg` (32rem / 512px), insufficiente per contenere la tabella operazioni con la nuova colonna "Scad." senza overflow orizzontale.
-
-### Soluzione
-
-Aumentare la larghezza massima del dialog a `max-w-2xl` (42rem / 672px), sufficiente per mostrare tutte le colonne senza barra di scorrimento orizzontale.
+Aggiungere un pulsante calcolatrice nella riga Iron Condor, posizionato a fianco del pulsante OptionStrat (Col 4). Nessuna colonna "UNIT". La calcolatrice permette di caricare file ordini Excel e calcola il gain potenziale netto (tutte le operazioni eseguite: vendite = positivo, acquisti = negativo).
 
 ### Dettaglio tecnico
 
-**`src/components/derivatives/CallPremiumCalculatorDialog.tsx`** -- linea 233
+**1. `src/lib/orderFileParser.ts` -- Nuova funzione di filtraggio**
 
-Sostituire:
-```
-max-w-lg
-```
-Con:
-```
-max-w-2xl
+Aggiungere `filterAndCalculateIronCondorPremiums(orders, ticker)`:
+- Filtra per `status === 'eseguito'` e `symbolMatchesTicker(symbol, ticker)`
+- Nessun filtro su CALL/PUT (entrambi contribuiscono)
+- Nessun filtro buy-only (tutte le operazioni contano, a differenza di Covered Call)
+- Vendite: `+orderValue`, Acquisti: `-orderValue`
+- Ritorna lo stesso tipo `OrderParseResult`
+
+**2. `src/components/derivatives/CallPremiumCalculatorDialog.tsx` -- Generalizzazione**
+
+Aggiungere prop `strategyType: 'covered_call' | 'iron_condor'` (default `'covered_call'`):
+- Nel `onDrop`, scegliere `filterAndCalculateCallPremiums` o `filterAndCalculateIronCondorPremiums` in base a `strategyType`
+- Label condizionali:
+  - Titolo: "Calcola Premi CALL" diventa "Calcola Gain Potenziale" per Iron Condor
+  - "Netto Unitario" diventa "Gain Potenziale"
+- Rendimento e annualizzato restano invariati
+
+**3. `src/pages/Derivatives.tsx` -- IronCondorRow**
+
+- Aggiungere stato `showCalculator`
+- Allargare la colonna del pulsante OptionStrat da `2rem` a `4rem` per ospitare sia OptionStrat che Calculator affiancati
+- Aggiungere il pulsante Calculator con icona e tooltip "Calcola gain potenziale"
+- Aggiungere `<CallPremiumCalculatorDialog>` con `strategyType="iron_condor"`
+- Risolvere il ticker da `underlyingPrices[underlying]?.ticker`
+- Generare `optionSymbol` come `'IC_{expiryDate}'` per unicita' nel DB
+- Passare `contracts` come `contractsInPortfolio`
+- Aggiornare `min-w` della griglia se necessario
+
+### Layout griglia aggiornato
+
+La colonna 4 (attualmente `2rem` con solo OptionStrat) diventa `4rem` e contiene entrambi i pulsanti affiancati:
+
+```text
+[Chevron][Underlying][IC badge][OptionStrat + Calculator][IR/OOR][Scad]...
 ```
 
 ### File da modificare
 
 | File | Modifica |
 |---|---|
-| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Cambiare `max-w-lg` in `max-w-2xl` nella classe di `DialogContent` |
+| `src/lib/orderFileParser.ts` | Nuova funzione `filterAndCalculateIronCondorPremiums` |
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Prop `strategyType`, logica condizionale di filtraggio e label |
+| `src/pages/Derivatives.tsx` | Pulsante Calculator affiancato a OptionStrat in IronCondorRow, dialog |
 
