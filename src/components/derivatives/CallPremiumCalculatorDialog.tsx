@@ -113,7 +113,7 @@ export function CallPremiumCalculatorDialog({
       totalBuys,
       totalSells,
       netPremium,
-      grossPremium: Math.abs(netPremium),
+      grossPremium: netPremium,
       firstOperationDate,
     };
 

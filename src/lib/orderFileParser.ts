@@ -559,7 +559,7 @@ export function filterAndCalculateIronCondorPremiums(
     totalBuys,
     totalSells,
     netPremium,
-    grossPremium: Math.abs(netPremium),
+    grossPremium: netPremium,
     firstOperationDate,
   };
 }
@@ -622,7 +622,7 @@ export function filterAndCalculateCallPremiums(
     totalBuys,
     totalSells,
     netPremium,
-    grossPremium: Math.abs(netPremium),
+    grossPremium: netPremium,
     firstOperationDate,
   };
 }
@@ -652,7 +652,7 @@ export function calculatePremiumMetrics(
 ): PremiumMetrics {
   const ordersFound = parseResult.filteredOrders.length;
   const commissions = ordersFound * transactionCost;
-  const netPremium = parseResult.grossPremium - commissions;
+  const netPremium = parseResult.netPremium - commissions;
   
   const totalShares = contractsInPortfolio * 100;
   const grossPerShare = totalShares > 0 ? parseResult.grossPremium / totalShares : 0;
