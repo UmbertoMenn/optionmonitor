@@ -1,61 +1,76 @@
 
 
-## Fix: Mostrare ticker non risolti delle azioni nella sezione admin Ticker
+## Risoluzione automatica dei ticker non risolti dalla sezione admin
 
 ### Problema
 
-L'hook `useUnderlyingMappings` (riga 34-60) cerca i sottostanti non risolti solo tra le posizioni con `asset_type IN ('OPTION', 'WARRANT', 'derivative')`. Le azioni (`asset_type = 'stock'`) non vengono mai considerate, quindi nella sezione admin "Ticker Non Risolti" non appaiono mai.
+La sezione admin mostra 56 ticker non risolti, ma richiede l'inserimento manuale di ciascuno. Il sistema ha gia' tutte le capacita' per risolvere i ticker automaticamente (mapping statici, Yahoo Finance, AI inference) tramite la Edge Function `fetch-underlying-prices`, ma questa logica non viene invocata dalla sezione admin.
 
 ### Soluzione
 
-**File: `src/hooks/useUnderlyingMappings.ts`**
+Aggiungere un pulsante **"Risolvi Automaticamente"** nella sezione admin "Ticker Non Risolti" che:
 
-Modificare la `unresolvedQuery` per includere anche le posizioni stock:
-
-1. Aggiungere una query per le posizioni stock con `ticker IS NULL`
-2. Estrarre le descrizioni, pulirle (rimuovere prefisso "AZ.", trim)
-3. Verificare quali non hanno corrispondenza in `underlying_mappings`
-4. Unire i risultati con gli underlying dei derivati non risolti (deduplicando)
+1. Prende tutti i nomi non risolti
+2. Li invia alla Edge Function `fetch-underlying-prices` (che gia' implementa il flusso completo: mapping statici -> Yahoo Finance -> AI inference -> salvataggio in `underlying_mappings`)
+3. Mostra il progresso e il risultato (quanti risolti vs quanti ancora irrisolti)
+4. Aggiorna automaticamente la lista
 
 ### Dettaglio tecnico
 
+**File: `src/components/admin/TickerMappingManager.tsx`**
+
+1. Aggiungere uno stato `isAutoResolving` e una funzione `handleAutoResolve`
+2. La funzione chiama `supabase.functions.invoke('fetch-underlying-prices', { body: { underlyings: unresolvedUnderlyings } })`
+3. Dopo la risposta, esegue `refetch()` per aggiornare la lista
+4. Mostra un toast con il risultato: "Risolti X su Y ticker"
+5. Il pulsante viene posizionato accanto al titolo della sezione "Ticker Non Risolti", con icona di magic wand o simile
+
 ```text
-// Dentro unresolvedQuery queryFn, DOPO il blocco derivati:
-
-// Fetch stock positions without ticker
-const { data: stocks, error: stocksError } = await supabase
-  .from('positions')
-  .select('description')
-  .eq('asset_type', 'stock')
-  .is('ticker', null);
-
-if (stocksError) throw stocksError;
-
-// Clean stock descriptions and add unique ones
-const stockNames = [...new Set(
-  stocks
-    ?.map(s => s.description?.replace(/^AZ\./i, '').trim())
-    .filter((d): d is string => Boolean(d))
-)];
-
-// Merge with derivative underlyings, check against mappings
-const allUnresolved = [...uniqueUnderlyings, ...stockNames];
-const mappedUnderlyings = new Set(mappings?.map(m => m.underlying));
-
-return allUnresolved.filter(u => !mappedUnderlyings.has(u)).sort();
+// Pseudo-codice della funzione:
+const handleAutoResolve = async () => {
+  setIsAutoResolving(true);
+  try {
+    const { data, error } = await supabase.functions.invoke('fetch-underlying-prices', {
+      body: { underlyings: unresolvedUnderlyings }
+    });
+    
+    if (error) throw error;
+    
+    const resolvedCount = Object.keys(data?.prices || {}).length;
+    toast.success(`Risolti automaticamente ${resolvedCount} su ${unresolvedUnderlyings.length} ticker`);
+    
+    // Refresh the lists
+    refetch();
+  } catch (err) {
+    toast.error('Errore nella risoluzione automatica');
+  } finally {
+    setIsAutoResolving(false);
+  }
+};
 ```
 
-Bisogna anche verificare la corrispondenza normalizzata (non solo esatta) per evitare falsi positivi.
+6. Il pulsante nella UI:
+```text
+<Button onClick={handleAutoResolve} disabled={isAutoResolving}>
+  {isAutoResolving ? <Loader2 className="animate-spin" /> : <Wand2 />}
+  Risolvi Automaticamente
+</Button>
+```
+
+### Comportamento atteso
+
+- L'admin clicca "Risolvi Automaticamente"
+- La Edge Function tenta di risolvere ogni underlying tramite:
+  - Mapping statici (NVIDIA -> NVDA, PAYPAL -> PYPL, ecc.)
+  - Yahoo Finance search
+  - AI inference (Lovable AI) con validazione Yahoo
+- I ticker risolti vengono salvati automaticamente in `underlying_mappings`
+- La lista si aggiorna mostrando solo quelli rimasti irrisolti
+- Quelli che non possono essere risolti restano nella lista per override manuale
 
 ### File da modificare
 
 | File | Modifica |
 |---|---|
-| `src/hooks/useUnderlyingMappings.ts` | Aggiungere posizioni stock alla `unresolvedQuery` per mostrare azioni senza mapping nella sezione admin |
-
-### Risultato atteso
-
-- La sezione admin "Ticker Non Risolti" mostra sia i sottostanti dei derivati che le descrizioni delle azioni senza mapping
-- L'admin puo' risolvere i mapping mancanti direttamente dalla sezione Ticker
-- I ticker risolti appaiono automaticamente nel dialog Gestione Avvisi
+| `src/components/admin/TickerMappingManager.tsx` | Aggiungere pulsante "Risolvi Automaticamente" che invoca la Edge Function `fetch-underlying-prices` con tutti gli underlying non risolti |
 
