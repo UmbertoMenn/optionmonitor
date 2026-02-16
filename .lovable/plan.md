@@ -1,74 +1,86 @@
 
 
-## Fix: Espansione quantita' per FIFO matching corretto
+## Estensione Calcolatrice + OptionStrat + P/L a Double Diagonal e Altre Strategie
 
-### Problema
+### Panoramica
 
-Scenario reale: Buy 1x C440, Buy 1x C440, Sell 2x C440. Il FIFO attuale accoppia il primo Buy con l'intero Sell (qty=2), lasciando il secondo Buy come "aperto" anche se la posizione netta e' zero.
+Portare la stessa logica gia' implementata per gli Iron Condor (calcolatrice premi con ordini Excel, link OptionStrat storico, P/L che include operazioni chiuse) anche a **Double Diagonal** e **Altre Strategie (Grouped)**.
 
-### Soluzione: espandere in unita' singole
+### Modifiche necessarie
 
-Prima del FIFO matching, ogni ordine con qty > 1 viene "esploso" in N ordini con qty = 1 allo stesso prezzo. Cosi' il matching 1:1 funziona sempre correttamente.
+---
 
-### Esempio
+### 1. `CallPremiumCalculatorDialog.tsx` — Supporto nuovi strategy type
 
-Input:
-```
-Buy 1x C440 @ 12
-Buy 1x C440 @ 8
-Sell 2x C440 @ 15
-```
+Il tipo `CalculatorStrategyType` passa da `'covered_call' | 'iron_condor'` a includere anche `'double_diagonal' | 'other_strategy'`.
 
-Dopo espansione:
-```
-Buy 1x C440 @ 12
-Buy 1x C440 @ 8
-Sell 1x C440 @ 15
-Sell 1x C440 @ 15
-```
+- Aggiungere `'double_diagonal' | 'other_strategy'` al tipo
+- Double Diagonal e Other Strategy usano la stessa logica di Iron Condor per il filtro ordini (`filterAndCalculateIronCondorPremiums` — filtra tutti gli ordini eseguiti per ticker, CALL+PUT)
+- Il dialog per DD e OS mostra "Gain Potenziale" come per IC (non "Netto Unitario")
+- In pratica, basta ampliare il check `isIronCondor` a un check piu' generico `isMultiLeg` che si attiva per `iron_condor`, `double_diagonal` e `other_strategy`
 
-FIFO matching:
-- Buy@12 -> Sell@15 -> `.C440@12@15`
-- Buy@8 -> Sell@15 -> `.C440@8@15`
+---
 
-Nessuna posizione orfana.
+### 2. `DoubleDiagonalRow` — Aggiungere calcolatrice, link storico, P/L da ordini
 
-### Dettaglio tecnico
+Modifiche al componente `DoubleDiagonalRow` in `Derivatives.tsx`:
 
-**File: `src/lib/optionStratUrl.ts`** -- funzione `buildOptionStratUrlFromOrders`
+- **Props**: aggiungere `getPremiumByTickerAndSymbol` (come gia' fatto per `IronCondorRow`)
+- **Option Symbol**: generare come `DD_{soldExpiryDate}` (analogo a `IC_{expiryDate}`)
+- **Link OptionStrat**: se ci sono ordini salvati, usare `buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, 'Double Diagonal')`, altrimenti il link attuale da posizioni
+- **Pulsante Calcolatrice**: aggiungere il bottone Calculator accanto al pulsante OptionStrat (stessa UI dell'Iron Condor, colonna allargata a 4rem)
+- **P/L sulla riga**: se ci sono ordini salvati nella calcolatrice, il P/L deve sommare:
+  - Il P/L delle posizioni ancora aperte in portafoglio (come ora)
+  - Il guadagno/perdita realizzato dalle operazioni chiuse (ordini nell'orders_json che hanno un match FIFO completo)
+  
+  Per calcolare il P/L realizzato dagli ordini storici: `savedPremium.net_per_share` rappresenta il GP totale (somma netta di tutte le operazioni). Il P/L combinato sara':
+  - Valore attuale mark-to-market delle 4 gambe aperte: `(current_price * qty * 100)` per ogni gamba
+  - Piu' il GP salvato dalla calcolatrice (che include i premi incassati/pagati storici)
 
-Aggiungere un passaggio di espansione dopo il raggruppamento per simbolo e prima del FIFO matching:
+  Formula semplificata: **P/L = GP calcolatrice + MtM posizioni aperte**
 
-```typescript
-for (const [, group] of groups) {
-  // Expand qty > 1 into individual unit orders
-  const expanded: ParsedOrder[] = [];
-  for (const order of group) {
-    for (let i = 0; i < order.quantity; i++) {
-      expanded.push({ ...order, quantity: 1 });
-    }
-  }
+  Dove MtM posizioni aperte = somma di `(current_price - avg_cost) * quantity * 100` per ogni gamba.
 
-  // FIFO matching on expanded (all qty=1)
-  const remaining = [...expanded];
-  // ... resto del codice invariato
-}
-```
+  In pratica: P/L portfolio attuale + GP calcolatrice.
 
-Con questa espansione, il suffisso `qtyPart` non servira' mai dentro il loop FIFO (ogni ordine ha qty=1). Pero' posizioni aperte consecutive con lo stesso prezzo e direzione possono essere riaggregate alla fine per produrre il suffisso `xN` corretto nel link.
+- **Grid layout**: allargare la colonna OptionStrat da 2rem a 4rem per ospitare i due pulsanti
 
-### Riaggregazione finale (opzionale ma corretta)
+---
 
-Dopo il FIFO matching, le gambe consecutive identiche (stesso prefisso, stesso simbolo, stesso prezzo, non chiuse) vengono unite in una sola con `xN`:
+### 3. `GroupedOtherStrategyRow` — Stesse modifiche
 
-```
-.C440@8
-.C440@8
--> .C440x2@8
-```
+Modifiche al componente `GroupedOtherStrategyRow` in `Derivatives.tsx`:
 
-Questo mantiene il link pulito e rispetta la regola "quantita' solo se > 1".
+- **Props**: aggiungere `getPremiumByTickerAndSymbol`
+- **Option Symbol**: generare come `OS_{underlying}` (chiave univoca per strategia)
+- **Link OptionStrat**: se ordini salvati, usare `buildOptionStratUrlFromOrders`, altrimenti link da posizioni attuali
+- **Pulsante Calcolatrice**: aggiungere accanto al pulsante OptionStrat (allargare colonna da 2rem a 4rem)
+- **P/L sulla riga**: stessa logica DD — P/L portfolio + GP calcolatrice
+- **Breakeven**: ricalcolare includendo il P/L realizzato dagli ordini storici. Attualmente il breakeven usa solo le posizioni attuali e il loro `avg_cost`. Con la calcolatrice, il breakeven deve shiftare in base al guadagno/perdita gia' realizzato:
+  - Il sistema attuale calcola il payoff basandosi su `avg_cost` come premio pagato/incassato
+  - Con ordini storici, il "premio effettivo netto" per ogni gamba cambia. Il modo piu' semplice: aggiungere il GP realizzato (dalla calcolatrice) come offset al payoff totale. Questo shifta le curve di breakeven correttamente
+  - Il calcolo diventa: `payoff_originale + GP_calcolatrice` per ogni punto del grafico
 
-### Nessuna modifica ad altri file
+---
 
-Tutto in `buildOptionStratUrlFromOrders` dentro `src/lib/optionStratUrl.ts`.
+### 4. Chiamate dalle sezioni padre
+
+Nelle sezioni che rendono `DoubleDiagonalRow` e `GroupedOtherStrategyRow` (linee ~530-653), passare la prop `getPremiumByTickerAndSymbol` (gia' disponibile dal hook `useCoveredCallPremiums`).
+
+---
+
+### Dettaglio tecnico dei file modificati
+
+| File | Modifica |
+|---|---|
+| `src/components/derivatives/CallPremiumCalculatorDialog.tsx` | Tipo `CalculatorStrategyType` esteso; logica `isMultiLeg` per DD/OS |
+| `src/pages/Derivatives.tsx` (DoubleDiagonalRow) | Props + calcolatrice + link storico + P/L combinato + grid layout |
+| `src/pages/Derivatives.tsx` (GroupedOtherStrategyRow) | Props + calcolatrice + link storico + P/L combinato + breakeven con offset + grid layout |
+| `src/pages/Derivatives.tsx` (sezioni padre) | Passare `getPremiumByTickerAndSymbol` a DD e OS rows |
+
+### Nessuna modifica a
+
+- `optionStratUrl.ts` — `buildOptionStratUrlFromOrders` gia' supporta qualsiasi strategy name tramite `STRATEGY_SLUG_MAP`
+- `orderFileParser.ts` — `filterAndCalculateIronCondorPremiums` gia' filtra per ticker senza distinzione CALL/PUT, perfetto anche per DD e OS
+- Database/tabelle — `covered_call_premiums` gia' supporta qualsiasi `option_symbol` come chiave
+
