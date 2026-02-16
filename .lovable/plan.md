@@ -1,56 +1,34 @@
 
 
-## Fix: Calcolo P/L sulla riga strategia
+## Rinominare "Gain Potenziale" in "Flussi di cassa" per il Double Diagonal
 
-### Problema
-
-Il P/L attuale usa `profit_loss` dal broker (basato su avg_cost), ma la formula corretta e':
-
-```
-P/L = Valore Calcolatrice (net_per_share) + Valore di Mercato Posizioni Aperte
-```
-
-Dove il valore di mercato e': `(prezzo_mercato_opzioni_comprate x contratti x 100) - (prezzo_mercato_opzioni_vendute x contratti x 100)`
-
-Equivale a: `net_per_share + SUM(current_price x quantity x 100)` per tutte le gambe (quantity gia' con segno: positivo per comprate, negativo per vendute).
+### Contesto
+Per il Double Diagonal, i termini "Gain Potenziale" e "Calcola gain potenziale" non sono appropriati: il valore rappresenta i flussi di cassa storici, non un guadagno potenziale. Occorre aggiornare tooltip e titoli.
 
 ### Modifiche
 
 **File: `src/pages/Derivatives.tsx`**
 
-1. **DoubleDiagonalRow** (~riga 1427-1429): sostituire il calcolo basato su `profit_loss` con il valore di mercato delle posizioni aperte:
-```typescript
-// PRIMA (errato):
-const portfolioPL = (soldPut.profit_loss || 0) + (soldCall.profit_loss || 0) + 
-                (boughtPut.profit_loss || 0) + (boughtCall.profit_loss || 0);
+1. **Riga 1487** - Tooltip del pulsante calcolatrice nella riga Double Diagonal:
+   - Da: `"Calcola gain potenziale"`
+   - A: `"Calcola flussi di cassa"`
 
-// DOPO (corretto):
-const marketValuePositions = 
-  ((boughtPut.current_price || 0) * Math.abs(boughtPut.quantity) * 100) +
-  ((boughtCall.current_price || 0) * Math.abs(boughtCall.quantity) * 100) -
-  ((soldPut.current_price || 0) * Math.abs(soldPut.quantity) * 100) -
-  ((soldCall.current_price || 0) * Math.abs(soldCall.quantity) * 100);
-const totalPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
-```
+2. **Riga 1584** - Tooltip del P/L sulla riga Double Diagonal:
+   - Da: `"...+ GP calcolatrice"`
+   - A: `"...+ flussi di cassa calcolatrice"`
 
-2. **OtherStrategyGroupRow** (~riga 1782-1783): stessa logica, calcolando il valore di mercato dalle singole gambe:
-```typescript
-// PRIMA:
-const combinedPL = totalProfitLoss + (hasSavedGP ? savedPremium.net_per_share : 0);
+**File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
 
-// DOPO:
-const marketValuePositions = options.reduce((sum, o) => {
-  const mv = (o.option.current_price || 0) * o.option.quantity * 100;
-  return sum + mv;
-}, 0);
-const combinedPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
-```
+Il componente riceve gia' `strategyType` come prop, quindi possiamo distinguere il Double Diagonal.
 
-### Dettagli tecnici
+3. **Riga 247** - Titolo del dialog:
+   - Da: `isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'`
+   - A: logica a 3 vie: `strategyType === 'double_diagonal' ? 'Calcola Flussi di cassa' : isMultiLeg ? 'Calcola Gain Potenziale' : 'Calcola Premi CALL'`
 
-- `current_price` sulle posizioni derivati contiene il prezzo di mercato aggiornato (delayed 15 min per opzioni)
-- `quantity` e' gia' con segno: positivo per le comprate, negativo per le vendute
-- Il calcolo del Double Diagonal usa `Math.abs(quantity)` con segno esplicito (+/-) per chiarezza
-- Per le Other Strategies, il `quantity * 100` gestisce automaticamente il segno
-- Il calcolo dell'Iron Condor (GP, non P/L) non viene modificato in quanto mostra il Gain Potenziale, non il P/L
+4. **Riga 297** - Etichetta del valore principale nel dialog:
+   - Da: `isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'`
+   - A: `strategyType === 'double_diagonal' ? 'Flussi di cassa' : isMultiLeg ? 'Gain Potenziale' : 'Netto Unitario'`
 
+### Note
+- Iron Condor e Altre Strategie mantengono "Gain Potenziale" invariato
+- Nessuna modifica alla logica di calcolo, solo testi e tooltip
