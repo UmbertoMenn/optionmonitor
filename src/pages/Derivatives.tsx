@@ -192,9 +192,15 @@ export function Derivatives() {
     categories.groupedOtherStrategies.forEach(group => {
       names.add(group.underlying);
     });
+
+    // Stock positions - add cleaned descriptions for ticker resolution
+    stockPositions.forEach(sp => {
+      const cleaned = sp.description.replace(/^AZ\./i, '').trim();
+      if (cleaned) names.add(cleaned);
+    });
     
     return Array.from(names);
-  }, [categories]);
+  }, [categories, stockPositions]);
 
   // Fetch underlying prices from Yahoo Finance
   const { prices: underlyingPrices, isLoading: isPricesLoading } = useUnderlyingPrices(allUnderlyingNames);

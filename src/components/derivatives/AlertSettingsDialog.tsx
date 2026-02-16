@@ -52,7 +52,25 @@ import { DerivativeCategories, CoveredCallPosition, NakedPutPosition, IronCondor
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { Position } from '@/types/portfolio';
+import { useUnderlyingMappings, UnderlyingMapping } from '@/hooks/useUnderlyingMappings';
 import { useStrategyAlertToggles, useUpsertStrategyAlertToggle, useBatchUpsertStrategyAlertToggles } from '@/hooks/useStrategyAlertToggles';
+
+// Normalize name for matching (same logic as useUnderlyingPrices)
+function normalizeName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[.,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\bINC\b/g, '')
+    .replace(/\bCORP\b/g, '')
+    .replace(/\bLTD\b/g, '')
+    .replace(/\bLLC\b/g, '')
+    .replace(/\bPLC\b/g, '')
+    .replace(/\bCO\b/g, '')
+    .replace(/\bTHE\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 interface AlertSettingsDialogProps {
   open: boolean;
@@ -66,7 +84,8 @@ interface AlertSettingsDialogProps {
 function extractUniqueTickers(
   categories: DerivativeCategories,
   underlyingPrices: Record<string, UnderlyingPrice>,
-  positions: Position[]
+  positions: Position[],
+  allMappings: UnderlyingMapping[]
 ): { 
   resolved: Array<{ underlying: string; ticker: string }>;
   unresolved: string[];
@@ -103,12 +122,24 @@ function extractUniqueTickers(
   
   // 3. Add stock tickers from portfolio positions (deduplicated)
   positions
-    .filter(p => p.asset_type === 'stock' && p.ticker)
+    .filter(p => p.asset_type === 'stock')
     .forEach(p => {
-      const ticker = p.ticker!.toUpperCase();
-      if (!resolvedTickersSet.has(ticker)) {
-        resolvedTickersSet.add(ticker);
-        resolved.push({ underlying: p.description, ticker });
+      // If has direct ticker, use it
+      if (p.ticker) {
+        const ticker = p.ticker.toUpperCase();
+        if (!resolvedTickersSet.has(ticker)) {
+          resolvedTickersSet.add(ticker);
+          resolved.push({ underlying: p.description, ticker });
+        }
+        return;
+      }
+      
+      // Otherwise, resolve via underlying_mappings using normalized description
+      const descNormalized = normalizeName(p.description.replace(/^AZ\./i, ''));
+      const mapping = allMappings.find(m => normalizeName(m.underlying) === descNormalized);
+      if (mapping && !resolvedTickersSet.has(mapping.ticker.toUpperCase())) {
+        resolvedTickersSet.add(mapping.ticker.toUpperCase());
+        resolved.push({ underlying: p.description, ticker: mapping.ticker.toUpperCase() });
       }
     });
   
@@ -143,6 +174,8 @@ function extractUniqueTickers(
 export function AlertSettingsDialog({ open, onOpenChange, categories, underlyingPrices }: AlertSettingsDialogProps) {
   const { isAdminMode } = usePortfolioContext();
   const { positions } = usePortfolio();
+  const { allMappings: allMappingsQuery } = useUnderlyingMappings();
+  const mappings = allMappingsQuery.data ?? [];
   const { data: configs = [], isLoading } = useAlertConfigs();
   const batchUpsertMutation = useBatchUpsertAlertConfigs();
   const deleteConfigMutation = useDeleteAlertConfig();
@@ -183,8 +216,8 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   
   // Extract available tickers from strategies + stock positions
   const { resolved: availableTickers, unresolved: unresolvedUnderlyings } = useMemo(() => 
-    extractUniqueTickers(categories, underlyingPrices, positions),
-    [categories, underlyingPrices, positions]
+    extractUniqueTickers(categories, underlyingPrices, positions, mappings),
+    [categories, underlyingPrices, positions, mappings]
   );
 
   // Build strategy items for "Per Strategia" tab using same key logic as strategyCache.ts
