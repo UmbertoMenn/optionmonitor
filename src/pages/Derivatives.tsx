@@ -488,7 +488,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1 overflow-x-auto">
                     {categories.ironCondors.map((ic, index) => (
-                      <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} />
+                      <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                     ))}
                   </div>
                 )}
@@ -1092,7 +1092,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
   );
 }
 
-function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondorPosition; underlyingPrices: Record<string, UnderlyingPrice> }) {
+function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymbol }: { ironCondor: IronCondorPosition; underlyingPrices: Record<string, UnderlyingPrice>; getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined }) {
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const { underlying, expiryDate, soldPut, boughtPut, soldCall, boughtCall, contracts } = ironCondor;
@@ -1104,24 +1104,31 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
   const hasUnderlyingPrice = underlyingPrice > 0;
   const legCurrency = soldCall.currency || soldPut.currency || 'USD';
   
+  // Check for saved GP from calculator
+  const ticker = underlyingPrices[underlying]?.ticker;
+  const optionSymbol = `IC_${expiryDate || 'unknown'}`;
+  const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
+  const hasSavedGP = savedPremium && savedPremium.orders_json.length > 0;
+  
   // Calculate if underlying price is In Range (between sold strikes)
   const soldPutStrike = soldPut.strike_price || 0;
   const soldCallStrike = soldCall.strike_price || 0;
   const isInRange = hasUnderlyingPrice && underlyingPrice >= soldPutStrike && underlyingPrice <= soldCallStrike;
   
-  // Calculate Gain Potenziale = premi incassati - premi pagati
-  // Sold options (negative qty) = premium received (avg_cost is positive, so we take it as income)
-  // Bought options (positive qty) = premium paid (avg_cost is the cost)
+  // Calculate Gain Potenziale = premi incassati - premi pagati (from portfolio PMC)
   const premiumReceived = ((soldPut.avg_cost || 0) + (soldCall.avg_cost || 0)) * contracts * 100;
   const premiumPaid = ((boughtPut.avg_cost || 0) + (boughtCall.avg_cost || 0)) * contracts * 100;
-  const gainPotenziale = premiumReceived - premiumPaid;
+  const gainPotenzialeFromPMC = premiumReceived - premiumPaid;
+  
+  // Use saved GP if available, otherwise use PMC-based calculation
+  const gainPotenziale = hasSavedGP ? savedPremium.net_per_share : gainPotenzialeFromPMC;
   const isPositiveGP = gainPotenziale >= 0;
   
   // Calculate Max Loss = spread width * 100 * contracts - net premium received
   const putSpreadWidth = soldPutStrike - (boughtPut.strike_price || 0);
   const callSpreadWidth = (boughtCall.strike_price || 0) - soldCallStrike;
   const maxSpreadWidth = Math.max(putSpreadWidth, callSpreadWidth);
-  const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenziale;
+  const maxLoss = (maxSpreadWidth * 100 * contracts) - gainPotenzialeFromPMC;
   
   // Strikes summary
   const putSpread = `${boughtPut.strike_price}/${soldPutStrike}`;
@@ -1266,7 +1273,7 @@ function IronCondorRow({ ironCondor, underlyingPrices }: { ironCondor: IronCondo
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Gain Potenziale: premi incassati - premi pagati</p>
+              <p>{hasSavedGP ? 'Gain Potenziale (da calcolatrice ordini)' : 'Gain Potenziale: premi incassati - premi pagati'}</p>
             </TooltipContent>
           </Tooltip>
           
