@@ -77,7 +77,12 @@ export function useUnderlyingMappings() {
       if (mappingsError) throw mappingsError;
       
       // Normalizza per confronto
-      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normalize = (s: string) =>
+        s.toUpperCase()
+          .replace(/[.,]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .replace(/\b(INC|CORP|LTD|LLC|PLC|CO|THE)\b/g, '')
+          .replace(/[^A-Z0-9]/g, '');
       const mappedNormalized = new Set(mappings?.map(m => normalize(m.underlying)));
       
       // Trova quelli non risolti (confronto normalizzato)
