@@ -1,77 +1,67 @@
 
 
-## Fix: Mostrare ticker azioni nella gestione avvisi prezzo + cron per aggiornamento
+## Mostrare ticker non risolti + link admin per override manuale
 
-### Problema
+### Problema attuale
 
-Le posizioni azionarie nel database hanno `ticker: null` - solo la `description` (es. "AZ.PAYPAL HOLDINGS INC") identifica il titolo. Il codice attuale in `extractUniqueTickers` filtra con `p.ticker` che e' sempre null per le azioni, quindi nessun badge viene mostrato.
+1. La lista `unresolved` nella funzione `extractUniqueTickers` traccia solo i sottostanti dei **derivati** non risolti (righe 146-166). Le azioni con `ticker: null` che non hanno corrispondenza in `underlying_mappings` vengono semplicemente ignorate -- non appaiono ne' come risolte ne' come non risolte.
 
-### Soluzione (2 parti)
+2. Non c'e' alcun collegamento diretto dal dialog degli avvisi alla sezione admin "Gestione Mapping Ticker" per risolvere i ticker mancanti.
 
-#### Parte 1: Mostrare i ticker delle azioni nel tab Prezzo
+### Soluzione
 
 **File: `src/components/derivatives/AlertSettingsDialog.tsx`**
 
-1. Importare `useUnderlyingMappings` per accedere alla tabella `underlying_mappings` (che contiene la risoluzione nome→ticker gia' popolata dal sistema di derivati e dal cron)
-2. Modificare `extractUniqueTickers` per accettare anche `allMappings` come parametro
-3. Per ogni posizione stock con `ticker === null`, normalizzare la `description` (rimuovere prefisso "AZ.", suffissi "INC", ecc.) e cercare una corrispondenza in `underlying_mappings`
-4. Se trovata, aggiungere il ticker alla lista dei disponibili (con deduplicazione)
+1. **Includere le azioni non risolte nella lista `unresolved`**: nella funzione `extractUniqueTickers`, dopo il loop sulle posizioni stock (riga 124-144), aggiungere le azioni che non hanno ne' ticker diretto ne' corrispondenza in `underlying_mappings` alla lista `unresolved`, usando la descrizione pulita (senza prefisso "AZ.").
+
+2. **Mostrare la sezione "ticker non risolti" anche nei tab Prezzo e Ticker**: attualmente il box amber con i badge non risolti e' visibile solo nel tab Distanza (riga 849). Aggiungere la stessa sezione anche nel tab **Prezzo** (dopo i badge dei ticker disponibili, riga 971) e nel tab **Ticker** (dopo i badge cliccabili, riga 847).
+
+3. **Aggiungere un pulsante "Gestisci Mapping" per admin**: dentro il box amber dei ticker non risolti, se `isAdminMode` e' true, mostrare un pulsante che naviga alla sezione admin Gestione Mapping Ticker (`/admin` con tab `tickers`), oppure un link informativo. Questo permette all'admin di aggiungere rapidamente i mapping mancanti.
+
+### Dettaglio tecnico
 
 ```text
-// Logica di risoluzione per azioni senza ticker:
+// In extractUniqueTickers, DOPO il loop stock positions (riga 144):
 
+// Track unresolved stocks
 positions
   .filter(p => p.asset_type === 'stock')
   .forEach(p => {
-    // Se ha ticker diretto, usalo
-    if (p.ticker) {
-      const t = p.ticker.toUpperCase();
-      if (!resolvedTickersSet.has(t)) { resolvedTickersSet.add(t); resolved.push(...); }
-      return;
-    }
-
-    // Altrimenti, cerca in underlying_mappings via normalizzazione
-    const descNormalized = normalizeName(p.description.replace(/^AZ\./i, ''));
-    const mapping = allMappings.find(m => normalizeName(m.underlying) === descNormalized);
-    if (mapping && !resolvedTickersSet.has(mapping.ticker)) {
-      resolvedTickersSet.add(mapping.ticker);
-      resolved.push({ underlying: p.description, ticker: mapping.ticker });
+    // Skip if already resolved (had direct ticker or found mapping)
+    if (p.ticker) return;
+    const descCleaned = p.description.replace(/^AZ\./i, '').trim();
+    const descNormalized = normalizeName(descCleaned);
+    const hasMapping = allMappings.some(m => normalizeName(m.underlying) === descNormalized);
+    if (!hasMapping) {
+      unresolved.push(descCleaned);
     }
   });
+
+// Nella sezione unresolved del tab Ticker + Prezzo (per admin):
+{isAdminMode && unresolvedUnderlyings.length > 0 && (
+  <Button variant="outline" size="sm" onClick={() => { onOpenChange(false); navigate('/admin?tab=tickers'); }}>
+    <Link2 className="w-4 h-4 mr-2" />
+    Gestisci Mapping Ticker
+  </Button>
+)}
 ```
 
-5. Importare la funzione `normalizeName` da `useUnderlyingPrices` (o duplicarla localmente, dato che e' gia' definita nello stesso modulo)
+### Sezioni UI modificate
 
-**File: `src/pages/Derivatives.tsx`**
-
-6. Aggiungere le descrizioni delle azioni (pulite dal prefisso "AZ.") alla lista `allUnderlyingNames` passata a `useUnderlyingPrices`, in modo che il sistema risolva automaticamente i ticker anche per le azioni e li salvi in `underlying_mappings` per uso futuro
-
-```text
-// In allUnderlyingNames useMemo, aggiungere:
-stockPositions.forEach(sp => {
-  const cleaned = sp.description.replace(/^AZ\./i, '').trim();
-  if (cleaned) names.add(cleaned);
-});
-```
-
-Questo garantisce che alla prima visita della pagina Derivati, i ticker delle azioni vengano risolti e salvati in `underlying_mappings`, rendendoli disponibili per il dialog degli avvisi.
-
-#### Parte 2: Aggiornamento cron per ticker con avvisi di prezzo
-
-Questa funzionalita' e' **gia' implementata**. Il cron job `update-underlying-prices-cron` (linee 191-202) include gia' i ticker dalla tabella `price_alerts` con `enabled = true`. Quando un utente crea un avviso di prezzo su un ticker, quel ticker viene automaticamente incluso nel ciclo di aggiornamento prezzi ogni 5 minuti.
-
-Nessuna modifica necessaria per questa parte.
+| Sezione | Modifica |
+|---|---|
+| Tab **Distanza** (esistente) | Aggiungere pulsante admin "Gestisci Mapping" nel box amber |
+| Tab **Prezzo** | Aggiungere box amber con ticker non risolti + pulsante admin |
+| Tab **Ticker** | Il box amber gia' presente -- aggiungere pulsante admin |
 
 ### File da modificare
 
 | File | Modifica |
 |---|---|
-| `src/pages/Derivatives.tsx` | Aggiungere descrizioni stock a `allUnderlyingNames` per risoluzione ticker |
-| `src/components/derivatives/AlertSettingsDialog.tsx` | Usare `useUnderlyingMappings` + `normalizeName` per risolvere ticker da descrizioni stock |
+| `src/components/derivatives/AlertSettingsDialog.tsx` | (1) Aggiungere azioni non risolte a `unresolved` in `extractUniqueTickers`; (2) Mostrare box amber anche nel tab Prezzo; (3) Aggiungere pulsante admin per navigare a Gestione Mapping Ticker in tutti i box amber |
 
 ### Risultato atteso
 
-- I ticker delle azioni appaiono come badge cliccabili nel tab Prezzo, accanto a quelli dei derivati
-- Nessun duplicato se un ticker appare sia come azione che come sottostante di un'opzione
-- I ticker con avvisi attivi continuano ad essere aggiornati dal cron ogni 5 minuti (gia' funzionante)
-
+- Le azioni senza ticker mappato appaiono nella lista "Ticker non risolti" con la descrizione pulita
+- L'admin vede un pulsante per andare direttamente alla gestione mapping e risolvere i ticker mancanti
+- Una volta risolti i mapping (nella sezione admin), i ticker appaiono automaticamente nei badge cliccabili alla riapertura del dialog
