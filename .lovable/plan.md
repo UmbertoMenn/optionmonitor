@@ -1,63 +1,46 @@
 
 
-## Fix: Delete dei premi Covered Call cancella tutti i record dello stesso ticker
+## Fix: Segno del Lordo Premi perso nel calcolo
 
-### Problema identificato
+### Problema
 
-Il database contiene **un solo record** per GOOGL (`C320_2026-04-21`), nonostante l'utente dichiari di avere salvato dati per entrambe le Covered Call. La causa piu' probabile e' nel metodo `deletePremium` in `useCoveredCallPremiums.ts`:
+Il bug e' in due punti dove `Math.abs()` rimuove il segno dal premio lordo.
 
+**In `orderFileParser.ts`** (righe 562 e 625):
 ```typescript
-// Riga 105 - BUG: cancella TUTTI i record con lo stesso ticker
-.delete().eq('portfolio_id', portfolioId).eq('ticker', ticker.toUpperCase())
+grossPremium: Math.abs(netPremium)  // BUG: segno perso
 ```
 
-Quando l'utente clicca "Cancella dati" su una Covered Call GOOGL, il sistema cancella **tutti** i record GOOGL, non solo quello specifico (es. strike 320 Apr/26). Questo spiega perche' il secondo record non e' presente: e' stato cancellato dalla reset del primo, o viceversa.
+Quando le operazioni sono prevalentemente acquisti (come per AppLovin), `netPremium` e' -5870, ma `grossPremium` diventa +5870.
+
+**In `calculatePremiumMetrics`** (riga 655):
+```typescript
+const netPremium = parseResult.grossPremium - commissions;  // Usa il valore senza segno
+```
+
+Questo usa `grossPremium` (sempre positivo) invece di `parseResult.netPremium` (con segno), quindi anche il netto risulta sempre positivo.
+
+**In `CallPremiumCalculatorDialog.tsx`** la funzione `recalculateMetrics` ha lo stesso problema:
+```typescript
+grossPremium: Math.abs(netPremium)  // BUG: segno perso
+```
 
 ### Soluzione
 
-**File: `src/hooks/useCoveredCallPremiums.ts`**
+**File: `src/lib/orderFileParser.ts`**
 
-1. Modificare `deleteMutation` per accettare sia `ticker` che `optionSymbol` e filtrare su entrambi:
-
-```typescript
-const deleteMutation = useMutation({
-  mutationFn: async ({ ticker, optionSymbol }: { ticker: string; optionSymbol: string }) => {
-    if (!portfolioId) throw new Error('No portfolio selected');
-    const { error } = await supabase
-      .from('covered_call_premiums')
-      .delete()
-      .eq('portfolio_id', portfolioId)
-      .eq('ticker', ticker.toUpperCase())
-      .eq('option_symbol', optionSymbol);
-    if (error) throw error;
-  },
-  ...
-});
-```
-
-2. Aggiornare il return per esporre il nuovo tipo:
-
-```typescript
-deletePremium: deleteMutation.mutateAsync,
-// Firma cambia da (ticker: string) a ({ ticker, optionSymbol })
-```
+1. Riga 562 (`filterAndCalculateIronCondorPremiums`): cambiare `grossPremium: Math.abs(netPremium)` in `grossPremium: netPremium`
+2. Riga 625 (`filterAndCalculateCallPremiums`): stessa modifica
+3. Riga 655 (`calculatePremiumMetrics`): cambiare `parseResult.grossPremium` in `parseResult.netPremium` per preservare il segno nel calcolo del netto commissioni
 
 **File: `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
 
-3. Aggiornare `handleReset` per passare anche `optionSymbol`:
+4. Nella funzione `recalculateMetrics` (~riga 115): cambiare `grossPremium: Math.abs(netPremium)` in `grossPremium: netPremium`
 
-```typescript
-const handleReset = async () => {
-  if (ticker && confirm('Cancellare tutti i dati salvati?')) {
-    await deletePremium({ ticker, optionSymbol });
-    // ...reset state
-  }
-};
-```
+### Effetto
 
-### Impatto
-
-- Il fix preserva i dati di ogni Covered Call individuale durante le operazioni di reset
-- Nessun impatto su Iron Condor, Double Diagonal o Altre Strategie (usano `optionSymbol` distinti per tipo)
-- L'utente dovra' ri-salvare i dati per la seconda Covered Call GOOGL dopo il fix
+- "Lordo Premi" mostrera' il valore con segno corretto (es. -5870 per AppLovin)
+- "Netto Commissioni" sara' calcolato correttamente (lordo - commissioni, preservando il segno)
+- "Lordo Unitario" e "Netto Unitario" avranno il segno corretto
+- Nessun impatto su altre funzionalita'
 
