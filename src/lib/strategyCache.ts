@@ -258,28 +258,37 @@ export async function saveStrategyCache(
     return;
   }
   
-  // Delete existing cache and insert new
-  const { error: deleteError } = await supabase
-    .from('strategy_cache')
-    .delete()
-    .eq('portfolio_id', portfolioId);
-  
-  if (deleteError) {
-    console.error('Error clearing strategy cache:', deleteError);
-    return;
-  }
-  
-  // Insert in batches
+  // Upsert in batches (robust against concurrent saves)
   const batchSize = 50;
   for (let i = 0; i < records.length; i += batchSize) {
     const batch = records.slice(i, i + batchSize);
-    const { error: insertError } = await supabase
+    const { error: upsertError } = await supabase
       .from('strategy_cache')
-      .insert(batch as any);
+      .upsert(batch as any, { onConflict: 'portfolio_id,strategy_key' });
     
-    if (insertError) {
-      console.error('Error saving strategy cache batch:', insertError);
+    if (upsertError) {
+      console.error('Error upserting strategy cache batch:', upsertError);
     }
+  }
+  
+  // Cleanup obsolete entries
+  const activeKeys = new Set(records.map(r => r.strategy_key));
+  const { data: existing } = await supabase
+    .from('strategy_cache')
+    .select('strategy_key')
+    .eq('portfolio_id', portfolioId);
+  
+  const keysToDelete = (existing || [])
+    .filter(e => !activeKeys.has(e.strategy_key))
+    .map(e => e.strategy_key);
+  
+  if (keysToDelete.length > 0) {
+    await supabase
+      .from('strategy_cache')
+      .delete()
+      .eq('portfolio_id', portfolioId)
+      .in('strategy_key', keysToDelete);
+    console.log(`[StrategyCache] Cleaned up ${keysToDelete.length} obsolete entries`);
   }
   
   // Cleanup orphaned covered call premiums
