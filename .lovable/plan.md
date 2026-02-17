@@ -1,52 +1,80 @@
 
 
-## Estendere logica P/L giallo oro a Iron Condor e Double Diagonal
+## Fix: Risoluzione ticker europei per opzioni EUREX
 
-### Cosa cambia
+### Stato attuale
 
-Attualmente, quando non ci sono operazioni nella calcolatrice, Iron Condor e Double Diagonal calcolano il P/L come solo valore di mercato (senza considerare il valore ai PMC). Inoltre il colore e' sempre verde/rosso e il tooltip non distingue tra calcolo con e senza calcolatrice.
+- ENI e' gia' mappata correttamente a `ENI.MI` nei `SPECIAL_MAPPINGS` (riga 82-83) -- nessun conflitto
+- Il problema e' che NON esiste un sistema di rilevamento dell'exchange: il prompt AI chiede solo "US stock ticker", quindi per qualsiasi azienda europea non presente in `SPECIAL_MAPPINGS`, il sistema risolve verso ADR americane con prezzi sbagliati
+- Nel DB ci sono 4 mapping errati (MBGYY, DHLGY) e 2 prezzi errati in `underlying_prices`
 
 ### Modifiche
 
-**File: `src/pages/Derivatives.tsx`**
+**File: `supabase/functions/fetch-underlying-prices/index.ts`**
 
-#### 1. Iron Condor (`IronCondorRow`) -- righe 1138-1145
+#### 1. Aggiungere funzione `detectExchange()`
 
-Aggiungere il calcolo `avgCostValue` (somma dei PMC delle 4 gambe) e usarlo come fallback:
+Rileva il prefisso "EUREX" (e potenzialmente altri exchange EU come IDEM) dalla stringa underlying per determinare se il titolo e' europeo.
+
+#### 2. Aggiungere funzione `cleanEurexUnderlying()`
+
+Estrae il nome pulito della societa' dalla stringa EUREX:
+- Input: `"EUREX, MERCEDES-BENZ GROUP, DEC26, 58, CALL, PHYSICAL, AMER, SINGLE STOCK"`
+- Output: `"MERCEDES-BENZ GROUP"`
+
+Nota: la normalizzazione rimuove virgole/punti e le converte in spazi, quindi la stringa EUREX completa viene gia' normalizzata. La funzione deve operare PRIMA della normalizzazione.
+
+#### 3. Aggiungere SPECIAL_MAPPINGS europei
 
 ```
-const avgCostValue = 
-  ((soldPut.avg_cost || 0) * Math.abs(soldPut.quantity) * 100) +
-  ((soldCall.avg_cost || 0) * Math.abs(soldCall.quantity) * 100) +
-  ((boughtPut.avg_cost || 0) * Math.abs(boughtPut.quantity) * 100) +
-  ((boughtCall.avg_cost || 0) * Math.abs(boughtCall.quantity) * 100);
-
-const totalPL = hasSavedGP
-  ? savedPremium.net_per_share + marketValuePositions
-  : avgCostValue + marketValuePositions;
+'MERCEDES-BENZ GROUP': 'MBG.DE',
+'MERCEDES-BENZ': 'MBG.DE',
+'MERCEDES BENZ': 'MBG.DE',
+'MERCEDES-BENZ GROUP AG': 'MBG.DE',
+'DEUTSCHE POST': 'DHL.DE',
+'DEUTSCHE POST AG': 'DHL.DE',
+'DHL GROUP': 'DHL.DE',
+'DHL': 'DHL.DE',
 ```
 
-#### 2. Iron Condor P/L display -- riga 1289
+ENI resta invariata (gia' presente come `ENI.MI`).
 
-Cambiare il colore da verde/rosso fisso a giallo oro quando non ci sono operazioni:
-- Da: `${isPositivePL ? 'text-green-500' : 'text-red-500'}`
-- A: `${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`
+#### 4. Modificare il prompt AI per supportare ticker europei
 
-#### 3. Iron Condor tooltip -- riga 1295-1296
+Quando l'exchange e' EU, il prompt diventa:
+- "What is the Yahoo Finance ticker for [company] on its primary European exchange? Include the suffix (e.g., .DE, .MI, .PA, .AS, .L)"
 
-Cambiare il tooltip per distinguere i due casi:
-- Con calcolatrice: "Profit/Loss: flussi di cassa + valore di mercato"
-- Senza calcolatrice: "P/L calcolato senza operazioni storiche caricate"
+Quando e' US (o sconosciuto), resta il prompt attuale.
 
-#### 4. Double Diagonal (`DoubleDiagonalRow`) -- righe 1412-1418
+#### 5. Aggiornare la validazione del ticker AI
 
-Stessa logica: aggiungere `avgCostValue` e usarlo come fallback nel calcolo `totalPL`.
+Il regex attuale `/^[A-Z-]+$/` con max 5 caratteri non accetta ticker con punto (es. `MBG.DE`). Va esteso per accettare il formato `TICKER.XX`.
 
-#### 5. Double Diagonal P/L display -- riga 1564
+#### 6. Aggiornare lo Step 0 (validazione diretta)
 
-Stessa modifica del colore (giallo oro senza calcolatrice).
+Anche lo step 0 (che controlla se l'input sembra un ticker) deve accettare il formato europeo `XXX.YY`.
 
-#### 6. Double Diagonal tooltip -- riga 1570
+### Modifiche al flusso principale
 
-Stesso tooltip differenziato.
+Nel loop `for (const underlying of underlyings)`:
+1. Aggiungere uno step iniziale che chiama `detectExchange()` e `cleanEurexUnderlying()` sulla stringa originale
+2. Passare il nome pulito (non la stringa EUREX completa) ai passi successivi di risoluzione
+3. Passare l'exchange hint alla funzione `inferTickerWithAI()`
+
+### Correzioni database
+
+Aggiornare i mapping errati e rimuovere i prezzi ADR:
+
+```sql
+UPDATE underlying_mappings SET ticker = 'MBG.DE' WHERE ticker = 'MBGYY';
+UPDATE underlying_mappings SET ticker = 'DHL.DE' WHERE ticker = 'DHLGY';
+DELETE FROM underlying_prices WHERE ticker IN ('MBGYY', 'DHLGY');
+```
+
+### File modificati
+
+| File | Modifica |
+|------|----------|
+| `supabase/functions/fetch-underlying-prices/index.ts` | Aggiungere detectExchange, cleanEurexUnderlying, mappature EU, prompt AI condizionale, regex ticker esteso |
+| Database (migration) | Fix mapping MBGYY->MBG.DE, DHLGY->DHL.DE, rimozione prezzi errati |
 
