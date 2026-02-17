@@ -1,23 +1,52 @@
 
 
-## Fix: Sovrapposizione indicatore stale price con P/L nelle Altre Strategie
+## Estendere logica P/L giallo oro a Iron Condor e Double Diagonal
 
-### Problema
-Dalla screenshot si vede che il contenuto della colonna "Prezzo Sottostante" (PS + triangolino rosso) deborda nella colonna "P/L" adiacente. La colonna PS a 7rem non basta quando c'e' l'indicatore stale, e la colonna P/L a 5rem non basta per valori grandi come `-20.845,00 $`.
+### Cosa cambia
 
-### Soluzione
+Attualmente, quando non ci sono operazioni nella calcolatrice, Iron Condor e Double Diagonal calcolano il P/L come solo valore di mercato (senza considerare il valore ai PMC). Inoltre il colore e' sempre verde/rosso e il tooltip non distingue tra calcolo con e senza calcolatrice.
 
-**File: `src/pages/Derivatives.tsx`** -- riga 1791
+### Modifiche
 
-Due modifiche:
+**File: `src/pages/Derivatives.tsx`**
 
-1. **Aumentare la colonna PS da `7rem` a `8rem`** per dare spazio sufficiente al prezzo + icona stale
-2. **Aumentare la colonna P/L da `5rem` a `8rem`** per contenere valori monetari lunghi con il prefisso "P/L:"
+#### 1. Iron Condor (`IronCondorRow`) -- righe 1138-1145
 
-Template grid aggiornato:
-- Da: `...4.5rem_7rem_5rem]`
-- A: `...4.5rem_8rem_8rem]`
+Aggiungere il calcolo `avgCostValue` (somma dei PMC delle 4 gambe) e usarlo come fallback:
 
-3. **Aggiungere `overflow-hidden` alla cella PS** (riga ~1927) per evitare che il contenuto debordi in caso di valori estremi
+```
+const avgCostValue = 
+  ((soldPut.avg_cost || 0) * Math.abs(soldPut.quantity) * 100) +
+  ((soldCall.avg_cost || 0) * Math.abs(soldCall.quantity) * 100) +
+  ((boughtPut.avg_cost || 0) * Math.abs(boughtPut.quantity) * 100) +
+  ((boughtCall.avg_cost || 0) * Math.abs(boughtCall.quantity) * 100);
 
-Queste modifiche garantiscono che il triangolino rosso resti confinato nella sua colonna e il P/L sia completamente leggibile.
+const totalPL = hasSavedGP
+  ? savedPremium.net_per_share + marketValuePositions
+  : avgCostValue + marketValuePositions;
+```
+
+#### 2. Iron Condor P/L display -- riga 1289
+
+Cambiare il colore da verde/rosso fisso a giallo oro quando non ci sono operazioni:
+- Da: `${isPositivePL ? 'text-green-500' : 'text-red-500'}`
+- A: `${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`
+
+#### 3. Iron Condor tooltip -- riga 1295-1296
+
+Cambiare il tooltip per distinguere i due casi:
+- Con calcolatrice: "Profit/Loss: flussi di cassa + valore di mercato"
+- Senza calcolatrice: "P/L calcolato senza operazioni storiche caricate"
+
+#### 4. Double Diagonal (`DoubleDiagonalRow`) -- righe 1412-1418
+
+Stessa logica: aggiungere `avgCostValue` e usarlo come fallback nel calcolo `totalPL`.
+
+#### 5. Double Diagonal P/L display -- riga 1564
+
+Stessa modifica del colore (giallo oro senza calcolatrice).
+
+#### 6. Double Diagonal tooltip -- riga 1570
+
+Stesso tooltip differenziato.
+
