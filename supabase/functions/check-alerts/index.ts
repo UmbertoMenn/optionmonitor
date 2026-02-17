@@ -245,6 +245,15 @@ function isUSMarketOpen(): boolean {
   return etTime >= 570 && etTime < 960;
 }
 
+function mapStrategyTypeToCategory(strategyType: string): string {
+  switch (strategyType) {
+    case 'Naked Put': return 'naked_put';
+    case 'Covered Call': return 'covered_call';
+    case 'LEAP Call': return 'leap_call';
+    default: return 'other';
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -322,6 +331,23 @@ serve(async (req) => {
         }
         
         const strategies: StrategyCache[] = strategiesCache;
+        
+        // ============ FETCH DERIVATIVE OVERRIDES ============
+        const { data: overridesData } = await supabase
+          .from('derivative_overrides')
+          .select('position_id, target_category, override_type')
+          .eq('portfolio_id', portfolioId);
+        
+        const overriddenPositions = new Map<string, string>();
+        for (const ov of (overridesData || [])) {
+          if (ov.override_type === 'single' && ov.position_id) {
+            overriddenPositions.set(ov.position_id, ov.target_category || 'other');
+          }
+        }
+        
+        if (overriddenPositions.size > 0) {
+          console.log(`[${portfolioId}] Found ${overriddenPositions.size} position overrides`);
+        }
         
         // ============ FETCH STRATEGY ALERT TOGGLES ============
         const { data: strategyTogglesData } = await supabase
@@ -402,6 +428,19 @@ serve(async (req) => {
           const ticker = strategy.ticker || 'N/A';
           const underlyingPrice = strategy.ticker ? (underlyingPrices[strategy.ticker] || 0) : 0;
           const strategyType = strategy.strategy_type;
+          
+          // Check if any position in this strategy has been overridden to a different category
+          const hasOverride = strategy.position_ids.some(pid => {
+            const overrideCategory = overriddenPositions.get(pid);
+            if (!overrideCategory) return false;
+            const expectedCategory = mapStrategyTypeToCategory(strategyType);
+            return overrideCategory !== expectedCategory;
+          });
+          
+          if (hasOverride) {
+            console.log(`[${portfolioId}] Skipping ${strategyType} ${ticker} - position overridden`);
+            continue;
+          }
           
           if (underlyingPrice <= 0) {
             console.log(`No price for ${ticker} (${strategyType})`);
