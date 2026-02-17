@@ -1,62 +1,58 @@
 
+## Dismissione permanente dei ticker non risolti
 
-## Fix: Matching fallito per "AMAZON.COM.INC" vs "AMAZON COM INC"
+### Obiettivo
+Aggiungere un pulsante "X" accanto a ogni ticker non risolto nel box amber della Gestione Avvisi. Cliccandolo, il ticker viene nascosto permanentemente per quell'utente e portafoglio. Il dismiss viene rimosso solo se il portafoglio viene cancellato (tramite cascade).
 
-### Problema
+### Modifiche
 
-La funzione `normalizeForMatching` in `src/lib/derivativeStrategies.ts` contiene una regex per collassare abbreviazioni puntate (es. `J.P.` -> `JP`):
+#### 1. Nuova tabella DB: `dismissed_unresolved_tickers`
 
-```text
-.replace(/([A-Z])\.([A-Z])/g, '$1$2')
+```sql
+CREATE TABLE public.dismissed_unresolved_tickers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  portfolio_id UUID NOT NULL REFERENCES public.portfolios(id) ON DELETE CASCADE,
+  underlying TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, portfolio_id, underlying)
+);
+
+ALTER TABLE public.dismissed_unresolved_tickers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own dismissed tickers"
+  ON public.dismissed_unresolved_tickers
+  FOR ALL USING (auth.uid() = user_id);
 ```
 
-Quando applicata a `AMAZON.COM.INC`, questa regex rimuove i punti e fonde i token in modo errato, producendo un risultato che non corrisponde piu' al nome del titolo `AMAZON COM INC`.
+- `ON DELETE CASCADE` su `portfolio_id` garantisce che cancellando il portafoglio si rimuovono anche tutti i dismiss.
+- Vincolo UNIQUE per evitare duplicati.
 
-Di conseguenza:
-- La CALL 270 JUN/27 venduta NON viene riconosciuta come Covered Call (Step 1 fallisce)
-- La PUT 180 DEC/27 comprata NON viene riconosciuta come Protezione (Step 2 fallisce per mancanza di stock match)
-- Entrambe finiscono in "Altre Strategie"
+#### 2. Nuovo hook: `src/hooks/useDismissedUnresolvedTickers.ts`
 
-### Soluzione
+- `useDismissedUnresolvedTickers(portfolioId)`: query che recupera la lista dei ticker dismessi per utente/portafoglio.
+- `useDismissUnresolvedTicker()`: mutation per inserire un dismiss.
+- `useUndismissUnresolvedTicker()`: mutation per rimuovere un dismiss (opzionale, per eventuale ripristino futuro).
 
-Due interventi complementari:
+#### 3. Modifica `src/components/derivatives/AlertSettingsDialog.tsx`
 
-#### 1. Fix `normalizeForMatching` - Gestire i punti come separatori PRIMA del collapse delle abbreviazioni
+- Importare il nuovo hook.
+- Filtrare `unresolvedUnderlyings` rimuovendo quelli presenti nella lista dei dismessi.
+- Aggiungere un pulsante "X" accanto a ogni badge di ticker non risolto nei due box amber (tab "Per Ticker" e tab "Prezzo").
+- Al click, inserire il dismiss nel DB e aggiornare la lista.
 
-La regex per le abbreviazioni puntate deve applicarsi solo a pattern come `J.P.` (1-2 lettere seguite da punto), non a parole complete come `AMAZON.COM`. Limitare il collapse a sequenze di singole lettere puntate.
-
-```text
-// Prima (problematico):
-.replace(/([A-Z])\.([A-Z])/g, '$1$2')
-
-// Dopo (corretto): collassa solo abbreviazioni brevi (1-2 lettere)
-// Prima sostituire i punti tra parole lunghe con spazi
-.replace(/([A-Z]{3,})\.([A-Z])/g, '$1 $2')
-.replace(/([A-Z])\.([A-Z]{3,})/g, '$1 $2')
-// Poi collassare le abbreviazioni brevi restanti
-.replace(/([A-Z])\.([A-Z])/g, '$1$2')
-```
-
-Con questo fix:
-- `AMAZON.COM.INC` -> `AMAZON COM INC` -> (dopo rimozione suffissi) `AMAZON COM`
-- `J.P.MORGAN` -> `JPMORGAN` (funziona ancora correttamente)
-
-#### 2. Aggiungere AMAZON a SPECIAL_ALIASES come safety net
-
-```text
-AMAZON: ['AMAZON', 'AMZN', 'AMAZON COM', 'AMAZON.COM', 'AMAZON.COM.INC'],
-```
-
-### File modificati
+### Dettagli tecnici
 
 | File | Modifica |
 |------|----------|
-| `src/lib/derivativeStrategies.ts` | Fix regex in `normalizeForMatching` + aggiunta AMAZON in SPECIAL_ALIASES |
+| Migrazione SQL | Nuova tabella `dismissed_unresolved_tickers` con RLS e cascade |
+| `src/hooks/useDismissedUnresolvedTickers.ts` | Nuovo file con query + mutation |
+| `src/components/derivatives/AlertSettingsDialog.tsx` | Filtrare unresolvedUnderlyings, aggiungere pulsante X su ogni badge |
 
-### Risultato
+### Flusso utente
 
-- La CALL 270 JUN/27 venduta verra' correttamente classificata come **Covered Call**
-- La PUT 180 DEC/27 comprata verra' correttamente classificata come **Protezione**
-- Il fix e' generico e risolve anche eventuali altri nomi con punti (es. futuri titoli con formato simile)
-- La regex per abbreviazioni brevi come `J.P.` continua a funzionare
-
+1. L'utente vede il box "Ticker non risolti" con i badge amber
+2. Clicca la X accanto a "FIRST REPUBLIC BANK/CA"
+3. Il badge scompare immediatamente
+4. Il dismiss e' persistente: riaprendo il dialog, il ticker resta nascosto
+5. Se il portafoglio viene eliminato, tutti i dismiss associati vengono cancellati automaticamente (CASCADE)
