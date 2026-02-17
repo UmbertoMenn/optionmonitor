@@ -1,34 +1,40 @@
 
 
-## Benchmark visibile solo all'admin
+## Rimozione "Netting ex. Covered Call" dai Dati Storici
 
 ### Obiettivo
-La linea del benchmark, la sua legenda, il toggle "Currency Adjusted" e il pulsante di refresh devono essere visibili **solo** all'utente admin, anche quando sta impersonando un altro utente.
+Eliminare il campo "Netting ex. Covered Call" (`netting_ex_cc`) dal form dei dati storici e dalla visualizzazione dei dati salvati, dato che la vista corrispondente è stata rimossa.
+
+**Nota:** La colonna `netting_ex_cc` nel database resta invariata per retrocompatibilità. Quando si salva un nuovo snapshot, il valore viene impostato automaticamente uguale a `netting_ex_cc_np`.
 
 ### Modifiche
 
-#### 1. `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+#### 1. `src/components/dashboard/HistoricalDataForm.tsx`
+- Rimuovere la prop `currentNettingExCC` dall'interfaccia e dalla destrutturazione
+- Rimuovere lo stato `formNettingExCC` e il relativo `setFormNettingExCC`
+- Rimuovere il campo input "Netting ex. Covered Call" dal form (riga 163-171)
+- Nel `handleSave`: impostare `netting_ex_cc` uguale al valore di `netting_ex_cc_np` (così il DB resta coerente)
+- In `startEdit`: rimuovere il caricamento di `formNettingExCC`
+- In `useCurrent`: rimuovere il set di `formNettingExCC`
+- Nella visualizzazione dei dati salvati: rimuovere la riga "Netting ex. CC" (riga 286)
+- Riorganizzare il layout: "Netting Totale" e "Netting ex. CC e NP" affiancati nella griglia 2 colonne
 
-- Importare `useAuth` da `@/contexts/AuthContext`
-- Usare `const { isAdmin } = useAuth()` nel componente principale
-- Passare `isAdmin` a `CustomLegend` come nuova prop
-- In `CustomLegend`: nascondere la legenda "Benchmark" (linea arancione + tooltip + warning + refresh) e il toggle "Currency" quando `isAdmin` e' `false`
-- Nel render del grafico principale: renderizzare la `<Line>` del benchmark **solo** se `isAdmin && hasBenchmarkData`
-- Nel tooltip custom: mostrare la sezione breakdown benchmark **solo** se `isAdmin`
+#### 2. `src/components/dashboard/Dashboard.tsx`
+- Rimuovere la prop `currentNettingExCC={netting.nettingExCoveredCall}` dal componente `HistoricalDataForm`
 
-#### 2. Ottimizzazione: skip fetch dati benchmark per non-admin
-
-- Condizionare il calcolo dell'equity exposure e USD exposure (hooks `useEquityExposurePct` e `useCurrencyExposure`) e il fetch dei benchmark prices (`useBenchmarkData`) in modo che vengano eseguiti **solo** se `isAdmin` e' `true`
-- Questo evita query inutili al DB per gli utenti normali
+#### 3. `src/types/historicalData.ts`
+- Mantenere `netting_ex_cc` in `HistoricalDataEntry` (viene dal DB, serve per retrocompatibilità)
+- Rimuovere `netting_ex_cc` da `HistoricalDataInput` (non più necessario come input utente)
 
 ### File modificati
 
 | File | Modifica |
 |------|----------|
-| `src/components/dashboard/charts/PerformanceEvolutionChart.tsx` | Aggiunta `useAuth`, condizionamento rendering benchmark (legenda, linea, tooltip, currency toggle) e skip hooks per non-admin |
+| `src/components/dashboard/HistoricalDataForm.tsx` | Rimozione campo, stato, prop e riga di visualizzazione |
+| `src/components/dashboard/Dashboard.tsx` | Rimozione prop `currentNettingExCC` |
+| `src/types/historicalData.ts` | Rimozione `netting_ex_cc` da `HistoricalDataInput` |
 
 ### Comportamento atteso
-
-- **Admin** (anche impersonando): vede benchmark, legenda, toggle currency, tooltip dettagliato
-- **Utente normale**: vede solo la linea del portafoglio, la legenda "Portafoglio" e il selettore temporale (1A/2A/3A/MAX)
-
+- Il form mostra solo: Data, Patrimonio Totale, Netting Totale, Netting ex. CC e NP, Equity Exposure, USD Exposure
+- I dati salvati mostrano le stesse voci (senza "Netting ex. CC")
+- Il valore `netting_ex_cc` nel DB viene impostato automaticamente uguale a `netting_ex_cc_np` per coerenza
