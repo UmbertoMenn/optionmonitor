@@ -1,61 +1,62 @@
 
 
-## Fix: Operazioni calcolatrice cancellate dal cleanup orfani
+## Fix: Matching fallito per "AMAZON.COM.INC" vs "AMAZON COM INC"
 
-### Causa radice
+### Problema
 
-Ogni volta che la pagina Derivati si apre, viene chiamata `saveStrategyCache()` che, alla fine, esegue un "cleanup orfani" sulla tabella `covered_call_premiums`. Questo cleanup:
+La funzione `normalizeForMatching` in `src/lib/derivativeStrategies.ts` contiene una regex per collassare abbreviazioni puntate (es. `J.P.` -> `JP`):
 
-1. Costruisce la lista delle chiavi attive (ticker + option_symbol) partendo dalle strategie categorizzate
-2. Per ogni strategia, risolve il ticker tramite `resolveTicker(underlying, underlyingPrices)`
-3. Se il ticker NON viene risolto (ritorna `null`), la strategia viene **saltata** dalla lista attiva
-4. I record salvati nella calcolatrice con quel ticker vengono quindi considerati "orfani" e **cancellati**
+```text
+.replace(/([A-Z])\.([A-Z])/g, '$1$2')
+```
 
-Il problema e' che `resolveTicker` fallisce per la maggioranza dei sottostanti (nel DB strategy_cache, quasi tutti i ticker sono null). Questo accade perche' la mappa `underlyingPrices` viene passata dal componente Derivatives.tsx e potrebbe non avere un mapping per tutti i sottostanti.
+Quando applicata a `AMAZON.COM.INC`, questa regex rimuove i punti e fonde i token in modo errato, producendo un risultato che non corrisponde piu' al nome del titolo `AMAZON COM INC`.
 
-In pratica: l'utente salva le operazioni nella calcolatrice (dove il ticker e' disponibile dall'UI), poi la prossima volta che apre la pagina Derivati, il cleanup cancella quei dati perche' non riesce a ricostruire la stessa chiave ticker.
+Di conseguenza:
+- La CALL 270 JUN/27 venduta NON viene riconosciuta come Covered Call (Step 1 fallisce)
+- La PUT 180 DEC/27 comprata NON viene riconosciuta come Protezione (Step 2 fallisce per mancanza di stock match)
+- Entrambe finiscono in "Altre Strategie"
 
 ### Soluzione
 
-**Non cancellare MAI** i premi dalla calcolatrice durante il cleanup automatico. I dati della calcolatrice sono inseriti manualmente dall'utente e devono essere trattati come dati persistenti, non come cache derivata.
+Due interventi complementari:
 
-### Modifiche
+#### 1. Fix `normalizeForMatching` - Gestire i punti come separatori PRIMA del collapse delle abbreviazioni
 
-**1. `src/lib/strategyCache.ts` - Rimuovere completamente il cleanup dei covered_call_premiums**
-
-Eliminare l'intero blocco di codice (righe 294-374) che cancella i "premi orfani". Questo blocco e' la causa diretta della perdita dati.
-
-La cancellazione dei premi deve avvenire SOLO tramite:
-- Il pulsante "Reset" esplicito nella calcolatrice (azione utente consapevole)
-- L'eliminazione dell'intero portafoglio
-
-**2. `src/hooks/useCoveredCallPremiums.ts` - Rimuovere la funzione `deleteOrphanedPremiums` (se presente)**
-
-Verificare e rimuovere eventuali chiamate automatiche di pulizia orfani nei hook, mantenendo solo la cancellazione esplicita via UI.
-
-### Dettaglio tecnico
+La regex per le abbreviazioni puntate deve applicarsi solo a pattern come `J.P.` (1-2 lettere seguite da punto), non a parole complete come `AMAZON.COM`. Limitare il collapse a sequenze di singole lettere puntate.
 
 ```text
-// IN strategyCache.ts - RIMUOVERE TUTTO QUESTO BLOCCO:
+// Prima (problematico):
+.replace(/([A-Z])\.([A-Z])/g, '$1$2')
 
-// Cleanup orphaned covered call premiums        <-- DA ELIMINARE
-// Extract active (ticker, option_symbol)...     <-- DA ELIMINARE  
-// ... tutto fino alla fine della funzione       <-- DA ELIMINARE
-
-// MANTENERE solo:
-console.log(`[StrategyCache] Saved ${records.length} strategies for portfolio ${portfolioId}`);
+// Dopo (corretto): collassa solo abbreviazioni brevi (1-2 lettere)
+// Prima sostituire i punti tra parole lunghe con spazi
+.replace(/([A-Z]{3,})\.([A-Z])/g, '$1 $2')
+.replace(/([A-Z])\.([A-Z]{3,})/g, '$1 $2')
+// Poi collassare le abbreviazioni brevi restanti
+.replace(/([A-Z])\.([A-Z])/g, '$1$2')
 ```
 
-### Risultato
+Con questo fix:
+- `AMAZON.COM.INC` -> `AMAZON COM INC` -> (dopo rimozione suffissi) `AMAZON COM`
+- `J.P.MORGAN` -> `JPMORGAN` (funziona ancora correttamente)
 
-- I dati della calcolatrice non verranno MAI piu' cancellati automaticamente
-- L'utente mantiene il pieno controllo dei propri dati tramite il pulsante Reset
-- Il salvataggio della strategy_cache continua a funzionare normalmente (solo la parte di cleanup premi viene rimossa)
+#### 2. Aggiungere AMAZON a SPECIAL_ALIASES come safety net
+
+```text
+AMAZON: ['AMAZON', 'AMZN', 'AMAZON COM', 'AMAZON.COM', 'AMAZON.COM.INC'],
+```
 
 ### File modificati
 
 | File | Modifica |
 |------|----------|
-| `src/lib/strategyCache.ts` | Rimuovere blocco cleanup covered_call_premiums (righe 294-374) |
-| `src/hooks/useCoveredCallPremiums.ts` | Rimuovere `deleteOrphanedPremiums` se usata in automatico |
+| `src/lib/derivativeStrategies.ts` | Fix regex in `normalizeForMatching` + aggiunta AMAZON in SPECIAL_ALIASES |
+
+### Risultato
+
+- La CALL 270 JUN/27 venduta verra' correttamente classificata come **Covered Call**
+- La PUT 180 DEC/27 comprata verra' correttamente classificata come **Protezione**
+- Il fix e' generico e risolve anche eventuali altri nomi con punti (es. futuri titoli con formato simile)
+- La regex per abbreviazioni brevi come `J.P.` continua a funzionare
 
