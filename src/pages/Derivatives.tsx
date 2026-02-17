@@ -204,7 +204,7 @@ export function Derivatives() {
   }, [categories, stockPositions]);
 
   // Fetch underlying prices from Yahoo Finance
-  const { prices: underlyingPrices, isLoading: isPricesLoading } = useUnderlyingPrices(allUnderlyingNames);
+  const { prices: underlyingPrices, isLoading: isPricesLoading, missingCount, isFetchingMissing } = useUnderlyingPrices(allUnderlyingNames);
   
   // Track if we've saved the cache for the current portfolio + categories
   const lastSavedRef = useRef<string>('');
@@ -367,6 +367,8 @@ export function Derivatives() {
           stockPositions={stockPositions}
           underlyingPrices={underlyingPrices}
           totalCoveredCallContractsByUnderlying={totalCoveredCallContractsByUnderlying}
+          missingCount={missingCount}
+          isFetchingMissing={isFetchingMissing}
         />
         
         {/* Section 1: Covered Call (Collapsible) */}
