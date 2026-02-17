@@ -28,6 +28,7 @@ import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { formatNumber } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 type TimeRange = '1Y' | '2Y' | '3Y' | 'MAX';
 
@@ -100,6 +101,7 @@ function CustomLegend({
   hasUsdData,
   timeRange,
   onTimeRangeChange,
+  isAdmin,
 }: { 
   hasBenchmarkData: boolean; 
   isHoveringBenchmark: boolean;
@@ -118,6 +120,7 @@ function CustomLegend({
   hasUsdData: boolean;
   timeRange: TimeRange;
   onTimeRangeChange: (range: TimeRange) => void;
+  isAdmin: boolean;
 }) {
   const equityPctFormatted = (equityExposurePct * 100).toFixed(1);
   const bondPctFormatted = ((1 - equityExposurePct) * 100).toFixed(1);
@@ -152,7 +155,7 @@ function CustomLegend({
           <div className="w-3 h-0.5 bg-profit rounded" />
           <span className="text-foreground">Portafoglio</span>
         </div>
-        {hasBenchmarkData && (
+        {isAdmin && hasBenchmarkData && (
           <UITooltip delayDuration={0}>
             <TooltipTrigger 
               className="flex items-center gap-1.5 cursor-help"
@@ -175,7 +178,7 @@ function CustomLegend({
             </TooltipContent>
           </UITooltip>
         )}
-        {showWarning && (
+        {isAdmin && showWarning && (
           <Button
             variant="ghost"
             size="sm"
@@ -210,7 +213,7 @@ function CustomLegend({
         </div>
         
         {/* Currency toggle */}
-        {hasBenchmarkData && hasUsdData && (
+        {isAdmin && hasBenchmarkData && hasUsdData && (
           <UITooltip delayDuration={0}>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-1.5">
@@ -246,20 +249,20 @@ export function PerformanceEvolutionChart({
   currentDate,
   deposits,
 }: PerformanceEvolutionChartProps) {
+  const { isAdmin } = useAuth();
   const [isHoveringBenchmark, setIsHoveringBenchmark] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currencyAdjusted, setCurrencyAdjusted] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
   
-  // Get equity exposure for BENCHMARK only: protections on, all derivatives off
-  // This ensures a fair comparison with direct equity holdings (SPY/QQQ/AGG)
+  // Get equity exposure for BENCHMARK only (admin-only, skip for non-admin)
   const { equityExposurePct, equityExposureEUR, assetsTotalEUR, hasData: hasEquityData } = useEquityExposurePct({
     includeNakedPut: false,
     includeStrategies: false,
     includeLeapCall: false
   });
   
-  // Get USD exposure for currency adjustment (derivatives excluded, bonds included)
+  // Get USD exposure for currency adjustment (admin-only optimization: data still fetched but benchmark won't render)
   const { usdExposurePct, totalExposure: usdTotalExposure, isLoading: isUsdLoading } = useCurrencyExposure({ 
     includeProtections: false, 
     includeNakedPut: false, 
@@ -482,6 +485,7 @@ export function PerformanceEvolutionChart({
         hasUsdData={hasUsdData}
         timeRange={timeRange}
         onTimeRangeChange={setTimeRange}
+        isAdmin={isAdmin}
       />
       <div className="flex-1">
         <ResponsiveContainer width="100%" height="100%">
@@ -542,8 +546,8 @@ export function PerformanceEvolutionChart({
                       </span>
                     </div>
                     
-                    {/* Benchmark with breakdown */}
-                    {hasBenchmark && (
+                    {/* Benchmark with breakdown (admin only) */}
+                    {isAdmin && hasBenchmark && (
                       <div className="mt-2 pt-2 border-t border-border">
                         <div className="flex items-center gap-2 mb-1">
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(30, 100%, 50%)' }} />
@@ -603,7 +607,7 @@ export function PerformanceEvolutionChart({
               activeDot={{ r: 5 }}
               name="returnPct"
             />
-            {hasBenchmarkData && (
+            {isAdmin && hasBenchmarkData && (
               <Line
                 type="monotone"
                 dataKey="benchmarkReturn"
