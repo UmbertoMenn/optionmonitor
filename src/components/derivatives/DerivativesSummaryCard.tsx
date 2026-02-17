@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-import { DerivativeCategories } from '@/lib/derivativeStrategies';
+import { DerivativeCategories, normalizeForMatching } from '@/lib/derivativeStrategies';
 import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
@@ -22,14 +22,7 @@ interface DerivativesSummaryCardProps {
   isFetchingMissing?: boolean;
 }
 
-// Normalize string for matching (lowercase, remove suffixes, etc.)
-function normalizeForMatching(str: string): string {
-  return str
-    .toUpperCase()
-    .replace(/\s+(INC|CORP|LTD|PLC|AG|SA|SPA|ADR|CLASS\s*[A-Z]?)\.?$/gi, '')
-    .replace(/^AZ\.\s*/i, '')
-    .trim();
-}
+// normalizeForMatching is now imported from derivativeStrategies for consistency
 
 // Get ticker from position
 function getTicker(position: Position | { description?: string; ticker?: string; underlying?: string }): string {
