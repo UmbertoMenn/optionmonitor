@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Briefcase, Copy, ExternalLink, Loader2, ChevronDown, ChevronRight, User, Trash2 } from 'lucide-react';
+import { Briefcase, Copy, ExternalLink, Loader2, ChevronDown, ChevronRight, User, Trash2, Pencil } from 'lucide-react';
 import { useAdminPortfolios, PortfolioWithOwner } from '@/hooks/useAdminPortfolios';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,7 +13,10 @@ import { useDeletePortfolio } from '@/hooks/useDeletePortfolio';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Portfolio } from '@/types/portfolio';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 export function PortfolioManager() {
   const { user } = useAuth();
@@ -25,6 +28,9 @@ export function PortfolioManager() {
   const [portfolioToCopy, setPortfolioToCopy] = useState<Portfolio | null>(null);
   const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
   const [portfolioToDelete, setPortfolioToDelete] = useState<PortfolioWithOwner | null>(null);
+  const [portfolioToRename, setPortfolioToRename] = useState<PortfolioWithOwner | null>(null);
+  const [newPortfolioName, setNewPortfolioName] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
   const { deletePortfolio, isDeleting } = useDeletePortfolio();
 
   const toggleUserExpanded = (userId: string) => {
@@ -51,6 +57,30 @@ export function PortfolioManager() {
 
   const handleDeleteClick = (portfolio: PortfolioWithOwner) => {
     setPortfolioToDelete(portfolio);
+  };
+
+  const handleRenameClick = (portfolio: PortfolioWithOwner) => {
+    setPortfolioToRename(portfolio);
+    setNewPortfolioName(portfolio.name);
+  };
+
+  const handleConfirmRename = async () => {
+    if (!portfolioToRename || !newPortfolioName.trim() || newPortfolioName.trim() === portfolioToRename.name) return;
+    setIsRenaming(true);
+    try {
+      const { error } = await supabase
+        .from('portfolios')
+        .update({ name: newPortfolioName.trim() })
+        .eq('id', portfolioToRename.id);
+      if (error) throw error;
+      toast.success('Portfolio rinominato');
+      await refetch();
+      setPortfolioToRename(null);
+    } catch (error) {
+      toast.error('Errore durante la rinomina');
+    } finally {
+      setIsRenaming(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -158,6 +188,16 @@ export function PortfolioManager() {
                                     <Copy className="w-4 h-4 mr-2" />
                                     Copia
                                   </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRenameClick(portfolio);
+                                    }}
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </Button>
                                   <Button variant="ghost" size="sm">
                                     <ExternalLink className="w-4 h-4 mr-2" />
                                     Apri
@@ -229,6 +269,13 @@ export function PortfolioManager() {
                       >
                         <Copy className="w-4 h-4 mr-2" />
                         Copia su Utente
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRenameClick(portfolio as PortfolioWithOwner)}
+                      >
+                        <Pencil className="w-4 h-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -309,6 +356,36 @@ export function PortfolioManager() {
                   Elimina Portfolio
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Dialog */}
+      <Dialog open={!!portfolioToRename} onOpenChange={(open) => !open && setPortfolioToRename(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rinomina Portfolio</DialogTitle>
+            <DialogDescription>
+              Inserisci il nuovo nome per il portfolio "{portfolioToRename?.name}"
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={newPortfolioName}
+            onChange={(e) => setNewPortfolioName(e.target.value)}
+            placeholder="Nome portfolio"
+            onKeyDown={(e) => e.key === 'Enter' && handleConfirmRename()}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPortfolioToRename(null)} disabled={isRenaming}>
+              Annulla
+            </Button>
+            <Button
+              onClick={handleConfirmRename}
+              disabled={isRenaming || !newPortfolioName.trim() || newPortfolioName.trim() === portfolioToRename?.name}
+            >
+              {isRenaming ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Pencil className="w-4 h-4 mr-2" />}
+              Salva
             </Button>
           </DialogFooter>
         </DialogContent>
