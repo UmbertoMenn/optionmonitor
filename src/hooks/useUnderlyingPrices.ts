@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -32,25 +32,28 @@ export interface UseUnderlyingPricesResult {
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
+  missingCount: number;
+  isFetchingMissing: boolean;
 }
 
 const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
-async function fetchUnderlyingPrices(uniqueUnderlyings: string[]): Promise<Record<string, UnderlyingPrice>> {
-  if (uniqueUnderlyings.length === 0) return {};
+interface LocalFetchResult {
+  prices: Record<string, UnderlyingPrice>;
+  missingUnderlyings: string[];
+}
 
-  // Step 1: Parallel fetch of ALL mappings + ALL prices (both tables are small)
+async function fetchLocalPrices(uniqueUnderlyings: string[]): Promise<LocalFetchResult> {
+  if (uniqueUnderlyings.length === 0) return { prices: {}, missingUnderlyings: [] };
+
   const [mappingsRes, pricesRes] = await Promise.all([
     supabase.from('underlying_mappings').select('underlying, ticker'),
     supabase.from('underlying_prices').select('ticker, price, currency, updated_at'),
   ]);
 
-  // Build normalized mapping lookup
   const underlyingToTicker: Record<string, string> = {};
   if (mappingsRes.data) {
-    // Direct match first
     const directMap = new Map(mappingsRes.data.map(m => [m.underlying, m.ticker]));
-    // Normalized lookup
     const normalizedMap = new Map<string, string>();
     for (const m of mappingsRes.data) {
       const norm = normalizeName(m.underlying);
@@ -68,7 +71,6 @@ async function fetchUnderlyingPrices(uniqueUnderlyings: string[]): Promise<Recor
     }
   }
 
-  // Build ticker -> price lookup
   const tickerPrices: Record<string, { price: number; currency: string; updated_at: string }> = {};
   if (pricesRes.data) {
     for (const p of pricesRes.data) {
@@ -76,31 +78,37 @@ async function fetchUnderlyingPrices(uniqueUnderlyings: string[]): Promise<Recor
     }
   }
 
-  // Step 2: Local matching (instant)
-  const results: Record<string, UnderlyingPrice> = {};
+  const prices: Record<string, UnderlyingPrice> = {};
+  const missingUnderlyings: string[] = [];
+
   for (const underlying of uniqueUnderlyings) {
     const ticker = underlyingToTicker[underlying];
     if (ticker && tickerPrices[ticker]) {
       const { price, currency, updated_at } = tickerPrices[ticker];
       const isStale = Date.now() - new Date(updated_at).getTime() > STALE_THRESHOLD_MS;
-      results[underlying] = { price, currency, ticker, isStale, updatedAt: updated_at };
+      prices[underlying] = { price, currency, ticker, isStale, updatedAt: updated_at };
+    } else {
+      missingUnderlyings.push(underlying);
     }
   }
 
-  // Step 3: Edge function only for missing underlyings
-  const missingUnderlyings = uniqueUnderlyings.filter(u => !results[u]);
-  if (missingUnderlyings.length > 0) {
-    console.log(`Fetching ${missingUnderlyings.length} missing prices from edge function`);
-    const { data, error } = await supabase.functions.invoke('fetch-underlying-prices', {
-      body: { underlyings: missingUnderlyings },
-    });
-    if (!error && data?.prices) {
-      for (const [underlying, priceData] of Object.entries(data.prices)) {
-        results[underlying] = priceData as UnderlyingPrice;
-      }
+  return { prices, missingUnderlyings };
+}
+
+async function fetchMissingPrices(missingUnderlyings: string[]): Promise<Record<string, UnderlyingPrice>> {
+  if (missingUnderlyings.length === 0) return {};
+
+  console.log(`Fetching ${missingUnderlyings.length} missing prices from edge function`);
+  const { data, error } = await supabase.functions.invoke('fetch-underlying-prices', {
+    body: { underlyings: missingUnderlyings },
+  });
+
+  const results: Record<string, UnderlyingPrice> = {};
+  if (!error && data?.prices) {
+    for (const [underlying, priceData] of Object.entries(data.prices)) {
+      results[underlying] = priceData as UnderlyingPrice;
     }
   }
-
   return results;
 }
 
@@ -114,21 +122,43 @@ export function useUnderlyingPrices(underlyings: string[]): UseUnderlyingPricesR
 
   const underlyingsKey = useMemo(() => uniqueUnderlyings.join('|'), [uniqueUnderlyings]);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['underlying-prices', underlyingsKey],
-    queryFn: () => fetchUnderlyingPrices(uniqueUnderlyings),
+  // Phase 1: Local DB fetch (fast, <300ms)
+  const { data: localData, isLoading: isLoadingLocal, error: localError } = useQuery({
+    queryKey: ['underlying-prices-local', underlyingsKey],
+    queryFn: () => fetchLocalPrices(uniqueUnderlyings),
     enabled: uniqueUnderlyings.length > 0,
-    staleTime: 5 * 60 * 1000, // 5 min, aligned with cron
+    staleTime: 5 * 60 * 1000,
   });
 
+  const missingUnderlyings = localData?.missingUnderlyings ?? [];
+  const missingKey = missingUnderlyings.join('|');
+
+  // Phase 2: Edge function for missing (slow, background)
+  const { data: missingData, isFetching: isFetchingMissing } = useQuery({
+    queryKey: ['underlying-prices-missing', missingKey],
+    queryFn: () => fetchMissingPrices(missingUnderlyings),
+    enabled: missingUnderlyings.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Merge local + missing
+  const mergedPrices = useMemo(() => {
+    const local = localData?.prices ?? {};
+    const missing = missingData ?? {};
+    return { ...local, ...missing };
+  }, [localData?.prices, missingData]);
+
   const refetch = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['underlying-prices'] });
+    queryClient.invalidateQueries({ queryKey: ['underlying-prices-local'] });
+    queryClient.invalidateQueries({ queryKey: ['underlying-prices-missing'] });
   }, [queryClient]);
 
   return {
-    prices: data ?? {},
-    isLoading,
-    error: error ? (error instanceof Error ? error.message : 'Unknown error') : null,
+    prices: mergedPrices,
+    isLoading: isLoadingLocal,
+    error: localError ? (localError instanceof Error ? localError.message : 'Unknown error') : null,
     refetch,
+    missingCount: missingUnderlyings.length,
+    isFetchingMissing,
   };
 }

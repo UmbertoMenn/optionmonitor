@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2, Menu, TrendingUp, ShieldAlert, LogOut, Bell } from 'lucide-react';
+import { ArrowLeft, UserPlus, Shield, Trash2, Users, ShieldCheck, Loader2, PieChart, Briefcase, Link2, Menu, TrendingUp, ShieldAlert, LogOut, Bell, Stethoscope } from 'lucide-react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -19,6 +19,7 @@ import { SectorMappingManager } from './SectorMappingManager';
 import { PortfolioManager } from './PortfolioManager';
 import { TickerMappingManager } from './TickerMappingManager';
 import { AdminNotificationSettings } from './AdminNotificationSettings';
+import { ResolutionDiagnostics } from './ResolutionDiagnostics';
 
 interface UserWithRole {
   id: string;
@@ -338,6 +339,10 @@ export function AdminPanel() {
               <Bell className="w-4 h-4 mr-2" />
               Notifiche
             </TabsTrigger>
+            <TabsTrigger value="diagnostics" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Stethoscope className="w-4 h-4 mr-2" />
+              Diagnostica
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="users">
@@ -435,6 +440,10 @@ export function AdminPanel() {
 
           <TabsContent value="notifications">
             <AdminNotificationSettings />
+          </TabsContent>
+
+          <TabsContent value="diagnostics">
+            <ResolutionDiagnostics />
           </TabsContent>
         </Tabs>
       </main>

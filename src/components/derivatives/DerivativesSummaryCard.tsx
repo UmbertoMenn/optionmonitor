@@ -18,6 +18,8 @@ interface DerivativesSummaryCardProps {
   stockPositions: Position[];
   underlyingPrices: Record<string, UnderlyingPrice>;
   totalCoveredCallContractsByUnderlying: Record<string, number>;
+  missingCount?: number;
+  isFetchingMissing?: boolean;
 }
 
 // Normalize string for matching (lowercase, remove suffixes, etc.)
@@ -119,6 +121,8 @@ export function DerivativesSummaryCard({
   categories,
   stockPositions,
   underlyingPrices,
+  missingCount = 0,
+  isFetchingMissing = false,
 }: DerivativesSummaryCardProps) {
   
   // ============ 1. Call vendute non coperte (Naked Call) ============
@@ -453,6 +457,14 @@ export function DerivativesSummaryCard({
           <AlertTriangle className="w-5 h-5 text-amber-500" />
           <CardTitle className="text-xl font-bold tracking-tight">Posizioni da monitorare</CardTitle>
         </div>
+        {isFetchingMissing && missingCount > 0 && (
+          <div className="flex items-center gap-2 mt-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+            <span className="text-xs text-blue-400">
+              Risoluzione AI in corso per {missingCount} strumenti...
+            </span>
+          </div>
+        )}
       </CardHeader>
         <CardContent className="pt-0">
           {/* 1. Call non coperte */}
