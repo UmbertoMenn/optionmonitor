@@ -1773,7 +1773,13 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
     const mv = (o.option.current_price || 0) * o.option.quantity * 100;
     return sum + mv;
   }, 0);
-  const combinedPL = (hasSavedGP ? savedPremium.net_per_share : 0) + marketValuePositions;
+  const avgCostValue = options.reduce((sum, o) => {
+    const acv = (o.option.avg_cost || 0) * o.option.quantity * 100;
+    return sum + acv;
+  }, 0);
+  const combinedPL = hasSavedGP
+    ? savedPremium.net_per_share + marketValuePositions
+    : avgCostValue + marketValuePositions;
   
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -1942,13 +1948,13 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           {/* Colonna 9: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${combinedPL >= 0 ? 'text-green-500' : 'text-red-500'}`} onClick={(e) => e.stopPropagation()}>
+              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${hasSavedGP ? (combinedPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">P/L:</span>
                 <span className="text-sm">{formatCurrency(combinedPL, legCurrency)}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Profit/Loss: somma dei P/L delle {options.length} gambe{hasSavedGP ? ' + flussi di cassa calcolatrice' : ''}</p>
+              <p>{hasSavedGP ? `Profit/Loss: flussi di cassa calcolatrice + valore mercato posizioni aperte` : 'P/L calcolato senza operazioni storiche caricate'}</p>
             </TooltipContent>
           </Tooltip>
       </div>
