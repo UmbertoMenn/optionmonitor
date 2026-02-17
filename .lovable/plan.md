@@ -1,21 +1,23 @@
 
 
-## Fix: Colonna prezzo sottostante troppo stretta + verifica colore giallo oro
+## Fix: Sovrapposizione indicatore stale price con P/L nelle Altre Strategie
 
-### Problema 1: Sovrapposizione triangolino rosso
-La colonna "Prezzo Sottostante" nella griglia di `GroupedOtherStrategyRow` (riga 1791) e' larga solo `6rem`, insufficiente per contenere il prezzo + l'icona `StalePriceIndicator` senza debordare nella colonna P/L.
-
-### Problema 2: Colore giallo oro
-Il colore `text-yellow-500` e' gia' applicato correttamente nel codice (riga 1951). Serve solo una verifica visiva dopo il login, ma il codice e' a posto.
+### Problema
+Dalla screenshot si vede che il contenuto della colonna "Prezzo Sottostante" (PS + triangolino rosso) deborda nella colonna "P/L" adiacente. La colonna PS a 7rem non basta quando c'e' l'indicatore stale, e la colonna P/L a 5rem non basta per valori grandi come `-20.845,00 $`.
 
 ### Soluzione
 
 **File: `src/pages/Derivatives.tsx`** -- riga 1791
 
-Aumentare la larghezza della colonna 9 (Prezzo Sottostante) da `6rem` a `7rem` nel template grid:
+Due modifiche:
 
-- Da: `grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_6rem_5rem]`
-- A: `grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_7rem_5rem]`
+1. **Aumentare la colonna PS da `7rem` a `8rem`** per dare spazio sufficiente al prezzo + icona stale
+2. **Aumentare la colonna P/L da `5rem` a `8rem`** per contenere valori monetari lunghi con il prefisso "P/L:"
 
-Questo fornisce spazio sufficiente per il prezzo + l'indicatore stale price senza sovrapposizioni con la colonna P/L.
+Template grid aggiornato:
+- Da: `...4.5rem_7rem_5rem]`
+- A: `...4.5rem_8rem_8rem]`
 
+3. **Aggiungere `overflow-hidden` alla cella PS** (riga ~1927) per evitare che il contenuto debordi in caso di valori estremi
+
+Queste modifiche garantiscono che il triangolino rosso resti confinato nella sua colonna e il P/L sia completamente leggibile.
