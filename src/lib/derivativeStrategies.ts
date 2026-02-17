@@ -1084,7 +1084,7 @@ export function normalizeForMatching(text: string): string {
     .replace(/([A-Z])\.([A-Z]{3,})/g, '$1 $2')  // Dots before long words become spaces: "X.AMAZON" -> "X AMAZON"
     .replace(/([A-Z])\.([A-Z])/g, '$1$2')  // Collapse short dotted abbreviations: "J.P." -> "JP"
     .replace(/[^A-Z0-9\s]/g, ' ')  // Remove special chars
-    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '') // Remove common suffixes including ADR, SPA
+    .replace(/\b(INC|CORP|CORPORATION|LTD|LIMITED|CLASS\s*[A-Z]?|CL\s*[A-Z]?|COMMON|STOCK|DEL|OHIO|CA|THE|ADR|SPA|AG|SA|NV|PLC)\b/gi, '') // Remove common suffixes including ADR, SPA, CL A/C
     .replace(/\s+/g, ' ')  // Normalize spaces AFTER suffix removal to avoid multiple spaces
     .trim();
 }
