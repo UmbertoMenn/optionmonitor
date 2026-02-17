@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-import { DerivativeCategories, normalizeForMatching } from '@/lib/derivativeStrategies';
+import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
 import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
@@ -22,8 +22,10 @@ interface DerivativesSummaryCardProps {
   isFetchingMissing?: boolean;
 }
 
-// normalizeForMatching is now imported from derivativeStrategies for consistency
-
+// Uses getCanonicalKey (SPECIAL_ALIASES) with fallback to normalizeForMatching
+function getMatchingKey(text: string): string {
+  return getCanonicalKey(text) || normalizeForMatching(text);
+}
 // Get ticker from position
 function getTicker(position: Position | { description?: string; ticker?: string; underlying?: string }): string {
   return position.ticker || position.description?.split(' ')[0] || 'N/A';
@@ -130,7 +132,7 @@ export function DerivativesSummaryCard({
     }>();
     
     stockPositions.forEach(stock => {
-      const key = normalizeForMatching(stock.description || '');
+      const key = getMatchingKey(stock.description || '');
       if (!underlyingBalance.has(key)) {
         underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
       }
@@ -138,7 +140,7 @@ export function DerivativesSummaryCard({
     });
     
     categories.coveredCalls.forEach(cc => {
-      const key = normalizeForMatching(cc.underlying.description || cc.option.underlying || '');
+      const key = getMatchingKey(cc.underlying.description || cc.option.underlying || '');
       if (!underlyingBalance.has(key)) {
         underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
       }
@@ -147,7 +149,7 @@ export function DerivativesSummaryCard({
     });
     
     categories.ironCondors.forEach(ic => {
-      const key = normalizeForMatching(ic.underlying);
+      const key = getMatchingKey(ic.underlying);
       if (!underlyingBalance.has(key)) {
         underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
       }
@@ -157,7 +159,7 @@ export function DerivativesSummaryCard({
     });
     
     categories.doubleDiagonals.forEach(dd => {
-      const key = normalizeForMatching(dd.underlying);
+      const key = getMatchingKey(dd.underlying);
       if (!underlyingBalance.has(key)) {
         underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
       }
@@ -167,7 +169,7 @@ export function DerivativesSummaryCard({
     });
     
     categories.groupedOtherStrategies.forEach(group => {
-      const key = normalizeForMatching(group.underlying);
+      const key = getMatchingKey(group.underlying);
       if (!underlyingBalance.has(key)) {
         underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
       }
@@ -187,7 +189,7 @@ export function DerivativesSummaryCard({
     });
     
     categories.leapCalls.forEach(lc => {
-      const key = normalizeForMatching(lc.option.underlying || lc.option.description);
+      const key = getMatchingKey(lc.option.underlying || lc.option.description);
       if (!underlyingBalance.has(key)) {
         underlyingBalance.set(key, { owned: 0, soldCalls: 0, boughtCalls: 0, strategies: new Set() });
       }
@@ -347,13 +349,13 @@ export function DerivativesSummaryCard({
     const result: { ticker: string; availableShares: number }[] = [];
     
     stockPositions.forEach(stock => {
-      const normalizedKey = normalizeForMatching(stock.description || '');
+      const normalizedKey = getMatchingKey(stock.description || '');
       const potentialContracts = Math.floor(stock.quantity / 100);
       
       let soldCallContracts = 0;
       
       categories.coveredCalls.forEach(cc => {
-        const ccKey = normalizeForMatching(cc.underlying.description || cc.option.underlying || '');
+        const ccKey = getMatchingKey(cc.underlying.description || cc.option.underlying || '');
         if (ccKey === normalizedKey) {
           soldCallContracts += cc.contractsCovered;
         }
