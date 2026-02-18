@@ -43,7 +43,7 @@ function isItalian10AM(): boolean {
 
   const offset = getCETOffset(now);
   const italianHour = now.getUTCHours() + offset;
-  return italianHour === 10 && now.getUTCMinutes() < 10;
+  return italianHour === 11 && now.getUTCMinutes() < 10;
 }
 
 // ============ EXPIRY FORMATTING ============
