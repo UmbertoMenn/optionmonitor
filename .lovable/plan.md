@@ -1,45 +1,61 @@
 
+## Fix Vista Aggregata Derivati: Categorizzazione Per-Portfolio
 
-## Fix 7 Call ALPHABET Non Coperte -- Usare getCanonicalKey
+### Problema Fondamentale
 
-### Problema
+Attualmente, nella vista aggregata (admin), tutte le posizioni di tutti gli utenti vengono mescolate in un unico pool e passate a `categorizeDerivatives()` come se fossero di un unico portafoglio. Questo causa errori perche:
 
-La funzione `normalizeForMatching` produce chiavi diverse per lo stesso sottostante:
+1. **`findUnderlyingStock` trova solo UNA riga stock** -- se User A ha 300 azioni ALPHABET e User B ne ha 600, la funzione matcha una sola call venduta contro i 300 di User A, non i 900 totali
+2. **La summary card ri-computa il matching da zero** con logica diversa dal motore di classificazione, duplicando e peggiorando gli errori
+3. **Gli override sono cross-portfolio** -- un override di User A viene applicato alle posizioni di User B
 
-| Posizione | Normalizzata | Chiave |
-|-----------|-------------|--------|
-| `ALPHABET INC` (stock) | `ALPHABET` | ALPHABET |
-| `AZ.ALPHABET INC-CL A` (stock) | `ALPHABET CL A` | ALPHABET CL A |
-| `AZ.ALPHABET INC-CL C` (stock) | `ALPHABET CL C` | ALPHABET CL C |
-| `GOOGLE INC. (A)` (opzione) | `GOOGLE` | GOOGLE |
-| `GOOGLE INC. (C)` (opzione) | `GOOGLE` | GOOGLE |
+### Soluzione: Categorizzazione Per-Portfolio con Merge dei Risultati
 
-Risultato: le azioni finiscono in 3 bucket separati ("ALPHABET", "ALPHABET CL A", "ALPHABET CL C"), le call vendute in un quarto ("GOOGLE"). Nessun bucket ha sia azioni che call, quindi tutte le call risultano "non coperte".
+Nella vista aggregata, invece di chiamare `categorizeDerivatives` una volta su tutte le posizioni mescolate, eseguirlo **separatamente per ogni portfolio** e poi concatenare i risultati. Ogni portafoglio viene classificato correttamente con i propri stock e le proprie opzioni, e i risultati vengono semplicemente uniti.
 
-Il sistema `SPECIAL_ALIASES` in `derivativeStrategies.ts` gia gestisce GOOGLE = ALPHABET, ma la card **non lo usa**.
+### Dettaglio Tecnico
 
-Un secondo problema: "CL A" e "CL C" non vengono rimossi (la regex rimuove solo "CLASS A", non "CL A"), frammentando ulteriormente le azioni.
+**File: `src/pages/Derivatives.tsx`**
 
-### Soluzione
+Modificare il `useMemo` di `categories` (riga 118-140):
 
-Due modifiche:
+```text
+Logica attuale:
+  categories = categorizeDerivatives(ALL_derivatives, ALL_positions, ALL_overrides)
 
-1. **Nella card** (`DerivativesSummaryCard.tsx`): sostituire ogni chiamata a `normalizeForMatching(...)` con una nuova funzione helper locale che prima prova `getCanonicalKey(text)` e, se non trova un alias, ricade su `normalizeForMatching(text)`. Questo unifica GOOGLE e ALPHABET in un unico bucket.
+Nuova logica:
+  SE vista aggregata:
+    1. Raggruppa positions per portfolio_id
+    2. Raggruppa overrides per portfolio_id
+    3. Per ogni portfolio_id:
+       - filtra derivatives e positions di quel portfolio
+       - filtra overrides di quel portfolio
+       - chiama categorizeDerivatives(derivatives_i, positions_i, overrides_i)
+    4. Concatena tutti gli array risultanti (coveredCalls, longPuts, ecc.)
+  ALTRIMENTI:
+    categorizeDerivatives(derivatives, positions, overrides) -- come ora
+```
 
-2. **Nella funzione `normalizeForMatching`** (`derivativeStrategies.ts`): aggiungere `CL` alla lista dei suffissi rimossi nel regex, cosi "ALPHABET CL A" e "ALPHABET CL C" diventano entrambi "ALPHABET".
+**File: `src/components/derivatives/DerivativesSummaryCard.tsx`**
+
+Semplificare il calcolo delle call non coperte (righe 124-216). Poiche ora le categories sono gia corrette per-portfolio, il riepilogo puo fidarsi dei risultati:
+
+- Le covered call con `isFullyCovered: false` indicano copertura parziale
+- Le sold call finite in `groupedOtherStrategies` senza stock matching sono non coperte
+- Non serve piu ri-computare il matching con `getMatchingKey`
+
+Il calcolo viene riscritto per derivare le call non coperte direttamente dalle categories, senza fare matching di nomi.
 
 ### File modificati
 
 | File | Modifica |
 |------|----------|
-| `src/lib/derivativeStrategies.ts` | Aggiungere `CL` alla regex dei suffissi in `normalizeForMatching` |
-| `src/components/derivatives/DerivativesSummaryCard.tsx` | Importare `getCanonicalKey` e creare una funzione helper `getMatchingKey(text)` che usa `getCanonicalKey` con fallback su `normalizeForMatching`. Usarla al posto di `normalizeForMatching` in tutto il calcolo uncovered calls |
+| `src/pages/Derivatives.tsx` | Nel `useMemo` di `categories`: se aggregato, esegui `categorizeDerivatives` per-portfolio e concatena i risultati |
+| `src/components/derivatives/DerivativesSummaryCard.tsx` | Semplificare il calcolo uncoveredCalls: derivare direttamente dalle categories senza ri-computare il matching dei nomi |
 
 ### Risultato atteso
 
-Dopo la modifica:
-- Tutte le azioni ALPHABET (900 totali) finiscono nel bucket "ALPHABET" (9 contratti coperti)
-- Tutte le call vendute GOOGLE finiscono nello stesso bucket "ALPHABET"
-- Le 9 call vendute sono tutte coperte dalle 900 azioni
-- Il conteggio call non coperte per ALPHABET/GOOGLE passa da 7 a 0
-
+- Ogni portafoglio viene classificato isolatamente con i propri stock e overrides
+- I risultati vengono semplicemente sommati
+- Le call non coperte riflettono esattamente cio che e gia calcolato dal motore di classificazione
+- Nessuna dipendenza da funzioni di normalizzazione nella summary card
