@@ -1,28 +1,23 @@
 
+## Aggiungere scadenze opzioni al briefing giornaliero
 
-## Aggiungere selettore vista alla card Composizione Portafoglio
+### Problema
+Nel messaggio di briefing della mattina, gli strike delle opzioni vengono mostrati senza la data di scadenza. Ad esempio: `AAPL strike 200` invece di `AAPL strike 200 (21 mar)`.
 
-### Cosa cambia
+### Soluzione
 
-La card "Composizione Portafoglio" (quella con la torta e il carousel netting) ricevera un dropdown compatto nell'header, identico a quello gia presente nelle card dei grafici storici. Il dropdown permette di cambiare la vista (Base / Netting ex. CC e NP / Netting Totale) direttamente dalla card, sincronizzato con il viewMode globale.
+**File: `supabase/functions/daily-briefing/index.ts`**
 
-### Modifiche tecniche
+I dati di scadenza sono gia disponibili nella `strategy_cache` (`sold_call_expiry`, `sold_put_expiry`). Basta formattarli e aggiungerli accanto agli strike in ogni sezione del briefing.
 
-**File: `src/components/dashboard/DynamicPortfolioChart.tsx`**
+1. Aggiungere una funzione helper `formatExpiry(dateStr)` che converte `"2026-03-20"` in `"20 mar"` (formato compatto giorno + mese abbreviato italiano)
 
-1. Aggiungere `onViewModeChange` alle props del componente
-2. Importare `Select`, `SelectContent`, `SelectItem`, `SelectTrigger`, `SelectValue` da `@/components/ui/select`
-3. Nell'header della Card, affiancare al titolo il dropdown Select (stile identico ai grafici storici: `h-7 w-auto text-xs bg-muted border-0 px-2 gap-1`)
-4. Il titolo diventa dinamico come gia e, ma spostato a sinistra con `justify-between`
+2. Aggiornare ogni sezione per includere la scadenza:
+   - **Covered Call ITM**: `AAPL strike 200 (20 mar)` -- usa `sold_call_expiry`
+   - **Naked Put ITM**: `AAPL strike 180 (20 mar)` -- usa `sold_put_expiry`
+   - **Iron Condor OOR**: `AAPL P170/C210 (20 mar)` -- usa `sold_call_expiry` o `sold_put_expiry`
+   - **Double Diagonal OOR**: stessa logica dell'Iron Condor
+   - **Altre Strategie OOR**: usa la scadenza rilevante in base al tipo di strategia
+   - **Leap Call in Gain**: usa `sold_call_expiry` (o la expiry dalla posizione)
 
-**File: `src/components/dashboard/Dashboard.tsx`**
-
-1. Passare `onViewModeChange={setViewMode}` come nuova prop a `DynamicPortfolioChart`
-
-### Layout header risultante
-
-```text
-[Composizione Portafoglio]                    [Base v]
-```
-
-Identico al layout delle card storiche (titolo a sinistra, dropdown a destra).
+Nessuna modifica al database o ad altri file necessaria.
