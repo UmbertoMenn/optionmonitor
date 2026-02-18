@@ -1,58 +1,28 @@
 
 
-## Fix Prezzi Sottostanti SAP e Ferrari: Mappature DB Errate
+## Aggiungere selettore vista alla card Composizione Portafoglio
 
-### Causa del Problema
+### Cosa cambia
 
-I prezzi sono sbagliati perche nel database ci sono mappature vecchie e sbagliate che hanno la priorita sulle mappature statiche corrette aggiunte nella Edge Function:
+La card "Composizione Portafoglio" (quella con la torta e il carousel netting) ricevera un dropdown compatto nell'header, identico a quello gia presente nelle card dei grafici storici. Il dropdown permette di cambiare la vista (Base / Netting ex. CC e NP / Netting Totale) direttamente dalla card, sincronizzato con il viewMode globale.
 
-| underlying (DB) | ticker attuale (SBAGLIATO) | ticker corretto |
-|---|---|---|
-| `SAP` | `SAP` (US, $201 USD) | `SAP.DE` (EUR, 171 EUR) |
-| `SAP SE` | `SAP` (US) | `SAP.DE` (EUR) |
-| `FERRARI` | `RACE` (US, $375 USD) | `RACE.MI` (EUR, 312 EUR) |
-| `Ferrari - Stock` | `RACE` (US) | `RACE.MI` (EUR) |
-| `FERRARI - STOCK` | `RACE` (US) | `RACE.MI` (EUR) |
+### Modifiche tecniche
 
-Il flusso e: hook `useUnderlyingPrices` -> query DB `underlying_mappings` -> trova `SAP -> SAP` (US) -> usa quel ticker senza mai arrivare alle mappature statiche corrette nella Edge Function.
+**File: `src/components/dashboard/DynamicPortfolioChart.tsx`**
 
-### Soluzione in 2 passi
+1. Aggiungere `onViewModeChange` alle props del componente
+2. Importare `Select`, `SelectContent`, `SelectItem`, `SelectTrigger`, `SelectValue` da `@/components/ui/select`
+3. Nell'header della Card, affiancare al titolo il dropdown Select (stile identico ai grafici storici: `h-7 w-auto text-xs bg-muted border-0 px-2 gap-1`)
+4. Il titolo diventa dinamico come gia e, ma spostato a sinistra con `justify-between`
 
-#### Passo 1: Correggere le mappature errate nel DB
+**File: `src/components/dashboard/Dashboard.tsx`**
 
-Aggiornare le righe nella tabella `underlying_mappings` per puntare ai ticker europei corretti:
+1. Passare `onViewModeChange={setViewMode}` come nuova prop a `DynamicPortfolioChart`
 
-- `SAP` -> `SAP.DE`
-- `SAP SE` -> `SAP.DE`  
-- `FERRARI` -> `RACE.MI`
-- `Ferrari - Stock` -> `RACE.MI`
-- `FERRARI - STOCK` -> `RACE.MI`
+### Layout header risultante
 
-#### Passo 2: Proteggere la Edge Function dal ri-creare mappature errate
+```text
+[Composizione Portafoglio]                    [Base v]
+```
 
-Nel file `supabase/functions/fetch-underlying-prices/index.ts`, le mappature statiche (`SPECIAL_MAPPINGS`) devono essere controllate **PRIMA** della cache DB, non dopo. In questo modo, se un underlying ha una mappatura statica nota (es. `SAP` -> `SAP.DE`), viene usata quella senza consultare il DB (che potrebbe avere dati obsoleti o errati).
-
-Ordine attuale (sbagliato):
-1. Check se input sembra un ticker -> valida su Yahoo
-2. Check cache DB (`underlying_mappings`)
-3. Check mappature statiche
-4. AI inference
-
-Nuovo ordine (corretto):
-1. Check se input sembra un ticker -> valida su Yahoo
-2. **Check mappature statiche PRIMA** (SPECIAL_MAPPINGS)
-3. Check cache DB (`underlying_mappings`)
-4. AI inference
-
-### File modificati
-
-| File | Modifica |
-|---|---|
-| Migrazione SQL | UPDATE `underlying_mappings` per correggere i 5 ticker errati |
-| `supabase/functions/fetch-underlying-prices/index.ts` | Spostare il check delle mappature statiche (Step 2) PRIMA della cache DB (Step 1), invertendo l'ordine attuale |
-
-### Risultato atteso
-
-- SAP mostrera il prezzo di SAP.DE (~171 EUR) invece di SAP US (~201 USD)
-- Ferrari mostrera il prezzo di RACE.MI (~312 EUR) invece di RACE US (~375 USD)
-- Nuovi upload non potranno sovrascrivere le mappature statiche con ticker errati
+Identico al layout delle card storiche (titolo a sinistra, dropdown a destra).
