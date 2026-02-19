@@ -74,6 +74,12 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
     return premiums.find(p => p.ticker.toUpperCase() === ticker.toUpperCase());
   };
   
+  const getPremiumsByTicker = (ticker: string): CoveredCallPremium[] => {
+    return premiums
+      .filter(p => p.ticker.toUpperCase() === ticker.toUpperCase())
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  };
+  
   const getPremiumByTickerAndSymbol = (ticker: string, optionSymbol: string): CoveredCallPremium | undefined => {
     return premiums.find(p => p.ticker.toUpperCase() === ticker.toUpperCase() && p.option_symbol === optionSymbol);
   };
@@ -109,7 +115,7 @@ export function useCoveredCallPremiums(portfolioId: string | undefined) {
   });
   
   return {
-    premiums, isLoading, refetch, getPremiumByTicker, getPremiumByTickerAndSymbol,
+    premiums, isLoading, refetch, getPremiumByTicker, getPremiumsByTicker, getPremiumByTickerAndSymbol,
     upsertPremium: upsertMutation.mutateAsync, deletePremium: deleteMutation.mutateAsync,
     isUpserting: upsertMutation.isPending, isDeleting: deleteMutation.isPending,
   };
