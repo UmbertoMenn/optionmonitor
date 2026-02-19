@@ -11,7 +11,7 @@ const corsHeaders = {
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 
-// ============ DST GUARD: exactly 10:00 Italian time ============
+// ============ DST GUARD: exactly 11:00 Italian time ============
 
 function getCETOffset(now: Date): number {
   const month = now.getUTCMonth();
@@ -36,7 +36,7 @@ function getCETOffset(now: Date): number {
   return 1;
 }
 
-function isItalian10AM(): boolean {
+function isItalian11AM(): boolean {
   const now = new Date();
   const dayOfWeek = now.getUTCDay();
   if (dayOfWeek === 0 || dayOfWeek === 6) return false;
@@ -46,258 +46,29 @@ function isItalian10AM(): boolean {
   return italianHour === 11 && now.getUTCMinutes() < 10;
 }
 
-// ============ EXPIRY FORMATTING ============
+// ============ EMOJI MAPPING ============
 
-function formatExpiry(dateStr: string | null | undefined): string {
-  if (!dateStr) return '';
-  const months = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
-  const d = new Date(dateStr + 'T00:00:00Z');
-  if (isNaN(d.getTime())) return '';
-  return ` (${d.getUTCDate()} ${months[d.getUTCMonth()]})`;
-}
-
-// ============ NORMALIZATION (mirrors frontend) ============
-
-function normalizeForMatching(str: string): string {
-  return str
-    .toUpperCase()
-    .replace(/^AZ\.\s*/i, '')
-    .replace(/\s*\(.*?\)\s*$/, '')
-    .replace(/\s+(INC|CORP|CORPORATION|LTD|PLC|AG|SA|SPA|ADR|CLASS\s*[A-Z]?)\.?\s*$/gi, '')
-    .replace(/[.,]/g, '')
-    .trim();
-}
-
-function resolveStockTicker(
-  description: string,
-  mappings: { underlying: string; ticker: string }[],
-): string | null {
-  const normalized = normalizeForMatching(description);
-  for (const m of mappings) {
-    if (normalizeForMatching(m.underlying) === normalized) {
-      return m.ticker.toUpperCase();
-    }
-  }
-  for (const m of mappings) {
-    const normMapping = normalizeForMatching(m.underlying);
-    if (normalized.includes(normMapping) || normMapping.includes(normalized)) {
-      return m.ticker.toUpperCase();
-    }
-  }
-  return null;
-}
+const EMOJI_MAP: Record<string, string> = {
+  red: '🔴',
+  amber: '🟡',
+  orange: '🟠',
+  purple: '🟣',
+  cyan: '🔵',
+  green: '🟢',
+};
 
 // ============ INTERFACES ============
 
-interface StrategyCache {
-  portfolio_id: string;
-  strategy_key: string;
-  strategy_type: string;
-  underlying: string;
-  ticker: string | null;
-  position_ids: string[];
-  sold_put_strike: number | null;
-  sold_call_strike: number | null;
-  bought_put_strike: number | null;
-  bought_call_strike: number | null;
-  is_range_strategy: boolean;
-  sold_call_expiry: string | null;
-  sold_put_expiry: string | null;
-}
-
-interface BriefingSection {
+interface SnapshotSection {
   title: string;
   emoji: string;
+  badge?: string;
   items: string[];
 }
 
 interface PortfolioBriefing {
   portfolioName: string;
-  sections: BriefingSection[];
-}
-
-// ============ MONITORING LOGIC ============
-
-function buildBriefingSections(
-  strategies: StrategyCache[],
-  underlyingPrices: Record<string, number>,
-  positions: any[],
-  underlyingMappings: { underlying: string; ticker: string }[],
-): BriefingSection[] {
-  const sections: BriefingSection[] = [];
-
-  // 1. Naked Call detection
-  const sharesPerTicker = new Map<string, number>();
-  for (const pos of positions) {
-    if (pos.asset_type !== 'stock' && pos.asset_type !== 'equity') continue;
-    let ticker = pos.ticker ? pos.ticker.toUpperCase() : null;
-    if (!ticker && pos.description) {
-      ticker = resolveStockTicker(pos.description, underlyingMappings);
-    }
-    if (!ticker) continue;
-    sharesPerTicker.set(ticker, (sharesPerTicker.get(ticker) || 0) + pos.quantity);
-  }
-
-  const netSoldCallsPerTicker = new Map<string, number>();
-  for (const s of strategies) {
-    const ticker = (s.ticker || '').toUpperCase();
-    if (!ticker) continue;
-    if (s.strategy_type === 'Covered Call') {
-      netSoldCallsPerTicker.set(ticker, (netSoldCallsPerTicker.get(ticker) || 0) + 1);
-    } else if (s.strategy_type === 'Iron Condor' || s.strategy_type === 'Double Diagonal' || s.strategy_type === 'Alternative Double Diagonal') {
-      // net 0
-    } else if (s.strategy_type === 'LEAP Call') {
-      // bought call only
-    } else {
-      if (s.sold_call_strike) netSoldCallsPerTicker.set(ticker, (netSoldCallsPerTicker.get(ticker) || 0) + 1);
-      if (s.bought_call_strike) netSoldCallsPerTicker.set(ticker, (netSoldCallsPerTicker.get(ticker) || 0) - 1);
-    }
-  }
-
-  const nakedCallItems: string[] = [];
-  for (const [ticker, netSold] of netSoldCallsPerTicker) {
-    if (netSold <= 0) continue;
-    const shares = sharesPerTicker.get(ticker) || 0;
-    const coveredContracts = Math.floor(shares / 100);
-    const uncovered = netSold - coveredContracts;
-    if (uncovered > 0) {
-      nakedCallItems.push(`${ticker} (${uncovered} contratt${uncovered === 1 ? 'o' : 'i'} scopert${uncovered === 1 ? 'o' : 'i'})`);
-    }
-  }
-  if (nakedCallItems.length > 0) {
-    sections.push({ title: 'Naked Call', emoji: '🔴', items: nakedCallItems });
-  }
-
-  // 2. Covered Call ITM
-  const ccITMItems: string[] = [];
-  for (const s of strategies) {
-    if (s.strategy_type !== 'Covered Call') continue;
-    const price = s.ticker ? underlyingPrices[s.ticker] : 0;
-    const strike = s.sold_call_strike || 0;
-    if (price && strike > 0 && price > strike) {
-      ccITMItems.push(`${s.ticker || s.underlying} strike ${strike}${formatExpiry(s.sold_call_expiry)}`);
-    }
-  }
-  if (ccITMItems.length > 0) {
-    sections.push({ title: 'Covered Call ITM', emoji: '🔴', items: ccITMItems });
-  }
-
-  // 3. Naked Put ITM
-  const npITMItems: string[] = [];
-  for (const s of strategies) {
-    if (s.strategy_type !== 'Naked Put') continue;
-    const price = s.ticker ? underlyingPrices[s.ticker] : 0;
-    const strike = s.sold_put_strike || 0;
-    if (price && strike > 0 && price < strike) {
-      npITMItems.push(`${s.ticker || s.underlying} strike ${strike}${formatExpiry(s.sold_put_expiry)}`);
-    }
-  }
-  if (npITMItems.length > 0) {
-    sections.push({ title: 'Naked Put ITM', emoji: '🔴', items: npITMItems });
-  }
-
-  // 4. Iron Condor OOR
-  const icOORItems: string[] = [];
-  for (const s of strategies) {
-    if (s.strategy_type !== 'Iron Condor') continue;
-    const price = s.ticker ? underlyingPrices[s.ticker] : 0;
-    if (!price) continue;
-    const putStrike = s.sold_put_strike || 0;
-    const callStrike = s.sold_call_strike || 0;
-    if (putStrike > 0 && callStrike > 0 && (price < putStrike || price > callStrike)) {
-      icOORItems.push(`${s.ticker || s.underlying} P${putStrike}/C${callStrike}${formatExpiry(s.sold_call_expiry || s.sold_put_expiry)}`);
-    }
-  }
-  if (icOORItems.length > 0) {
-    sections.push({ title: 'Iron Condor OOR', emoji: '🔴', items: icOORItems });
-  }
-
-  // 5. Double Diagonal OOR
-  const ddOORItems: string[] = [];
-  for (const s of strategies) {
-    if (s.strategy_type !== 'Double Diagonal' && s.strategy_type !== 'Alternative Double Diagonal') continue;
-    const price = s.ticker ? underlyingPrices[s.ticker] : 0;
-    if (!price) continue;
-    const putStrike = s.sold_put_strike || 0;
-    const callStrike = s.sold_call_strike || 0;
-    if (putStrike > 0 && callStrike > 0 && (price < putStrike || price > callStrike)) {
-      ddOORItems.push(`${s.ticker || s.underlying} P${putStrike}/C${callStrike}${formatExpiry(s.sold_call_expiry || s.sold_put_expiry)}`);
-    }
-  }
-  if (ddOORItems.length > 0) {
-    sections.push({ title: 'Double Diagonal OOR', emoji: '🔴', items: ddOORItems });
-  }
-
-  // 6. Other Strategies OOR
-  const rangeStrategies = [
-    'Short Strangle', 'Bull Put Spread', 'Bear Put Spread',
-    'Bull Call Spread', 'Bear Call Spread',
-    'Diagonal Call Spread', 'Diagonal Put Spread',
-  ];
-  const otherOORItems: string[] = [];
-  for (const s of strategies) {
-    if (['Covered Call', 'Naked Put', 'Iron Condor', 'Double Diagonal', 'Alternative Double Diagonal', 'LEAP Call'].includes(s.strategy_type)) continue;
-    const price = s.ticker ? underlyingPrices[s.ticker] : 0;
-    if (!price) continue;
-    const isRange = rangeStrategies.some(r => s.strategy_type.includes(r)) || s.is_range_strategy;
-    if (isRange) {
-      let isOOR = false;
-      if (s.strategy_type.includes('Strangle')) {
-        if (s.sold_put_strike && s.sold_call_strike) isOOR = price < s.sold_put_strike || price > s.sold_call_strike;
-      } else if (s.strategy_type.includes('Put')) {
-        if (s.sold_put_strike) isOOR = price < s.sold_put_strike;
-      } else if (s.strategy_type.includes('Call')) {
-        if (s.sold_call_strike) isOOR = price > s.sold_call_strike;
-      } else if (s.sold_put_strike && s.sold_call_strike) {
-        isOOR = price < s.sold_put_strike || price > s.sold_call_strike;
-      }
-      if (isOOR) otherOORItems.push(`${s.ticker || s.underlying} - ${s.strategy_type}${formatExpiry(s.sold_call_expiry || s.sold_put_expiry)} (OOR)`);
-    }
-  }
-  if (otherOORItems.length > 0) {
-    sections.push({ title: 'Altre Strategie OOR', emoji: '🟡', items: otherOORItems });
-  }
-
-  // 7. Leap Call in Gain
-  const leapGainItems: string[] = [];
-  for (const s of strategies) {
-    if (s.strategy_type !== 'LEAP Call') continue;
-    const leapPositions = positions.filter(p => s.position_ids.includes(p.id));
-    for (const lp of leapPositions) {
-      const avgCost = lp.avg_cost || 0;
-      const currentPrice = lp.current_price || 0;
-      if (avgCost > 0 && currentPrice > avgCost) {
-        const gainPct = ((currentPrice - avgCost) / avgCost * 100).toFixed(0);
-        leapGainItems.push(`${s.ticker || s.underlying} strike ${s.bought_call_strike || '?'}${formatExpiry(s.sold_call_expiry || lp.expiry_date)} (+${gainPct}%)`);
-      }
-    }
-  }
-  if (leapGainItems.length > 0) {
-    sections.push({ title: 'Leap Call in Gain', emoji: '🟢', items: leapGainItems });
-  }
-
-  // 8. Call da rivendere
-  const ccByTicker = new Map<string, number>();
-  for (const s of strategies) {
-    if (s.strategy_type !== 'Covered Call') continue;
-    const t = (s.ticker || '').toUpperCase();
-    if (t) ccByTicker.set(t, (ccByTicker.get(t) || 0) + 1);
-  }
-
-  const callToSellItems: string[] = [];
-  for (const [ticker, shares] of sharesPerTicker) {
-    const potentialContracts = Math.floor(shares / 100);
-    const soldContracts = ccByTicker.get(ticker) || 0;
-    const available = potentialContracts - soldContracts;
-    if (available >= 1) {
-      callToSellItems.push(`${ticker} (${available * 100} azioni disponibili)`);
-    }
-  }
-  if (callToSellItems.length > 0) {
-    sections.push({ title: 'Call da rivendere', emoji: '📈', items: callToSellItems });
-  }
-
-  return sections;
+  sections: SnapshotSection[];
 }
 
 // ============ MESSAGE FORMATTING ============
@@ -317,7 +88,9 @@ function buildTelegramMessage(briefings: PortfolioBriefing[], userName?: string)
   for (const pb of briefings) {
     msg += `\n📁 *${pb.portfolioName}*\n`;
     for (const section of pb.sections) {
-      msg += `\n${section.emoji} *${section.title}*\n`;
+      const emoji = EMOJI_MAP[section.emoji] || '⚪';
+      const badge = section.badge ? ` [${section.badge}]` : '';
+      msg += `\n${emoji} *${section.title}*${badge}\n`;
       for (const item of section.items) {
         msg += `  ${item}\n`;
       }
@@ -337,10 +110,12 @@ function buildEmailHTML(briefings: PortfolioBriefing[], userName?: string): stri
         </td>
       </tr>`;
     for (const section of pb.sections) {
+      const emoji = EMOJI_MAP[section.emoji] || '⚪';
+      const badge = section.badge ? ` <span style="font-size: 12px; color: #6b7280;">[${section.badge}]</span>` : '';
       portfolioRows += `
       <tr>
         <td style="padding: 12px 0 4px 8px; font-weight: bold; font-size: 15px;">
-          ${section.emoji} ${section.title}
+          ${emoji} ${section.title}${badge}
         </td>
       </tr>`;
       for (const item of section.items) {
@@ -363,7 +138,7 @@ function buildEmailHTML(briefings: PortfolioBriefing[], userName?: string): stri
           ${portfolioRows}
         </table>
         <p style="font-size: 12px; color: #9ca3af; margin-top: 16px;">
-          Generato automaticamente alle 10:00.
+          Generato automaticamente alle 11:00.
         </p>
       </div>
     </div>
@@ -420,10 +195,10 @@ serve(async (req: Request): Promise<Response> => {
     const body = await req.json().catch(() => ({}));
     const force = body?.force === true;
 
-    if (!force && !isItalian10AM()) {
-      console.log("Not 10:00 Italian time, skipping briefing");
+    if (!force && !isItalian11AM()) {
+      console.log("Not 11:00 Italian time, skipping briefing");
       return new Response(
-        JSON.stringify({ skipped: true, reason: "not_italian_10am" }),
+        JSON.stringify({ skipped: true, reason: "not_italian_11am" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -435,19 +210,7 @@ serve(async (req: Request): Promise<Response> => {
 
     console.log("Starting daily briefing...");
 
-    // 1. Get all underlying prices + mappings
-    const [{ data: pricesData }, { data: mappingsData }] = await Promise.all([
-      supabase.from("underlying_prices").select("ticker, price"),
-      supabase.from("underlying_mappings").select("underlying, ticker"),
-    ]);
-    
-    const underlyingPrices: Record<string, number> = {};
-    for (const p of pricesData || []) {
-      underlyingPrices[p.ticker] = p.price;
-    }
-    const underlyingMappings = (mappingsData || []) as { underlying: string; ticker: string }[];
-
-    // 2. Get users with notifications enabled
+    // 1. Get users with notifications enabled
     const { data: profiles } = await supabase
       .from("profiles")
       .select("user_id, email, full_name, notify_email, notify_telegram, telegram_chat_id");
@@ -458,7 +221,7 @@ serve(async (req: Request): Promise<Response> => {
 
     console.log(`Found ${notifiableUsers.length} users with notifications enabled`);
 
-    // 3. Get admin users for oversight
+    // 2. Get admin users for oversight
     const { data: adminRoles } = await supabase
       .from("user_roles")
       .select("user_id")
@@ -470,11 +233,12 @@ serve(async (req: Request): Promise<Response> => {
       .select("user_id, email, full_name, admin_notify_email, admin_notify_telegram, telegram_chat_id")
       .in("user_id", Array.from(adminUserIds));
 
+    const MAX_SNAPSHOT_AGE_MS = 48 * 60 * 60 * 1000; // 48 hours
     let totalSent = 0;
 
-    // 4. Process each notifiable user
+    // 3. Process each notifiable user
     for (const user of notifiableUsers) {
-      // Get user's portfolios with name
+      // Get user's portfolios
       const { data: portfolios } = await supabase
         .from("portfolios")
         .select("id, name")
@@ -484,22 +248,33 @@ serve(async (req: Request): Promise<Response> => {
 
       const portfolioIds = portfolios.map((p: any) => p.id);
 
-      // Get strategy cache and positions for all portfolios
-      const [{ data: strategiesCache }, { data: positions }] = await Promise.all([
-        supabase.from("strategy_cache").select("*").in("portfolio_id", portfolioIds),
-        supabase.from("positions")
-          .select("id, portfolio_id, asset_type, description, ticker, underlying, option_type, strike_price, quantity, current_price, avg_cost, expiry_date")
-          .in("portfolio_id", portfolioIds),
-      ]);
+      // Read snapshots from monitoring_snapshot
+      const { data: snapshots } = await supabase
+        .from("monitoring_snapshot")
+        .select("portfolio_id, sections, updated_at")
+        .in("portfolio_id", portfolioIds);
 
-      if (!strategiesCache || strategiesCache.length === 0) continue;
+      if (!snapshots || snapshots.length === 0) {
+        console.log(`No snapshots for user ${user.email}, skipping`);
+        continue;
+      }
 
       // Build briefing per portfolio
       const portfolioBriefings: PortfolioBriefing[] = [];
+      const now = Date.now();
+
       for (const portfolio of portfolios) {
-        const pStrategies = (strategiesCache as StrategyCache[]).filter(s => s.portfolio_id === portfolio.id);
-        const pPositions = (positions || []).filter((p: any) => p.portfolio_id === portfolio.id);
-        const sections = buildBriefingSections(pStrategies, underlyingPrices, pPositions, underlyingMappings);
+        const snapshot = (snapshots as any[]).find((s: any) => s.portfolio_id === portfolio.id);
+        if (!snapshot) continue;
+
+        // Check staleness
+        const snapshotAge = now - new Date(snapshot.updated_at).getTime();
+        if (snapshotAge > MAX_SNAPSHOT_AGE_MS) {
+          console.warn(`Snapshot for portfolio "${portfolio.name}" is ${Math.round(snapshotAge / 3600000)}h old, skipping`);
+          continue;
+        }
+
+        const sections = (snapshot.sections || []) as SnapshotSection[];
         if (sections.length > 0) {
           portfolioBriefings.push({ portfolioName: portfolio.name, sections });
         }
