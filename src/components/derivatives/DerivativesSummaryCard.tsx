@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -119,6 +120,8 @@ export function DerivativesSummaryCard({
   missingCount = 0,
   isFetchingMissing = false,
 }: DerivativesSummaryCardProps) {
+  const { selectedPortfolioId } = usePortfolioContext();
+  const snapshotSavedRef = useRef(false);
   
   // ============ 1. Call vendute non coperte (Naked Call) ============
   const uncoveredCalls = useMemo(() => {
@@ -431,6 +434,95 @@ export function DerivativesSummaryCard({
     return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
   }, [categories.groupedOtherStrategies, underlyingPrices]);
   
+  // ============ Save monitoring snapshot when data is complete ============
+  useEffect(() => {
+    if (isFetchingMissing || !selectedPortfolioId) return;
+    // Avoid saving multiple times per render cycle
+    if (snapshotSavedRef.current) return;
+
+    const sections: { title: string; emoji: string; badge?: string; items: string[] }[] = [];
+
+    if (uncoveredCalls.length > 0) {
+      sections.push({
+        title: 'Call non coperte',
+        emoji: 'red',
+        items: uncoveredCalls.map(uc => `${uc.ticker}: ${uc.uncoveredContracts}NC`),
+      });
+    }
+    if (coveredCallsITM.length > 0) {
+      sections.push({
+        title: 'Covered Call',
+        emoji: 'amber',
+        badge: 'ITM',
+        items: coveredCallsITM.map(cc => `${cc.ticker} $${cc.strike} ×${cc.contracts}`),
+      });
+    }
+    if (doubleDiagonalOOR.length > 0) {
+      sections.push({
+        title: 'Double Diagonal',
+        emoji: 'purple',
+        badge: 'OOR',
+        items: doubleDiagonalOOR.map(dd => `${dd.ticker}${dd.isAlternative ? ' (Alt)' : ''}`),
+      });
+    }
+    if (ironCondorOOR.length > 0) {
+      sections.push({
+        title: 'Iron Condor',
+        emoji: 'amber',
+        badge: 'OOR',
+        items: ironCondorOOR.map(ic => ic.ticker),
+      });
+    }
+    if (nakedPutsITM.length > 0) {
+      sections.push({
+        title: 'Naked Put',
+        emoji: 'orange',
+        badge: 'ITM',
+        items: nakedPutsITM.map(np => `${np.ticker} $${np.strike} ×${np.contracts}`),
+      });
+    }
+    if (leapCallsInGain.length > 0) {
+      sections.push({
+        title: 'Leap Call',
+        emoji: 'green',
+        badge: 'G',
+        items: leapCallsInGain.map(lc => `${lc.ticker} $${lc.strike} ×${lc.contracts}`),
+      });
+    }
+    if (otherStrategiesOOROOB.length > 0) {
+      sections.push({
+        title: 'Altre Strategie',
+        emoji: 'cyan',
+        badge: 'OOR/OOB',
+        items: otherStrategiesOOROOB.map(os => `${os.ticker} ${os.strategyName} ${os.status}`),
+      });
+    }
+    if (availableCallsToSell.length > 0) {
+      sections.push({
+        title: 'Call da rivendere',
+        emoji: 'green',
+        items: availableCallsToSell.map(item => `${item.ticker} ${item.availableShares}az`),
+      });
+    }
+
+    snapshotSavedRef.current = true;
+    supabase
+      .from('monitoring_snapshot' as any)
+      .upsert(
+        { portfolio_id: selectedPortfolioId, sections, updated_at: new Date().toISOString() } as any,
+        { onConflict: 'portfolio_id' }
+      )
+      .then(({ error }) => {
+        if (error) console.error('Failed to save monitoring snapshot:', error);
+        else console.log('Monitoring snapshot saved');
+      });
+  }, [isFetchingMissing, selectedPortfolioId, uncoveredCalls, coveredCallsITM, doubleDiagonalOOR, ironCondorOOR, nakedPutsITM, leapCallsInGain, otherStrategiesOOROOB, availableCallsToSell]);
+
+  // Reset ref when portfolio changes
+  useEffect(() => {
+    snapshotSavedRef.current = false;
+  }, [selectedPortfolioId]);
+
   const hasContent = uncoveredCalls.length > 0 || 
                      coveredCallsITM.length > 0 || 
                      doubleDiagonalOOR.length > 0 ||

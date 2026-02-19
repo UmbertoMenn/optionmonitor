@@ -544,6 +544,32 @@ export type Database = {
         }
         Relationships: []
       }
+      monitoring_snapshot: {
+        Row: {
+          portfolio_id: string
+          sections: Json
+          updated_at: string
+        }
+        Insert: {
+          portfolio_id: string
+          sections?: Json
+          updated_at?: string
+        }
+        Update: {
+          portfolio_id?: string
+          sections?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monitoring_snapshot_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: true
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notification_logs: {
         Row: {
           alert_id: string | null
