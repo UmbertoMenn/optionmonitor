@@ -7,8 +7,9 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Save, RefreshCw, ExternalLink } from 'lucide-react';
+import { FileSpreadsheet, Upload, Calculator, AlertCircle, Trash2, BarChart3, Save, RefreshCw, ExternalLink, History } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   parseOrderFile, 
   filterAndCalculateCallPremiums,
@@ -24,7 +25,7 @@ import {
 } from '@/lib/orderFileParser';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { buildOptionStratUrlFromOrders } from '@/lib/optionStratUrl';
-import { useCoveredCallPremiums } from '@/hooks/useCoveredCallPremiums';
+import { useCoveredCallPremiums, CoveredCallPremium } from '@/hooks/useCoveredCallPremiums';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { toast } from 'sonner';
 
@@ -54,7 +55,7 @@ export function CallPremiumCalculatorDialog({
   const isMultiLeg = strategyType === 'iron_condor' || strategyType === 'double_diagonal' || strategyType === 'other_strategy';
   const isIronCondor = strategyType === 'iron_condor';
   const { portfolio } = usePortfolio();
-  const { getPremiumByTickerAndSymbol, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
+  const { getPremiumByTickerAndSymbol, getPremiumsByTicker, upsertPremium, deletePremium, isUpserting, isLoading: isLoadingPremiums } = useCoveredCallPremiums(portfolio?.id);
   
   const [transactionCost, setTransactionCost] = useState<number>(10);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -64,6 +65,9 @@ export function CallPremiumCalculatorDialog({
   const [parseResult, setParseResult] = useState<OrderParseResult | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastOperationDate, setLastOperationDate] = useState<string | null>(null);
+  const [historicalPremiums, setHistoricalPremiums] = useState<CoveredCallPremium[]>([]);
+  const [showHistoricalPicker, setShowHistoricalPicker] = useState(false);
+  const [selectedHistoricalId, setSelectedHistoricalId] = useState<string>('');
 
   // Load saved data when dialog opens
   useEffect(() => {
@@ -75,9 +79,39 @@ export function CallPremiumCalculatorDialog({
         setLastOperationDate(saved.last_operation_date);
         recalculateMetrics(saved.orders_json, saved.transaction_cost);
         setHasUnsavedChanges(false);
+        setShowHistoricalPicker(false);
+        setHistoricalPremiums([]);
+      } else {
+        // No exact match — check for historical records for same ticker
+        const allForTicker = getPremiumsByTicker(ticker);
+        // Filter out the current optionSymbol (which has no data)
+        const historical = allForTicker.filter(p => p.option_symbol !== optionSymbol && p.orders_json.length > 0);
+        if (historical.length > 0) {
+          setHistoricalPremiums(historical);
+          setShowHistoricalPicker(true);
+          setSelectedHistoricalId('');
+        } else {
+          setHistoricalPremiums([]);
+          setShowHistoricalPicker(false);
+        }
       }
     }
   }, [open, ticker, optionSymbol, isLoadingPremiums]);
+
+  // Import historical premium data
+  const handleImportHistorical = () => {
+    if (!selectedHistoricalId) return;
+    const selected = historicalPremiums.find(p => p.id === selectedHistoricalId);
+    if (!selected) return;
+    
+    setTransactionCost(selected.transaction_cost);
+    setFilteredOrders(selected.orders_json);
+    setLastOperationDate(selected.last_operation_date);
+    recalculateMetrics(selected.orders_json, selected.transaction_cost);
+    setHasUnsavedChanges(true);
+    setShowHistoricalPicker(false);
+    toast.success(`Dati importati da ${selected.option_symbol}`);
+  };
 
   // Recalculate metrics from current orders
   const recalculateMetrics = useCallback((orders: ParsedOrder[], txCost: number) => {
@@ -253,6 +287,45 @@ export function CallPremiumCalculatorDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Historical data picker banner */}
+          {showHistoricalPicker && historicalPremiums.length > 0 && !metrics && (
+            <Alert className="border-blue-500/50 bg-blue-500/5">
+              <History className="h-4 w-4 text-blue-500" />
+              <AlertDescription className="space-y-3">
+                <p className="text-sm font-medium">Dati storici disponibili per {ticker}</p>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Select value={selectedHistoricalId} onValueChange={setSelectedHistoricalId}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="Seleziona una serie precedente..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {historicalPremiums.map(p => {
+                          const updDate = new Date(p.updated_at);
+                          const dateStr = `${String(updDate.getDate()).padStart(2, '0')}/${String(updDate.getMonth() + 1).padStart(2, '0')}/${updDate.getFullYear()}`;
+                          return (
+                            <SelectItem key={p.id} value={p.id} className="text-xs">
+                              {p.option_symbol} — aggiornato il {dateStr}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={handleImportHistorical}
+                    disabled={!selectedHistoricalId}
+                    className="h-8"
+                  >
+                    Importa
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* File Upload - Always visible to add operations */}
           <div
             {...getRootProps()}
