@@ -1,85 +1,63 @@
 
-## Briefing server-side basato su strategy_cache
 
-### Obiettivo
-Riscrivere `supabase/functions/daily-briefing/index.ts` in modo che calcoli le sezioni di monitoraggio direttamente dal database, senza dipendere da `monitoring_snapshot` (che richiede l'app aperta).
+## Fix matching nel briefing server-side
 
-### File modificato
-**`supabase/functions/daily-briefing/index.ts`**
+### Problema identificato
+Le stock positions nel database hanno `ticker: null` e descriptions con prefisso `"AZ."` (es. `"AZ.NVIDIA CORP"`, `"AZ.APPLE INC"`, `"AZ.ALPHABET INC-CL A"`).
 
-### Logica: nuova funzione `computeSectionsFromCache()`
+Il codice server-side usa `stock.ticker || stock.description.split(" ")[0]` che produce chiavi come `"AZ.NVIDIA"` -- completamente diverse dai ticker in `strategy_cache` (`"NVDA"`, `"AAPL"`, ecc.).
 
-Per ogni portfolio, legge 3 tabelle:
-- `strategy_cache` -- strategie gia categorizzate dal frontend (include override)
-- `underlying_prices` -- prezzi aggiornati ogni 5 min dal cron
-- `positions` -- per quantita stock (uncovered calls) e current_price/avg_cost (LEAP)
+Il frontend usa `getCanonicalKey` / `normalizeForMatching` con `SPECIAL_ALIASES` per normalizzare correttamente i nomi e matcharli.
 
-Replica esattamente le 8 sezioni di `DerivativesSummaryCard.tsx`:
+### Soluzione
+Replicare nel file `supabase/functions/daily-briefing/index.ts` le funzioni di normalizzazione dal frontend (`src/lib/derivativeStrategies.ts`):
 
-**1. Call non coperte** (righe 127-219 del frontend)
-- Per ogni underlying in strategy_cache, somma call vendute e comprate da tutte le strategie
-- Per le stock da `positions`, calcola `floor(shares/100)`
-- Se `net_sold_calls > covered_contracts` --> uncovered
+1. **`normalizeForMatching()`** - Rimuove prefisso `AZ.`, parentesi, suffissi (`INC`, `CORP`, `LTD`, `CLASS A/C`, `ADR`, `SPA`, ecc.), gestisce i punti tra abbreviazioni
+2. **`getCanonicalKey()`** - Cerca match in `SPECIAL_ALIASES` (Google/Alphabet, JP Morgan, Amazon.com, Apple Computer, ecc.)
+3. **`getMatchingKey()`** - Wrapper: `getCanonicalKey(text) || normalizeForMatching(text)`
 
-**2. Covered Call ITM** (righe 222-239)
-- `strategy_cache` dove `strategy_type = 'Covered Call'`
-- Se `underlying_price > sold_call_strike` --> ITM
+### Modifiche nel file
 
-**3. Double Diagonal OOR** (righe 242-285)
-- `strategy_cache` dove `strategy_type IN ('Double Diagonal', 'Alternative Double Diagonal')`
-- Se `price < sold_put_strike OR price > sold_call_strike` --> OOR
+**Aggiungere** (prima di `computeSectionsFromCache`):
+- Costante `SPECIAL_ALIASES` con tutte le voci dal frontend (ALPHABET/GOOGLE, APPLE, JPMORGAN, AMAZON)
+- Funzione `normalizeForMatching()` con identica logica regex
+- Funzione `getCanonicalKey()` con identica logica di lookup
+- Funzione `getMatchingKey()` wrapper
 
-**4. Iron Condor OOR** (righe 288-307)
-- `strategy_cache` dove `strategy_type = 'Iron Condor'`
-- Se `price < sold_put_strike OR price > sold_call_strike` --> OOR
-
-**5. Naked Put ITM** (righe 310-328)
-- `strategy_cache` dove `strategy_type = 'Naked Put'`
-- Se `price < sold_put_strike` --> ITM
-
-**6. LEAP Call in Gain** (righe 331-348)
-- `strategy_cache` dove `strategy_type = 'LEAP Call'`
-- Legge la posizione da `positions` tramite `position_ids[0]`
-- Se `current_price > avg_cost` --> in Gain
-
-**7. Call da rivendere** (righe 351-377)
-- Per ogni stock, calcola `floor(quantity/100)`
-- Sottrae le Covered Call gia vendute su quel sottostante
-- Se `available >= 1` --> da rivendere
-
-**8. Altre Strategie OOR/OOB** (righe 380-435)
-- Filtra strategy_cache per tutti i tipi non gia coperti sopra, escludendo 'Alternative Double Diagonal'
-- Per Short Strangle: OOR se prezzo fuori da sold_put..sold_call
-- Per Put Spread / Diagonal Put Spread: OOR se prezzo < sold_put_strike
-- Per Call Spread / Diagonal Call Spread: OOR se prezzo > sold_call_strike
-- Per altri tipi (es. "Altre Strategie"): OOB se somma market_value delle posizioni < 0
-
-### Fallback
-1. Prima controlla `monitoring_snapshot` (come oggi): se ha dati < 48h, li usa
-2. Se `monitoring_snapshot` e vuoto/vecchio, usa `computeSectionsFromCache()`
-3. Se anche `strategy_cache` e vuoto, salta il portfolio con log
-
-### Formato output sezioni
-Identico a quello salvato dal frontend:
-
-```text
-{
-  title: "Covered Call",
-  emoji: "amber",
-  badge: "ITM",
-  items: ["AAPL $180 x2", "MSFT $420 x1"]
-}
-```
-
-### Matching underlying -> ticker per le sezioni
-Usa il campo `ticker` gia presente in `strategy_cache` (popolato dal frontend con la stessa logica di `resolveTicker`). Per le stock positions, usa `positions.ticker`.
-
-### Matching uncovered calls
-Il frontend usa `getCanonicalKey` / `normalizeForMatching` per matchare stock con opzioni. Server-side, il match avviene tramite il campo `ticker` in `strategy_cache` confrontato con `positions.ticker`, che e gia normalizzato.
+**Modificare** `computeSectionsFromCache()`:
+- Sezione 1 (Call non coperte): usare `getMatchingKey(stock.description)` per le stock e `getMatchingKey(s.underlying)` per le strategie, invece di `stock.ticker` e `displayTicker(s)`
+- Sezione 7 (Call da rivendere): stesso fix di matching
+- Il confronto deve avvenire sulla chiave normalizzata, non sul ticker raw
 
 ### Cosa NON cambia
-- Formattazione messaggi Telegram/Email
-- Guard DST 11:00 italiane
-- Logica admin/notifiche
-- Parametro `force: true` per test
-- Il frontend continua a salvare in `monitoring_snapshot` e `strategy_cache`
+- Le sezioni 2-6 e 8 non usano matching stock/opzioni (usano solo `strategy_cache` + `underlying_prices`), quindi restano corrette
+- La formattazione dei messaggi resta identica
+- Il fallback monitoring_snapshot resta
+- Il display ticker per i messaggi di output continua a usare `s.ticker || s.underlying` (solo per mostrare il nome, non per il matching)
+
+### Dettaglio tecnico
+
+Per le sezioni 1 e 7, il matching funzionera cosi:
+
+```text
+Stock: "AZ.NVIDIA CORP" 
+  → normalizeForMatching → "NVIDIA"
+  → getMatchingKey → "NVIDIA"
+
+Strategy underlying: "NVIDIA CORP"
+  → normalizeForMatching → "NVIDIA" 
+  → getMatchingKey → "NVIDIA"
+
+→ Match corretto!
+
+Stock: "AZ.ALPHABET INC-CL A"
+  → normalizeForMatching → "ALPHABET"
+  → getCanonicalKey → "ALPHABET" (via SPECIAL_ALIASES)
+
+Strategy underlying: "GOOGLE INC. (A)"
+  → normalizeForMatching → "GOOGLE"
+  → getCanonicalKey → "ALPHABET" (via SPECIAL_ALIASES)
+
+→ Match corretto!
+```
+
