@@ -15,7 +15,7 @@ import { StrategyBuilder } from '@/components/simulator/StrategyBuilder';
 import { AdjustmentRuleEditor } from '@/components/simulator/AdjustmentRuleEditor';
 import { BacktestChart } from '@/components/simulator/BacktestChart';
 import { BacktestResults } from '@/components/simulator/BacktestResults';
-import { GreeksChart } from '@/components/simulator/GreeksChart';
+
 
 import { BacktestLeg, BacktestResult, runBacktest } from '@/lib/backtestEngine';
 import { CoveredCallRules, getDefaultCoveredCallRules } from '@/lib/adjustmentRules';
@@ -199,7 +199,6 @@ export function Simulator() {
           <div className="space-y-6">
             <BacktestResults result={backtestResult} />
             <BacktestChart days={backtestResult.days} adjustmentLog={backtestResult.adjustmentLog} />
-            <GreeksChart days={backtestResult.days} />
           </div>
         )}
       </main>
