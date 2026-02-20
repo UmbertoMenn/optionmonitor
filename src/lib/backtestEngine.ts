@@ -420,7 +420,7 @@ function executeProfitRule(
     const firstExpiry = allExpiries.find(e => e >= date.slice(0, 10));
     if (firstExpiry && leg.expiryDate === firstExpiry) {
       // First expiry: roll down lower strike, same expiry
-      const newStrike = roundStrike(S * (1 + 3 / 100), strikeStep);
+      const newStrike = roundStrike(S * (1 + profitRule.firstExpiryMinDistancePct / 100), strikeStep);
       const T = yearsBetween(date, leg.expiryDate);
       if (T <= 0) return null;
 

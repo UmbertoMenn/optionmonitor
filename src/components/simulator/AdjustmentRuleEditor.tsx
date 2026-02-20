@@ -218,6 +218,16 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                           <p className="text-xs font-medium text-muted-foreground">
                             Se sulla prima scadenza disponibile, rollo su strike più basso con stessa scadenza, se il nuovo premio è maggiore di almeno:
                           </p>
+                          <div className="flex items-center gap-1">
+                            <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
+                            <Input
+                              type="number"
+                              value={rules.profitRule.firstExpiryMinDistancePct}
+                              onChange={e => updateProfit({ firstExpiryMinDistancePct: parseFloat(e.target.value) || 5 })}
+                              className="w-16 h-7 text-xs"
+                            />
+                            <span className="text-xs">%</span>
+                          </div>
                           <div className="flex gap-3">
                             <div className="flex items-center gap-1">
                               <Input

@@ -25,6 +25,7 @@ export interface ProfitRule {
   newCallBarrierPct: number;
 
   // roll_down_first_expiry
+  firstExpiryMinDistancePct: number;
   minPremiumUsd: number;
   minPremiumPct: number;
 
@@ -57,6 +58,7 @@ export function getDefaultCoveredCallRules(): CoveredCallRules {
       profitPct: 80,
       action: 'wait_and_sell',
       newCallBarrierPct: 5,
+      firstExpiryMinDistancePct: 5,
       minPremiumUsd: 0.50,
       minPremiumPct: 0.5,
       minDistancePct: 5,
