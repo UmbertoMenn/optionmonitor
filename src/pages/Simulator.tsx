@@ -1,32 +1,35 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Settings, LogOut, Sun, Moon, ShieldAlert, Play, Loader2 } from 'lucide-react';
+import { ArrowLeft, ShieldAlert, Play, Loader2, Sun, Moon, LogOut } from 'lucide-react';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown } from 'lucide-react';
 
-import { TickerSelector, TickerData } from '@/components/simulator/TickerSelector';
+import { TickerSelector, CsvPriceData } from '@/components/simulator/TickerSelector';
+import { IVCurveEditor, IVPoint } from '@/components/simulator/IVCurveEditor';
 import { StrategyBuilder } from '@/components/simulator/StrategyBuilder';
 import { AdjustmentRuleEditor } from '@/components/simulator/AdjustmentRuleEditor';
-import { IVSurfaceChart } from '@/components/simulator/IVSurfaceChart';
 import { BacktestChart } from '@/components/simulator/BacktestChart';
 import { BacktestResults } from '@/components/simulator/BacktestResults';
 import { GreeksChart } from '@/components/simulator/GreeksChart';
 
 import { BacktestLeg, BacktestResult, runBacktest } from '@/lib/backtestEngine';
 import { AdjustmentRule, StrategyPresetType } from '@/lib/adjustmentRules';
+import { buildManualIVSurface, IVSurface } from '@/lib/ivSurface';
 import { toast } from 'sonner';
 
 export function Simulator() {
   const { isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
-  const navigate = useNavigate();
 
-  const [tickerData, setTickerData] = useState<TickerData | null>(null);
+  const [priceData, setPriceData] = useState<{ date: string; close: number }[] | null>(null);
+  const [ticker, setTicker] = useState('');
+  const [ivPoints, setIVPoints] = useState<IVPoint[]>([]);
+  const [riskFreeRate, setRiskFreeRate] = useState(0.045);
+
   const [legs, setLegs] = useState<BacktestLeg[]>([]);
   const [entryDate, setEntryDate] = useState('');
   const [strategyType, setStrategyType] = useState<StrategyPresetType>('iron_condor');
@@ -35,9 +38,28 @@ export function Simulator() {
   const [running, setRunning] = useState(false);
   const [configOpen, setConfigOpen] = useState(true);
 
-  const handleDataLoaded = useCallback((data: TickerData) => {
-    setTickerData(data);
+  // Build IVSurface from manual curve
+  const ivSurface: IVSurface = useMemo(
+    () => buildManualIVSurface(ivPoints, riskFreeRate),
+    [ivPoints, riskFreeRate]
+  );
+
+  const dateRange = useMemo(() => {
+    if (!priceData || priceData.length === 0) return { from: '', to: '' };
+    return { from: priceData[0].date, to: priceData[priceData.length - 1].date };
+  }, [priceData]);
+
+  const handleDataLoaded = useCallback((data: CsvPriceData) => {
+    setPriceData(data.priceData);
+    setTicker(data.ticker);
     setBacktestResult(null);
+    // Initialize IV curve: 2 points at 30%
+    if (data.priceData.length > 0) {
+      setIVPoints([
+        { date: data.priceData[0].date, iv: 0.3 },
+        { date: data.priceData[data.priceData.length - 1].date, iv: 0.3 },
+      ]);
+    }
   }, []);
 
   const handleLegsChange = useCallback((newLegs: BacktestLeg[], date: string) => {
@@ -46,22 +68,22 @@ export function Simulator() {
   }, []);
 
   const handleRunBacktest = useCallback(() => {
-    if (!tickerData || legs.length === 0) {
+    if (!priceData || legs.length === 0) {
       toast.error('Configura prima dati e strategia');
       return;
     }
 
     setRunning(true);
-    const entryIdx = tickerData.priceData.findIndex(p => p.date >= entryDate);
-    const filteredPriceData = entryIdx >= 0 ? tickerData.priceData.slice(entryIdx) : tickerData.priceData;
+    const entryIdx = priceData.findIndex(p => p.date >= entryDate);
+    const filteredPriceData = entryIdx >= 0 ? priceData.slice(entryIdx) : priceData;
 
     setTimeout(() => {
       try {
         const result = runBacktest({
           legs,
           priceData: filteredPriceData,
-          ivSurface: tickerData.ivSurface,
-          riskFreeRate: tickerData.riskFreeRate,
+          ivSurface,
+          riskFreeRate,
           adjustmentRules,
         });
         setBacktestResult(result);
@@ -74,7 +96,7 @@ export function Simulator() {
         setRunning(false);
       }
     }, 50);
-  }, [tickerData, legs, entryDate, adjustmentRules]);
+  }, [priceData, legs, entryDate, adjustmentRules, ivSurface, riskFreeRate]);
 
   if (!isAdmin) {
     return (
@@ -84,10 +106,8 @@ export function Simulator() {
     );
   }
 
-
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b border-border bg-background/50 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -97,14 +117,13 @@ export function Simulator() {
               </div>
               <div>
                 <h1 className="text-lg font-bold">Simulatore Backtest</h1>
-                {tickerData && (
+                {priceData && (
                   <p className="text-xs text-muted-foreground">
-                    {tickerData.ticker} • {tickerData.priceData.length} giorni
+                    {ticker} • {priceData.length} giorni
                   </p>
                 )}
               </div>
             </div>
-
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" asChild>
                 <Link to="/"><ArrowLeft className="w-4 h-4 mr-2" />Dashboard</Link>
@@ -124,7 +143,6 @@ export function Simulator() {
       </header>
 
       <main className="container mx-auto px-4 py-6 space-y-6">
-        {/* Configuration section */}
         <Collapsible open={configOpen} onOpenChange={setConfigOpen}>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" className="w-full justify-between text-left">
@@ -135,22 +153,24 @@ export function Simulator() {
           <CollapsibleContent className="space-y-4 mt-2">
             <TickerSelector onDataLoaded={handleDataLoaded} />
 
-            {tickerData && (
+            {priceData && (
               <>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <IVSurfaceChart
-                    ivSurface={tickerData.ivSurface}
-                    strategyStrikes={legs.filter(l => l.type !== 'stock').map(l => l.strike)}
-                  />
-                  <StrategyBuilder
-                    priceData={tickerData.priceData}
-                    ivSurface={tickerData.ivSurface}
-                    riskFreeRate={tickerData.riskFreeRate}
-                    dateRange={tickerData.dateRange}
-                    onLegsChange={handleLegsChange}
-                    onStrategyTypeChange={setStrategyType}
-                  />
-                </div>
+                <IVCurveEditor
+                  priceData={priceData}
+                  ivPoints={ivPoints}
+                  riskFreeRate={riskFreeRate}
+                  onIVPointsChange={setIVPoints}
+                  onRiskFreeRateChange={setRiskFreeRate}
+                />
+
+                <StrategyBuilder
+                  priceData={priceData}
+                  ivSurface={ivSurface}
+                  riskFreeRate={riskFreeRate}
+                  dateRange={dateRange}
+                  onLegsChange={handleLegsChange}
+                  onStrategyTypeChange={setStrategyType}
+                />
 
                 <AdjustmentRuleEditor
                   rules={adjustmentRules}
@@ -162,8 +182,7 @@ export function Simulator() {
           </CollapsibleContent>
         </Collapsible>
 
-        {/* Run button */}
-        {tickerData && legs.length > 0 && (
+        {priceData && legs.length > 0 && (
           <div className="flex justify-center">
             <Button size="lg" onClick={handleRunBacktest} disabled={running} className="px-12">
               {running ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Play className="w-5 h-5 mr-2" />}
@@ -172,7 +191,6 @@ export function Simulator() {
           </div>
         )}
 
-        {/* Results */}
         {backtestResult && (
           <div className="space-y-6">
             <BacktestResults result={backtestResult} />

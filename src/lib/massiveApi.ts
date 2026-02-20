@@ -36,49 +36,7 @@ export interface StockBar {
   v: number;
 }
 
-export interface OptionContract {
-  ticker: string; // O:PLTR250117C00030000
-  underlying_ticker: string;
-  contract_type: 'call' | 'put';
-  strike_price: number;
-  expiration_date: string; // YYYY-MM-DD
-}
-
-export interface OptionBar {
-  t: number;
-  o: number;
-  h: number;
-  l: number;
-  c: number;
-  v: number;
-}
-
-export interface OptionSnapshotResult {
-  ticker: string;
-  strike_price: number;
-  contract_type: 'call' | 'put';
-  expiration_date: string;
-  day?: { close: number; open: number; high: number; low: number; volume: number };
-  greeks?: { delta: number; gamma: number; theta: number; vega: number; implied_volatility: number };
-  last_quote?: { bid: number; ask: number; midpoint: number };
-}
-
 /** Fetch daily stock bars for a ticker. */
 export async function fetchStockBars(ticker: string, from: string, to: string): Promise<StockBar[]> {
   return callProxy<StockBar[]>({ op: 'stock-bars', ticker, from, to });
-}
-
-/** Fetch option contracts for a ticker and expiration date. */
-export async function fetchOptionContracts(ticker: string, expirationDate: string): Promise<OptionContract[]> {
-  return callProxy<OptionContract[]>({ op: 'option-contracts', ticker, expiration_date: expirationDate });
-}
-
-/** Fetch daily bars for an option ticker. */
-export async function fetchOptionBars(optionTicker: string, from: string, to: string): Promise<OptionBar[]> {
-  return callProxy<OptionBar[]>({ op: 'option-bars', ticker: optionTicker, from, to });
-}
-
-/** Fetch option chain snapshot for a ticker and expiration date. */
-export async function fetchOptionChain(ticker: string, expirationDate: string): Promise<OptionSnapshotResult[]> {
-  return callProxy<OptionSnapshotResult[]>({ op: 'option-chain', ticker, expiration_date: expirationDate });
 }
