@@ -1,51 +1,90 @@
 
 
-## Modifiche: Date Picker + Curva IV con punti mensili
+## Semplificazione Regole di Aggiustamento
 
-### 1. TickerSelector -- Aggiungere date picker Start/End
+### Problema attuale
+- "Prezzo vicino a barriera" ha un campo "direction" (approaching/breached) inutile -- deve sempre significare "si avvicina"
+- "Max Trigger" e "Cooldown" sono parametri confusi e inutili
+- Le azioni disponibili sono troppe e poco chiare (close_all, close_leg, compound, ecc.)
+- Gli strike vengono calcolati con percentuali continue invece di allinearsi a una griglia reale (ogni 5 unita)
 
-Dopo il caricamento del CSV, aggiungere due campi data (Start Date / End Date) usando il componente `DateInput` gia esistente. Le date sono vincolate al range del CSV caricato. Solo i dati tra start e end vengono passati al parent via `onDataLoaded`.
+### Cosa cambia
 
-L'output cambia: il CSV viene parsato e salvato internamente come `allData`, ma `onDataLoaded` emette solo la fetta filtrata tra start e end date.
+#### 1. Interfaccia `AdjustmentRule` semplificata
 
-### 2. IVCurveEditor -- Linea arancione + punti mensili automatici
+La regola diventa:
+- **Condizione**: `price_near_barrier` (unica condizione) con `legType` (put/call venduta) e `distancePct` (percentuale di avvicinamento alla barriera)
+- **Azione**: solo 3 opzioni:
+  - `roll_strike` -- rolla solo lo strike (chiude la gamba e riapre allo strike piu vicino alla nuova barriera %)
+  - `roll_expiry` -- rolla solo la scadenza (stessa strike, scadenza successiva)
+  - `roll_both` -- rolla strike e scadenza insieme
+- **Strike step**: parametro configurabile (default 5) che determina l'incremento degli strike disponibili. Quando si rolla, il nuovo strike viene arrotondato al multiplo di `strikeStep` piu vicino alla barriera % impostata
+- **Priorita**: mantenuta per ordinare le regole
+- Rimossi: `maxTriggers`, `cooldownDays`, `delta_threshold`, `days_to_expiry`, `pl_threshold`, `close_all`, `close_leg`, `add_leg`, `compound`
 
-**Colore**: la linea IV e i punti Scatter diventano arancioni (`#f97316` / `orange`).
+#### 2. Logica di selezione strike
 
-**Punti automatici**: quando il componente riceve `priceData`, genera automaticamente un punto IV per ogni primo giorno di mese nel range (es. se il range va da 2024-01-15 a 2024-06-20, crea punti per 2024-01-15, 2024-02-01, 2024-03-01, 2024-04-01, 2024-05-01, 2024-06-01, 2024-06-20). Tutti inizializzati al 30%.
+Quando una regola si attiva (prezzo si avvicina alla barriera):
+1. Calcola il nuovo strike target: `prezzo_sottostante * (1 +/- newBarrierPct / 100)`
+2. Arrotonda al multiplo di `strikeStep` piu vicino (es. se strikeStep=5 e target=87.3, lo strike diventa 85 o 90)
+3. Vende/compra (stessa direzione della gamba originale) al nuovo strike
 
-L'admin non aggiunge punti cliccando sul grafico (la funzionalita click-to-add viene rimossa). I punti sono fissi sulle date mensili; l'admin puo solo trascinare verticalmente per cambiare la IV o usare l'input numerico.
+#### 3. File coinvolti
 
-### 3. Simulator.tsx -- Gestione date range
-
-L'inizializzazione dei `ivPoints` si sposta nel `IVCurveEditor` (o viene ricalcolata quando cambiano le date). Quando `handleDataLoaded` viene chiamato, i punti IV vengono generati automaticamente in base alle date filtrate.
+| File | Modifica |
+|------|----------|
+| `src/lib/adjustmentRules.ts` | Semplificazione interfacce, rimozione condizioni/azioni inutili, nuovi preset |
+| `src/components/simulator/AdjustmentRuleEditor.tsx` | UI semplificata: solo condizione barriera, 3 azioni, strike step, niente max trigger/cooldown |
+| `src/lib/backtestEngine.ts` | Aggiornamento `evaluateCondition` e `executeAction` per usare le nuove regole con strike step |
 
 ---
 
 ### Dettaglio tecnico
 
-**TickerSelector.tsx**:
-- Nuovo state: `startDate`, `endDate` (Date | undefined)
-- Dopo il parsing del CSV, auto-imposta start = primo giorno, end = ultimo giorno
-- Due `DateInput` con `disabled` che limita al range del CSV
-- `onDataLoaded` emette `priceData` filtrata tra start e end
-- Cambio di start/end ri-emette i dati filtrati
+**adjustmentRules.ts -- Nuove interfacce**:
 
-**IVCurveEditor.tsx**:
-- Colore linea e scatter: `#f97316` (arancione) invece di `hsl(var(--chart-2))`
-- Nuova prop opzionale: nessuna -- i punti vengono generati internamente quando `priceData` cambia
-- Funzione `generateMonthlyPoints(priceData)`: crea un punto al primo giorno di ogni mese + primo e ultimo giorno del range, tutti a 30% IV
-- Rimuovere `handleChartClick` (niente piu click-to-add)
-- Rimuovere pulsante "Elimina" (i punti sono fissi)
-- Mantenere: drag verticale, input numerico, IV Piatta, Reset
+```text
+AdjustmentCondition:
+  type: 'price_near_barrier'  (unica opzione)
+  legType: 'sold_put' | 'sold_call'
+  distancePct: number  (es. 5 = si attiva quando il prezzo e entro il 5% dello strike)
 
-**Simulator.tsx**:
-- L'inizializzazione dei `ivPoints` in `handleDataLoaded` usa la nuova logica mensile (o delega al componente)
+AdjustmentAction:
+  type: 'roll_strike' | 'roll_expiry' | 'roll_both'
+  newBarrierPct: number  (nuova distanza % dallo strike per il roll, es. 10 = nuovo strike al 10% dal prezzo)
+  rollMonths: number  (solo per roll_expiry e roll_both, default 1)
 
-### File coinvolti
+AdjustmentRule:
+  id: string
+  name: string
+  condition: AdjustmentCondition
+  action: AdjustmentAction
+  strikeStep: number  (default 5, incremento degli strike)
+  priority: number
+```
 
-| File | Modifica |
-|------|----------|
-| `src/components/simulator/TickerSelector.tsx` | Aggiunta date picker start/end con DateInput, filtraggio dati |
-| `src/components/simulator/IVCurveEditor.tsx` | Colore arancione, punti mensili fissi, rimozione click-to-add e elimina punto |
-| `src/pages/Simulator.tsx` | Aggiornamento inizializzazione ivPoints con logica mensile |
+**backtestEngine.ts -- Nuova logica roll_strike**:
+
+```text
+1. Prezzo attuale S, gamba venduta con strike K
+2. Distanza = |S - K| / K * 100
+3. Se distanza <= condition.distancePct -> attiva regola
+4. Nuovo strike target = S * (1 - newBarrierPct/100) per put, S * (1 + newBarrierPct/100) per call
+5. Arrotonda: newStrike = Math.round(target / strikeStep) * strikeStep
+6. Chiudi vecchia gamba, apri nuova allo strike arrotondato
+```
+
+**AdjustmentRuleEditor.tsx -- UI semplificata**:
+
+Ogni regola mostra:
+- Nome (editabile)
+- Tipo gamba: Put venduta / Call venduta
+- Distanza attivazione: input numerico + "%"
+- Azione: select con 3 opzioni (Rolla barriera / Rolla scadenza / Rolla entrambi)
+- Nuova barriera %: input numerico (visibile per roll_strike e roll_both)
+- Mesi avanti: input numerico (visibile per roll_expiry e roll_both)
+- Strike step: input numerico (default 5)
+- Priorita: input numerico
+
+Rimossi completamente: Max trigger, Cooldown, condizioni delta/DTE/P&L, azioni close_all/close_leg/compound.
+
