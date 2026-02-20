@@ -6,7 +6,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const MASSIVE_BASE = "https://api.polygon.io"; // massive.com uses Polygon-compatible API
+const MASSIVE_BASE = "https://api.polygon.io";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -14,7 +14,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Auth check: must be admin
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -41,7 +40,6 @@ Deno.serve(async (req) => {
 
     const userId = claimsData.claims.sub as string;
 
-    // Check admin role
     const { data: roleData } = await supabase
       .from("user_roles")
       .select("role")
@@ -72,34 +70,12 @@ Deno.serve(async (req) => {
     const ticker = url.searchParams.get("ticker") || "";
     const from = url.searchParams.get("from") || "";
     const to = url.searchParams.get("to") || "";
-    const expirationDate = url.searchParams.get("expiration_date") || "";
-
-    let apiUrl: string;
-    let allResults: unknown[] = [];
 
     switch (op) {
       case "stock-bars": {
-        apiUrl = `${MASSIVE_BASE}/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}?adjusted=true&sort=asc&apiKey=${MASSIVE_API_KEY}`;
+        const apiUrl = `${MASSIVE_BASE}/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}?adjusted=true&sort=asc&apiKey=${MASSIVE_API_KEY}`;
         const data = await fetchWithPagination(apiUrl, MASSIVE_API_KEY);
         return jsonResponse(data);
-      }
-
-      case "option-contracts": {
-        apiUrl = `${MASSIVE_BASE}/v3/reference/options/contracts?underlying_ticker=${ticker}&expiration_date=${expirationDate}&limit=250&apiKey=${MASSIVE_API_KEY}`;
-        allResults = await fetchWithPaginationV3(apiUrl, MASSIVE_API_KEY);
-        return jsonResponse(allResults);
-      }
-
-      case "option-bars": {
-        apiUrl = `${MASSIVE_BASE}/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/1/day/${from}/${to}?adjusted=true&sort=asc&apiKey=${MASSIVE_API_KEY}`;
-        const data = await fetchWithPagination(apiUrl, MASSIVE_API_KEY);
-        return jsonResponse(data);
-      }
-
-      case "option-chain": {
-        apiUrl = `${MASSIVE_BASE}/v3/snapshot/options/${ticker}?expiration_date=${expirationDate}&limit=250&apiKey=${MASSIVE_API_KEY}`;
-        allResults = await fetchWithPaginationV3(apiUrl, MASSIVE_API_KEY);
-        return jsonResponse(allResults);
       }
 
       default:
@@ -131,43 +107,7 @@ function jsonResponse(data: unknown) {
   });
 }
 
-// V2 pagination (aggs): results are in .results, next_url in root
 async function fetchWithPagination(
-  initialUrl: string,
-  apiKey: string
-): Promise<unknown[]> {
-  let allResults: unknown[] = [];
-  let nextUrl: string | null = initialUrl;
-  let retries = 0;
-
-  while (nextUrl) {
-    const res = await fetch(nextUrl);
-
-    if (res.status === 429) {
-      retries++;
-      if (retries > 5) throw new Error("Rate limited by Massive.com API");
-      await new Promise((r) => setTimeout(r, 1000 * retries));
-      continue;
-    }
-
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Massive API error ${res.status}: ${body}`);
-    }
-
-    const json = await res.json();
-    if (json.results) allResults = allResults.concat(json.results);
-    nextUrl = json.next_url
-      ? `${json.next_url}&apiKey=${apiKey}`
-      : null;
-    retries = 0;
-  }
-
-  return allResults;
-}
-
-// V3 pagination: results are in .results, next_url in root
-async function fetchWithPaginationV3(
   initialUrl: string,
   apiKey: string
 ): Promise<unknown[]> {
