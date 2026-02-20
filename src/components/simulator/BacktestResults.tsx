@@ -200,6 +200,7 @@ export function BacktestResults({ result }: BacktestResultsProps) {
                     <TableHead className="text-xs">Data</TableHead>
                     <TableHead className="text-xs">Regola</TableHead>
                     <TableHead className="text-xs">Descrizione</TableHead>
+                    <TableHead className="text-xs text-right">Sottostante</TableHead>
                     <TableHead className="text-xs text-right">Costo</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -211,6 +212,7 @@ export function BacktestResults({ result }: BacktestResultsProps) {
                         <Badge variant="outline" className="text-xs">{adj.ruleName}</Badge>
                       </TableCell>
                       <TableCell className="text-xs">{adj.description}</TableCell>
+                      <TableCell className="text-xs text-right font-mono">${adj.underlyingPrice.toFixed(2)}</TableCell>
                       <TableCell className={`text-xs text-right font-mono ${adj.cost < 0 ? 'text-green-500' : 'text-red-500'}`}>
                         ${adj.cost.toFixed(2)}
                       </TableCell>

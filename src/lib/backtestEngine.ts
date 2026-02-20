@@ -54,6 +54,7 @@ export interface AdjustmentLog {
   legsRemoved: BacktestLeg[];
   legsAdded: BacktestLeg[];
   cost: number;
+  underlyingPrice: number;
 }
 
 export interface DayLegResult {
@@ -336,6 +337,7 @@ function executeApproachRule(
     description: `Roll up: ${leg.strike} → ${newStrike} (exp ${nextExpiry})`,
     legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
     cost: closeCost + openCost,
+    underlyingPrice: S,
   };
 }
 
@@ -380,6 +382,7 @@ function handleExpiryDoNothing(
     description: desc,
     legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
     cost: newPrice * (-1) * 100,
+    underlyingPrice: S,
   };
 }
 
@@ -417,6 +420,7 @@ function sellNewCallAfterExpiry(
     description: `Nuova call ${newStrike} (exp ${nextExpiry})`,
     legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
     cost: newPrice * (-1) * 100,
+    underlyingPrice: S,
   };
 }
 
@@ -464,6 +468,7 @@ function executeProfitRule(
         description: `Roll down: ${leg.strike} → ${newStrike} (stessa scadenza)`,
         legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
         cost: closeCost + newPrice * leg.quantity * 100,
+        underlyingPrice: S,
       };
     } else {
       // Later expiries: search best option
@@ -497,6 +502,7 @@ function executeProfitRule(
               description: `Roll: ${leg.strike} → ${strike} (exp ${expiry})`,
               legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
               cost: closeCost + price * leg.quantity * 100,
+              underlyingPrice: S,
             };
           }
         }
