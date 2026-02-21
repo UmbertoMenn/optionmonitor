@@ -1,27 +1,94 @@
 
 
-## Fix: Distanza min strike per roll_up_always + Colonna Sottostante nei Movimenti
+## Revisione Resoconto: Premi, Commissioni e Separazione P/L Sottostante vs Strategia
 
-### 1. Aggiungere "Distanza min strike" a roll_up_always
+### Problemi attuali
 
-L'opzione "Rollo su scadenza successiva con strike piu alto (anche se il nuovo premio e inferiore)" non mostra alcun campo configurabile. Serve aggiungere l'input "Distanza min strike" (gia presente per `roll_up_positive`), che usa il campo `rollUpMinDistancePct` gia esistente nel model.
+1. La card riassuntiva mostra solo "Costo totale" generico degli aggiustamenti
+2. La tabella Movimenti ha una colonna "Totale" duplicata (bug dal diff precedente)
+3. Non c'e distinzione tra P/L del sottostante (buy & hold) e P/L della strategia covered call
+4. Mancano i dettagli su premi incassati e commissioni
 
-**File: `src/components/simulator/AdjustmentRuleEditor.tsx`**
-- Dopo la label `roll_up_always` (riga 70-75), aggiungere un blocco condizionale `{rules.approachRule.action === 'roll_up_always' && ...}` con l'input per `rollUpMinDistancePct`, identico a quello gia presente nel blocco `roll_up_positive`.
+### Modifiche
 
-### 2. Colonna "Sottostante" nei Movimenti Cronologici
+#### 1. Engine: tracciare premi lordi, commissioni e P/L sottostante (`src/lib/backtestEngine.ts`)
 
-La tabella Movimenti Cronologici non include il prezzo del sottostante al momento dell'operazione.
+Aggiungere a `BacktestResult`:
+```text
+totalGrossPremiums: number;    // somma premi venduti (lordi, senza commissioni)
+totalCommissions: number;      // $10 per ogni trade (apertura e chiusura contano separatamente)
+totalNetPremiums: number;      // lordi - commissioni
+underlyingPL: number;          // P/L puro del sottostante (prezzo finale - prezzo iniziale) * qty
+strategyPL: number;            // P/L totale strategia = underlyingPL + netPremiums
+tradeCount: number;            // numero totale di trade per calcolo commissioni
+```
 
-**File: `src/components/simulator/BacktestResults.tsx`**
-- Aggiungere `underlyingPrice?: number` all'interfaccia `TradeMovement`.
-- In `buildMovements`: per le leg iniziali, usare il prezzo della leg stock (se presente) o il primo `result.days[0].price`. Per le leg da `adjustmentLog`, usare `adj.underlyingPrice`.
-- Aggiungere la colonna "Sottostante" nella `TableHeader` e `TableBody` della tabella Movimenti, formattata come `$XXX.XX`.
+Nel loop del motore:
+- Contare ogni trade iniziale come 1 trade
+- Contare ogni leg rimossa (chiusura) + ogni leg aggiunta (apertura) negli aggiustamenti come trade separati
+- `totalCommissions = tradeCount * 10`
+- `totalGrossPremiums`: somma dei premi delle call vendute (entryPrice * qty * 100, solo SELL di opzioni)
+- `underlyingPL`: differenza tra prezzo finale e prezzo iniziale del sottostante * quantita stock
+- `strategyPL`: valore totale finale - valore totale iniziale (gia calcolato come `finalPL`, ma ricalcolato includendo commissioni)
 
-### Dettaglio tecnico
+Aggiungere anche `stockPL` e `optionsPL` al `BacktestDayResult` per il grafico.
+
+#### 2. Chart: due linee separate per P/L sottostante e P/L strategia (`src/components/simulator/BacktestChart.tsx`)
+
+Aggiungere al `chartData`:
+```text
+{
+  date, price,
+  stockPL: number,      // P/L solo sottostante (buy & hold)
+  strategyPL: number,   // P/L strategia completa
+  adjustmentDesc
+}
+```
+
+- Linea 1 (tratteggiata, grigia): `stockPL` - "P/L Sottostante"
+- Area 2 (colorata, come ora): `strategyPL` - "P/L Strategia"
+- Tooltip aggiornato per mostrare entrambi i valori
+
+#### 3. Resoconto: sostituire "Costo totale" con dettaglio premi e commissioni (`src/components/simulator/BacktestResults.tsx`)
+
+**Card riassuntiva** (sostituisce la card attuale riga 135-143):
+```text
+| Premi lordi incassati | Premio unitario medio | Commissioni | Premi netti |
+| $1,234.00             | $2.45                 | $120 (12 op)| $1,114.00   |
+```
+
+**Stat cards**: aggiungere/sostituire:
+- "P/L Sottostante" (guadagno/perdita puro del titolo)
+- "P/L Strategia" (risultato complessivo inclusi premi netti)
+- Mantenere Max Drawdown, Sharpe, Win Rate
+
+**Tabella Movimenti**: 
+- Rimuovere la colonna "Totale" duplicata (bug)
+- Rinominare la colonna rimasta in "Importo"
+- Aggiungere colonna "Commissione" ($10 per ogni riga)
+
+#### 4. Dettaglio tecnico per file
 
 | File | Modifica |
 |------|----------|
-| `src/components/simulator/AdjustmentRuleEditor.tsx` | Aggiungere input "Distanza min strike" quando `roll_up_always` e selezionato |
-| `src/components/simulator/BacktestResults.tsx` | Aggiungere `underlyingPrice` a `TradeMovement`; popolare da `adj.underlyingPrice`; nuova colonna nella tabella |
+| `src/lib/backtestEngine.ts` | Aggiungere `totalGrossPremiums`, `totalCommissions`, `totalNetPremiums`, `underlyingPL`, `strategyPL`, `tradeCount` a `BacktestResult`; aggiungere `stockPL` a `BacktestDayResult`; calcolare nel loop |
+| `src/components/simulator/BacktestChart.tsx` | Due serie: `stockPL` (linea tratteggiata) e `strategyPL` (area colorata); tooltip aggiornato con entrambi |
+| `src/components/simulator/BacktestResults.tsx` | Rimuovere colonna Totale duplicata; card premi con lordi/unitario/commissioni/netti; stat cards con P/L Sottostante e P/L Strategia; colonna Commissione in movimenti |
+
+#### 5. Logica commissioni
+
+- Commissione fissa: $10 per trade
+- Ogni riga nella tabella Movimenti = 1 trade = $10
+- Le commissioni vengono sottratte dal P/L della strategia
+- Il P/L del sottostante NON include commissioni (e il puro buy & hold)
+
+#### 6. Calcolo P/L nel motore
+
+```text
+underlyingPL = (prezzoFinale - prezzoIniziale) * quantitaStock
+totalGrossPremiums = somma(premi vendita call * qty * 100) - somma(premi riacquisto * qty * 100)
+totalCommissions = tradeCount * 10
+totalNetPremiums = totalGrossPremiums - totalCommissions
+strategyPL = underlyingPL + totalNetPremiums
+```
 
