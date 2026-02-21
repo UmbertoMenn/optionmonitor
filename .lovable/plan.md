@@ -1,94 +1,48 @@
 
 
-## Revisione Resoconto: Premi, Commissioni e Separazione P/L Sottostante vs Strategia
+## Fix: Cascata infinita di operazioni sulla stessa barra
 
-### Problemi attuali
+### Causa del bug
 
-1. La card riassuntiva mostra solo "Costo totale" generico degli aggiustamenti
-2. La tabella Movimenti ha una colonna "Totale" duplicata (bug dal diff precedente)
-3. Non c'e distinzione tra P/L del sottostante (buy & hold) e P/L della strategia covered call
-4. Mancano i dettagli su premi incassati e commissioni
-
-### Modifiche
-
-#### 1. Engine: tracciare premi lordi, commissioni e P/L sottostante (`src/lib/backtestEngine.ts`)
-
-Aggiungere a `BacktestResult`:
+Nel loop principale (riga 173):
 ```text
-totalGrossPremiums: number;    // somma premi venduti (lordi, senza commissioni)
-totalCommissions: number;      // $10 per ogni trade (apertura e chiusura contano separatamente)
-totalNetPremiums: number;      // lordi - commissioni
-underlyingPL: number;          // P/L puro del sottostante (prezzo finale - prezzo iniziale) * qty
-strategyPL: number;            // P/L totale strategia = underlyingPL + netPremiums
-tradeCount: number;            // numero totale di trade per calcolo commissioni
+for (const leg of activeLegs) { ... }
 ```
 
-Nel loop del motore:
-- Contare ogni trade iniziale come 1 trade
-- Contare ogni leg rimossa (chiusura) + ogni leg aggiunta (apertura) negli aggiustamenti come trade separati
-- `totalCommissions = tradeCount * 10`
-- `totalGrossPremiums`: somma dei premi delle call vendute (entryPrice * qty * 100, solo SELL di opzioni)
-- `underlyingPL`: differenza tra prezzo finale e prezzo iniziale del sottostante * quantita stock
-- `strategyPL`: valore totale finale - valore totale iniziale (gia calcolato come `finalPL`, ma ricalcolato includendo commissioni)
+Le funzioni di aggiustamento (`executeApproachRule`, `executeProfitRule`, `handleExpiryDoNothing`, `sellNewCallAfterExpiry`) fanno `activeLegs.push(newLeg)` -- aggiungendo la nuova leg **allo stesso array** su cui il `for...of` sta iterando.
 
-Aggiungere anche `stockPL` e `optionsPL` al `BacktestDayResult` per il grafico.
+Risultato: la nuova leg viene elaborata immediatamente nella stessa barra. Se il suo prezzo BS soddisfa una regola (es. profitto >80%), scatta un altro aggiustamento, che aggiunge un'altra leg, che viene elaborata, e cosi via. Decine di operazioni sulla stessa data.
 
-#### 2. Chart: due linee separate per P/L sottostante e P/L strategia (`src/components/simulator/BacktestChart.tsx`)
+### Soluzione
 
-Aggiungere al `chartData`:
+All'inizio di ogni barra, prendere uno **snapshot** delle leg da elaborare. Le nuove leg aggiunte durante la barra saranno elaborate solo dalla barra successiva.
+
+### Modifica in `src/lib/backtestEngine.ts`
+
+Riga 173, sostituire:
 ```text
-{
-  date, price,
-  stockPL: number,      // P/L solo sottostante (buy & hold)
-  strategyPL: number,   // P/L strategia completa
-  adjustmentDesc
-}
+for (const leg of activeLegs) {
+```
+con:
+```text
+const legsSnapshot = activeLegs.filter(l => l.active);
+for (const leg of legsSnapshot) {
 ```
 
-- Linea 1 (tratteggiata, grigia): `stockPL` - "P/L Sottostante"
-- Area 2 (colorata, come ora): `strategyPL` - "P/L Strategia"
-- Tooltip aggiornato per mostrare entrambi i valori
+Questo e sufficiente perche:
+- `legsSnapshot` e un array separato, creato prima del loop
+- Le nuove leg aggiunte da `activeLegs.push(newLeg)` non appaiono in `legsSnapshot`
+- Dalla barra successiva, il nuovo snapshot includera le leg appena aggiunte
 
-#### 3. Resoconto: sostituire "Costo totale" con dettaglio premi e commissioni (`src/components/simulator/BacktestResults.tsx`)
+### Perche funziona
 
-**Card riassuntiva** (sostituisce la card attuale riga 135-143):
-```text
-| Premi lordi incassati | Premio unitario medio | Commissioni | Premi netti |
-| $1,234.00             | $2.45                 | $120 (12 op)| $1,114.00   |
-```
+- Le leg appena create hanno `entryDate` uguale alla data corrente
+- Il loro `T` (tempo a scadenza) e calcolato correttamente solo dalla barra successiva
+- Elaborarle immediatamente sulla stessa barra causa prezzi BS incoerenti (il prezzo cambia ad ogni iterazione per via degli aggiustamenti cascata)
 
-**Stat cards**: aggiungere/sostituire:
-- "P/L Sottostante" (guadagno/perdita puro del titolo)
-- "P/L Strategia" (risultato complessivo inclusi premi netti)
-- Mantenere Max Drawdown, Sharpe, Win Rate
-
-**Tabella Movimenti**: 
-- Rimuovere la colonna "Totale" duplicata (bug)
-- Rinominare la colonna rimasta in "Importo"
-- Aggiungere colonna "Commissione" ($10 per ogni riga)
-
-#### 4. Dettaglio tecnico per file
+### File modificato
 
 | File | Modifica |
 |------|----------|
-| `src/lib/backtestEngine.ts` | Aggiungere `totalGrossPremiums`, `totalCommissions`, `totalNetPremiums`, `underlyingPL`, `strategyPL`, `tradeCount` a `BacktestResult`; aggiungere `stockPL` a `BacktestDayResult`; calcolare nel loop |
-| `src/components/simulator/BacktestChart.tsx` | Due serie: `stockPL` (linea tratteggiata) e `strategyPL` (area colorata); tooltip aggiornato con entrambi |
-| `src/components/simulator/BacktestResults.tsx` | Rimuovere colonna Totale duplicata; card premi con lordi/unitario/commissioni/netti; stat cards con P/L Sottostante e P/L Strategia; colonna Commissione in movimenti |
-
-#### 5. Logica commissioni
-
-- Commissione fissa: $10 per trade
-- Ogni riga nella tabella Movimenti = 1 trade = $10
-- Le commissioni vengono sottratte dal P/L della strategia
-- Il P/L del sottostante NON include commissioni (e il puro buy & hold)
-
-#### 6. Calcolo P/L nel motore
-
-```text
-underlyingPL = (prezzoFinale - prezzoIniziale) * quantitaStock
-totalGrossPremiums = somma(premi vendita call * qty * 100) - somma(premi riacquisto * qty * 100)
-totalCommissions = tradeCount * 10
-totalNetPremiums = totalGrossPremiums - totalCommissions
-strategyPL = underlyingPL + totalNetPremiums
-```
+| `src/lib/backtestEngine.ts` | Riga 173: usare `activeLegs.filter(l => l.active)` come snapshot prima del loop |
 
