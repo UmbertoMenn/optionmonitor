@@ -1,42 +1,35 @@
 
 
-## Fix: Regola di approccio non scatta quando il prezzo supera lo strike
+## Fix: allExpiries non copre abbastanza scadenze future
 
 ### Causa del bug
 
-La condizione di attivazione della regola di approccio barriera (riga 248) richiede:
+Riga 160-162 di `src/lib/backtestEngine.ts`:
 ```text
-dist <= activationPct (es. 2%)  AND  S >= strike * (1 - 2/100)
+const lastBarDate = new Date(priceData[priceData.length - 1].date);
+lastBarDate.setMonth(lastBarDate.getMonth() + 3);
+const allExpiries = getMonthlyExpiries(..., formatDate(lastBarDate));
 ```
 
-Questo crea una **finestra strettissima**: il prezzo deve trovarsi entro il 2% dallo strike (es. tra 132.30 e 137.70 per strike 135). Una volta che il prezzo supera questa banda (es. sale a 150, 200), la distanza diventa 11%, 48% ecc. e la regola non scatta piu.
+Le scadenze vengono generate solo fino a 3 mesi dopo l'ultima barra. Se l'ultima barra e febbraio 2026, le scadenze arrivano fino a maggio 2026 circa.
 
-Il risultato: dopo il roll up a strike 135 del 13/05/2025, il prezzo e salito rapidamente oltre 135 e non e piu rientrato nella banda del 2%. Nessun aggiustamento fino alla scadenza naturale nel maggio 2026.
+Quando un roll crea una leg con scadenza maggio 2026 e il prezzo continua a salire, `executeApproachRule` chiama `findNextExpiry(leg.expiryDate, allExpiries)` cercando una scadenza **dopo** maggio 2026. Non ne trova nessuna, ritorna `null`, e il roll viene bloccato.
 
 ### Soluzione
 
-La condizione deve scattare quando il prezzo **raggiunge o supera** la zona di attivazione, non solo quando si trova al suo interno.
+Estendere il range di `allExpiries` da +3 mesi a **+12 mesi** oltre l'ultima barra. Questo garantisce che ci sia sempre almeno una scadenza mensile disponibile dopo qualsiasi leg creata durante il backtest.
 
-**Riga 248 di `src/lib/backtestEngine.ts`** -- sostituire:
+### Modifica
 
-```text
-// PRIMA (bug):
-const dist = Math.abs(S - leg.strike) / leg.strike * 100;
-if (dist <= ccRules.approachRule.activationPct && S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100))
-
-// DOPO (fix):
-if (S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100))
-```
-
-Rimuovere il controllo `dist <= activationPct`. La condizione rimasta (`S >= strike * 0.98`) e sufficiente: scatta quando il prezzo e entro il 2% sotto lo strike OPPURE ovunque sopra lo strike. In questo modo:
-
-- Prezzo a 133 (strike 135): `133 >= 135*0.98 = 132.3` -- scatta
-- Prezzo a 200 (strike 135): `200 >= 132.3` -- scatta
-- Prezzo a 120 (strike 135): `120 >= 132.3` -- NON scatta (troppo lontano)
+| File | Riga | Modifica |
+|------|------|----------|
+| `src/lib/backtestEngine.ts` | 161 | Cambiare `lastBarDate.setMonth(lastBarDate.getMonth() + 3)` in `lastBarDate.setMonth(lastBarDate.getMonth() + 12)` |
 
 ### Dettaglio tecnico
 
-| File | Modifica |
-|------|----------|
-| `src/lib/backtestEngine.ts` | Righe 247-248: rimuovere la variabile `dist` e la condizione `dist <= activationPct`, mantenere solo `S >= leg.strike * (1 - activationPct / 100)` |
+Con +12 mesi, se l'ultima barra e febbraio 2026:
+- `allExpiries` arriva fino a febbraio 2027
+- Una leg con scadenza maggio 2026 trova giugno 2026 come prossima scadenza
+- Una leg con scadenza gennaio 2027 trova febbraio 2027
+- Nessun roll viene piu bloccato per mancanza di scadenze disponibili
 
