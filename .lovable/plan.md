@@ -1,25 +1,24 @@
 
 
-## Trasformare "Alla scadenza, barriera nuova call" in terza opzione radio
+## Fix: Approccio barriera - strike sempre superiore e scadenza piu vicina
 
-### Modifica
+### Comportamento attuale (sbagliato)
 
-Il blocco "Alla scadenza, barriera nuova call" (attualmente sempre visibile, senza pallino) diventa una terza opzione radio nella sezione "Cosa fai?":
+Il nuovo strike viene calcolato come `roundStrike(S * (1 + rollUpMinDistancePct / 100))`, che puo risultare uguale o inferiore allo strike corrente. Inoltre le due azioni `roll_up_always` e `roll_up_positive` dovrebbero cercare entrambe sulla scadenza piu vicina che rispetti i requisiti.
 
-```
-Cosa fai?
-  (o) Rollo su scadenza successiva con strike piu alto (anche se debito)
-      Distanza min strike [__]%
-  (o) Rollo solo se la differenza e positiva di almeno: [__] USD
-      Distanza min strike [__]%
-  (o) Non faccio nulla ed alla scadenza rivendo una nuova call con barriera: [__]%
-```
+### Comportamento corretto
 
-### File modificati
+Quando il sottostante si avvicina allo strike (o lo supera):
+1. Calcolare il nuovo strike come il massimo tra `roundStrike(S * (1 + rollUpMinDistancePct / 100))` e `leg.strike + strikeStep` -- garantisce che sia sempre superiore allo strike corrente
+2. Iterare le scadenze successive in ordine cronologico (dalla piu vicina)
+3. Per `roll_up_always`: prendere la prima scadenza disponibile
+4. Per `roll_up_positive`: prendere la prima scadenza dove il credito netto (nuovo premio - costo riacquisto) sia almeno `minPremiumUsd`
 
-| File | Modifica |
-|------|----------|
-| `src/lib/adjustmentRules.ts` | Aggiungere `'do_nothing'` al tipo `action` di `ApproachRule` (riga 7): `'roll_up_always' \| 'roll_up_positive' \| 'do_nothing'` |
-| `src/components/simulator/AdjustmentRuleEditor.tsx` | Rimuovere il blocco "always visible" (righe 117-127) e aggiungere una terza opzione `RadioGroupItem` con value `do_nothing`, label "Non faccio nulla ed alla scadenza rivendo una nuova call con barriera:", e input `newCallBarrierPct` visibile solo quando selezionata |
-| `src/lib/backtestEngine.ts` | Aggiungere gestione del caso `do_nothing` in `executeApproachRule`: se l'azione e `do_nothing`, non fare nessun roll (return null), la leg scadra naturalmente e verra venduta una nuova call con barriera `newCallBarrierPct` alla scadenza |
+### Dettaglio tecnico
+
+| File | Riga | Modifica |
+|------|------|----------|
+| `src/lib/backtestEngine.ts` | 384 | Dopo il calcolo di `newStrike`, aggiungere: `if (newStrike <= leg.strike) newStrike = leg.strike + strikeStep;` |
+
+Questa singola riga risolve il problema. Il resto della logica (iterazione scadenze dalla piu vicina, check `minPremiumUsd` per `roll_up_positive`) e gia corretto.
 
