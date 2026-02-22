@@ -4,12 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { CalendarIcon } from 'lucide-react';
+import { DateInput } from '@/components/ui/date-input';
 import { format, parseISO } from 'date-fns';
-import { cn } from '@/lib/utils';
 import { BacktestLeg, getMonthlyExpiries } from '@/lib/backtestEngine';
 import { bsPrice } from '@/lib/blackScholes';
 import { IVSurface } from '@/lib/ivSurface';
@@ -107,35 +103,16 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-end">
           <div className="space-y-1.5">
             <Label>Data Ingresso</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "w-full justify-start text-left font-normal",
-                    !entryDateStr && "text-muted-foreground"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {entryDateStr ? entryDateStr.slice(0, 10) : "Seleziona data"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={entryDateStr ? parseISO(entryDateStr) : undefined}
-                  onSelect={(date) => {
-                    if (date) setEntryDateStr(format(date, 'yyyy-MM-dd'));
-                  }}
-                  disabled={(date) => {
-                    if (!dateRange.from || !dateRange.to) return false;
-                    return date < parseISO(dateRange.from) || date > parseISO(dateRange.to);
-                  }}
-                  initialFocus
-                  className={cn("p-3 pointer-events-auto")}
-                />
-              </PopoverContent>
-            </Popover>
+            <DateInput
+              value={entryDateStr ? parseISO(entryDateStr) : undefined}
+              onChange={(date) => {
+                if (date) setEntryDateStr(format(date, 'yyyy-MM-dd'));
+              }}
+              disabled={(date) => {
+                if (!dateRange.from || !dateRange.to) return false;
+                return date < parseISO(dateRange.from) || date > parseISO(dateRange.to);
+              }}
+            />
           </div>
           <div className="space-y-1.5">
             <Label>Prezzo Sottostante</Label>
