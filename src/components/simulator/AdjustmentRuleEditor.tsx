@@ -201,7 +201,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                       {/* Sub-rule 2: Later expiries */}
                       <div className="space-y-2">
                         <p className="text-xs font-medium text-muted-foreground">
-                          Su scadenze successive, cerco opzione con strike lontano almeno X% dal sottostante, premio non inferiore a:
+                          Su scadenze successive, cerco sulla scadenza più vicina possibile un'opzione con strike lontano almeno X% dal sottostante e premio netto non inferiore a:
                         </p>
                         <div className="flex items-center gap-1">
                           <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
