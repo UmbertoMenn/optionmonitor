@@ -1,24 +1,31 @@
 
 
-## Fix: Approccio barriera - strike sempre superiore e scadenza piu vicina
+## Fix: Data Ingresso - date uniche e input manuale
 
-### Comportamento attuale (sbagliato)
+### Problema 1: Date duplicate
+Il `Select` mostra `priceData.slice(0, 50)`, ma i dati possono avere piu barre con la stessa data (es. dati orari). Risultato: la stessa data appare ripetuta piu volte nel menu.
 
-Il nuovo strike viene calcolato come `roundStrike(S * (1 + rollUpMinDistancePct / 100))`, che puo risultare uguale o inferiore allo strike corrente. Inoltre le due azioni `roll_up_always` e `roll_up_positive` dovrebbero cercare entrambe sulla scadenza piu vicina che rispetti i requisiti.
+### Problema 2: Nessun input manuale
+Il campo usa solo un `Select`, senza possibilita di scrivere la data a mano.
 
-### Comportamento corretto
+### Soluzione
 
-Quando il sottostante si avvicina allo strike (o lo supera):
-1. Calcolare il nuovo strike come il massimo tra `roundStrike(S * (1 + rollUpMinDistancePct / 100))` e `leg.strike + strikeStep` -- garantisce che sia sempre superiore allo strike corrente
-2. Iterare le scadenze successive in ordine cronologico (dalla piu vicina)
-3. Per `roll_up_always`: prendere la prima scadenza disponibile
-4. Per `roll_up_positive`: prendere la prima scadenza dove il credito netto (nuovo premio - costo riacquisto) sia almeno `minPremiumUsd`
+Sostituire il `Select` con un campo `Input` di tipo testo (formato `YYYY-MM-DD`) che permetta di scrivere la data liberamente. Aggiungere un `Popover` con un `Calendar` (datepicker) come alternativa visuale per chi preferisce selezionare.
 
 ### Dettaglio tecnico
 
-| File | Riga | Modifica |
-|------|------|----------|
-| `src/lib/backtestEngine.ts` | 384 | Dopo il calcolo di `newStrike`, aggiungere: `if (newStrike <= leg.strike) newStrike = leg.strike + strikeStep;` |
+**File:** `src/components/simulator/StrategyBuilder.tsx`
 
-Questa singola riga risolve il problema. Il resto della logica (iterazione scadenze dalla piu vicina, check `minPremiumUsd` per `roll_up_positive`) e gia corretto.
+**Righe 102-111** - Sostituire il blocco `Select` con:
+
+- Un `Popover` contenente un `Calendar` (componente shadcn gia presente nel progetto)
+- Il trigger sara un `Button` che mostra la data selezionata con un'icona calendario
+- La data selezionata aggiorna `entryDateStr` nel formato `YYYY-MM-DD`
+- Il calendario sara limitato alle date disponibili nel range `dateRange.from` / `dateRange.to`
+
+Inoltre, prima di passare `entryDateStr` al resto della logica, la data verra cercata nella barra piu vicina disponibile in `priceData` (gia implementato nel `useMemo` di `entryPrice` alle righe 38-46).
+
+**Imports aggiuntivi:** `Calendar`, `Popover`, `PopoverTrigger`, `PopoverContent` da shadcn, `CalendarIcon` da lucide-react, `format` da date-fns.
+
+**Logica date uniche:** Non piu necessaria perche il Calendar mostra solo giorni unici per natura.
 
