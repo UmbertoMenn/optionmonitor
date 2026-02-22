@@ -197,7 +197,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         // Handle expiry logic - ensure a replacement call is ALWAYS created
         let expiryHandled = false;
 
-        if (ccRules.approachRule.enabled && ccRules.approachRule.action === 'do_nothing') {
+        if (false) { // do_nothing removed
           const adj = handleExpiryDoNothing(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
           if (adj) {
             dayAdjustments.push(adj);
@@ -243,7 +243,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         vega = bsVega(S, leg.strike, T, riskFreeRate, iv);
 
         // Check approach rule (price near sold call)
-        if (ccRules.approachRule.enabled && leg.type === 'call' && leg.quantity < 0 && leg.active) {
+        if (leg.type === 'call' && leg.quantity < 0 && leg.active) {
           if (S >= leg.strike * (1 - ccRules.approachRule.activationPct / 100)) {
             const adj = executeApproachRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
             if (adj) {
@@ -262,7 +262,7 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         }
 
         // Check profit rule (option gaining value for seller)
-        if (ccRules.profitRule.enabled && leg.type === 'call' && leg.quantity < 0 && leg.active) {
+        if (leg.type === 'call' && leg.quantity < 0 && leg.active) {
           const gainPct = ((leg.entryPrice - price) / leg.entryPrice) * 100;
           if (gainPct >= ccRules.profitRule.profitPct) {
             const adj = executeProfitRule(leg, S, date, price, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
@@ -373,7 +373,7 @@ function executeApproachRule(
 ): AdjustmentLog | null {
   const { approachRule, strikeStep } = ccRules;
 
-  if (approachRule.action === 'do_nothing') return null; // handled at expiry
+  // do_nothing action removed - only roll_up_always and roll_up_positive
 
   // Search across all future expiries starting from the one after the current leg's expiry
   const futureExpiries = allExpiries.filter(e => e > leg.expiryDate.slice(0, 10));
@@ -392,8 +392,7 @@ function executeApproachRule(
     if (approachRule.action === 'roll_up_positive') {
       const netPremium = newPrice - currentPrice;
       const meetsUsd = netPremium >= approachRule.minPremiumUsd;
-      const meetsPct = netPremium >= S * (approachRule.minPremiumPct / 100);
-      if (!meetsUsd && !meetsPct) continue; // try next expiry
+      if (!meetsUsd) continue; // try next expiry
     }
 
     // Found a valid expiry: execute the roll
@@ -529,8 +528,7 @@ function executeProfitRule(
       const netPremium = newPrice - currentPrice;
 
       const meetsUsd = netPremium >= profitRule.minPremiumUsd;
-      const meetsPct = netPremium >= S * (profitRule.minPremiumPct / 100);
-      if (!meetsUsd && !meetsPct) return null;
+      if (!meetsUsd) return null;
 
       leg.active = false;
       const newLeg: BacktestLeg = {
@@ -563,9 +561,8 @@ function executeProfitRule(
           const netPremium = price - currentPrice;
 
           const meetsUsd = netPremium >= profitRule.rollDownMinPremiumUsd;
-          const meetsPct = currentPrice > 0 && netPremium >= currentPrice * (profitRule.rollDownMinPremiumPct / 100);
 
-          if (meetsUsd || meetsPct) {
+          if (meetsUsd) {
             leg.active = false;
             const newLeg: BacktestLeg = {
               id: `${leg.id}_rollany_${date}`,

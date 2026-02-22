@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,6 @@ import { AdjustmentRuleEditor } from '@/components/simulator/AdjustmentRuleEdito
 import { BacktestChart } from '@/components/simulator/BacktestChart';
 import { BacktestResults } from '@/components/simulator/BacktestResults';
 
-
 import { BacktestLeg, BacktestResult, runBacktest } from '@/lib/backtestEngine';
 import { CoveredCallRules, getDefaultCoveredCallRules } from '@/lib/adjustmentRules';
 import { buildStaticIVSurface, IVSurface } from '@/lib/ivSurface';
@@ -28,7 +27,7 @@ export function Simulator() {
 
   const [priceData, setPriceData] = useState<{ date: string; close: number }[] | null>(null);
   const [ticker, setTicker] = useState('');
-  const [ivPct, setIvPct] = useState(30); // static IV %
+  const [ivPct, setIvPct] = useState(30);
   const [riskFreeRate, setRiskFreeRate] = useState(0.045);
 
   const [legs, setLegs] = useState<BacktestLeg[]>([]);
@@ -38,7 +37,8 @@ export function Simulator() {
   const [running, setRunning] = useState(false);
   const [configOpen, setConfigOpen] = useState(true);
 
-  // Build static IVSurface
+  const resultsRef = useRef<HTMLDivElement>(null);
+
   const ivSurface: IVSurface = useMemo(
     () => buildStaticIVSurface(ivPct / 100, riskFreeRate),
     [ivPct, riskFreeRate]
@@ -82,6 +82,10 @@ export function Simulator() {
         setBacktestResult(result);
         setConfigOpen(false);
         toast.success(`Backtest completato: ${result.days.length} barre simulate`);
+        // Scroll to results after render
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
       } catch (err) {
         console.error('Backtest error:', err);
         toast.error(`Errore: ${err instanceof Error ? err.message : 'Errore sconosciuto'}`);
@@ -148,7 +152,6 @@ export function Simulator() {
 
             {priceData && (
               <>
-                {/* Static IV + Risk-Free Rate */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label>Volatilità Implicita (%)</Label>
@@ -186,7 +189,7 @@ export function Simulator() {
           </CollapsibleContent>
         </Collapsible>
 
-        {priceData && legs.length > 0 && (
+        {priceData && (
           <div className="flex justify-center">
             <Button size="lg" onClick={handleRunBacktest} disabled={running} className="px-12">
               {running ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Play className="w-5 h-5 mr-2" />}
@@ -196,7 +199,7 @@ export function Simulator() {
         )}
 
         {backtestResult && (
-          <div className="space-y-6">
+          <div ref={resultsRef} className="space-y-6">
             <BacktestResults result={backtestResult} />
             <BacktestChart days={backtestResult.days} adjustmentLog={backtestResult.adjustmentLog} />
           </div>

@@ -1,6 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -58,7 +57,7 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
     return bsPrice(entryPrice, callStrike, T, riskFreeRate, iv, 'call');
   }, [entryPrice, callStrike, selectedExpiry, entryDateStr, ivSurface, riskFreeRate]);
 
-  const totalCost = entryPrice * 100 - callPrice * 100; // 100 shares - 1 call premium
+  const totalCost = entryPrice * 100 - callPrice * 100;
 
   const computedLegs = useMemo((): BacktestLeg[] => {
     if (!entryPrice || !selectedExpiry) return [];
@@ -86,8 +85,11 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
     ];
   }, [entryPrice, callStrike, callPrice, entryDateStr, selectedExpiry]);
 
-  const handleApply = useCallback(() => {
-    onLegsChange(computedLegs, entryDateStr);
+  // Auto-sync legs to parent
+  useEffect(() => {
+    if (computedLegs.length > 0) {
+      onLegsChange(computedLegs, entryDateStr);
+    }
   }, [computedLegs, entryDateStr, onLegsChange]);
 
   return (
@@ -139,10 +141,6 @@ export function StrategyBuilder({ priceData, ivSurface, riskFreeRate, dateRange,
           <Badge variant="destructive">-1 CALL ${callStrike} @${callPrice.toFixed(2)}</Badge>
           <Badge variant="outline">Costo netto: ${totalCost.toFixed(2)}</Badge>
         </div>
-
-        <Button onClick={handleApply} disabled={computedLegs.length === 0}>
-          Applica Strategia
-        </Button>
       </CardContent>
     </Card>
   );
