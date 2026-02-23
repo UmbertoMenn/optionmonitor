@@ -1,41 +1,34 @@
 
 
-## Correzioni Simulatore
+## Fix: Commissioni calcolate per lotto invece che per ordine
 
-### 1. Volatilita implicita default al 55%
+### Problema
+La riga 654 di `orderFileParser.ts`:
+```
+const commissions = ordersFound * transactionCost;
+```
+Calcola le commissioni come **numero di ordini × costo**. Ma il costo è $10 per lotto (contratto), quindi un ordine con quantità 3 dovrebbe generare $30 di commissioni, non $10.
 
-**File:** `src/pages/Simulator.tsx`, riga 30
+### Soluzione
 
-Cambiare `useState(30)` in `useState(55)`.
+**File:** `src/lib/orderFileParser.ts`, riga 654
 
-### 2. La data ingresso si resetta dopo il backtest
+Sostituire:
+```ts
+const commissions = ordersFound * transactionCost;
+```
+con:
+```ts
+const totalLots = parseResult.filteredOrders.reduce((sum, o) => sum + o.quantity, 0);
+const commissions = totalLots * transactionCost;
+```
 
-**Causa:** Lo state `rawEntryDate` vive dentro `StrategyBuilder` (riga 33) ed e inizializzato con `dateRange.from`. Ogni volta che il componente si ri-monta o `dateRange` cambia, la data torna all'inizio del database.
+Questo somma le quantità di tutti gli ordini filtrati e moltiplica per il costo unitario per lotto.
 
-**Soluzione:** Spostare lo state `rawEntryDate` nel componente padre `Simulator.tsx`, cosi persiste per tutta la sessione. `StrategyBuilder` ricevera `rawEntryDate` e `setRawEntryDate` come props.
+**File:** `src/components/derivatives/CallPremiumCalculatorDialog.tsx`, riga 467
 
-**File:** `src/pages/Simulator.tsx`
-- Aggiungere state: `const [rawEntryDate, setRawEntryDate] = useState('')`
-- Nel callback `handleDataLoaded`: impostare `rawEntryDate` solo se e ancora vuoto (prima volta)
-- Passare `rawEntryDate` e `setRawEntryDate` come props a `StrategyBuilder`
+Aggiornare la label del campo da "Costo unitario transazione (USD)" a "Commissione per lotto (USD)" per chiarezza.
 
-**File:** `src/components/simulator/StrategyBuilder.tsx`
-- Rimuovere lo state locale `rawEntryDate`
-- Accettare `rawEntryDate` e `onRawEntryDateChange` nelle props
-- Usare queste props al posto dello state locale
-
-### 3. Il backtest parte dall'inizio del database
-
-**Causa:** La logica di filtraggio in `handleRunBacktest` (riga 70-71) usa `entryDate` che viene da `handleLegsChange`. Ma dato che il punto 2 resettava la data, `entryDate` tornava alla prima data del file. Inoltre, i `legs` generati da `StrategyBuilder` hanno `entryDate` uguale alla data resettata.
-
-**Soluzione:** Con il fix del punto 2, `entryDate` sara corretto perche `rawEntryDate` non si resettera piu. La logica di filtraggio a riga 70-71 gia fa `priceData.findIndex(p => p.date >= entryDate)` e passa solo i dati dalla data di ingresso in poi: funzionera correttamente una volta che la data e persistente.
-
-### Dettaglio tecnico
-
-| # | File | Modifica |
-|---|------|----------|
-| 1 | `Simulator.tsx:30` | `ivPct` default da 30 a 55 |
-| 2 | `Simulator.tsx` | Aggiungere state `rawEntryDate`, passarlo come prop |
-| 2 | `Simulator.tsx:52-56` | In `handleDataLoaded`, impostare `rawEntryDate` solo se vuoto |
-| 2 | `StrategyBuilder.tsx` | Rimuovere state locale, accettare props `rawEntryDate`/`onRawEntryDateChange` |
+### Nessun altro file da modificare
+La funzione `recalculateMetrics` nel dialog ricostruisce un `OrderParseResult` e lo passa a `calculatePremiumMetrics`, che è l'unico punto dove le commissioni sono calcolate. Il fix è centralizzato.
 
