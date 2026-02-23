@@ -651,7 +651,8 @@ export function calculatePremiumMetrics(
   underlyingPrice: number = 0
 ): PremiumMetrics {
   const ordersFound = parseResult.filteredOrders.length;
-  const commissions = ordersFound * transactionCost;
+  const totalLots = parseResult.filteredOrders.reduce((sum, o) => sum + o.quantity, 0);
+  const commissions = totalLots * transactionCost;
   const netPremium = parseResult.netPremium - commissions;
   
   const totalShares = contractsInPortfolio * 100;
