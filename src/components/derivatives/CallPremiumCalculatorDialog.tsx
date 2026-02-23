@@ -465,7 +465,7 @@ export function CallPremiumCalculatorDialog({
                         {/* Transaction cost input */}
                         <div className="border-t pt-3 space-y-2">
                           <Label htmlFor="transactionCost" className="text-sm text-muted-foreground">
-                            Costo unitario transazione (USD)
+                            Commissione per lotto (USD)
                           </Label>
                           <Input
                             id="transactionCost"
