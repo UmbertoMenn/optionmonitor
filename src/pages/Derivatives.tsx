@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -106,6 +107,7 @@ export function Derivatives() {
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
+  const [includePutPremiums, setIncludePutPremiums] = useState(false);
 
   const derivatives = useMemo(() => 
     positions.filter(p => p.asset_type === 'derivative'),
@@ -252,6 +254,23 @@ export function Derivatives() {
   // Fetch underlying prices from Yahoo Finance
   const { prices: underlyingPrices, isLoading: isPricesLoading, missingCount, isFetchingMissing } = useUnderlyingPrices(allUnderlyingNames);
   
+  // Calculate naked put premiums by underlying for the CC toggle
+  const nakedPutPremiumsByUnderlying = useMemo(() => {
+    const result: Record<string, number> = {};
+    categories.nakedPuts.forEach(np => {
+      const underlying = np.option.underlying;
+      if (!underlying) return;
+      const ticker = underlyingPrices[underlying]?.ticker;
+      if (!ticker) return;
+      const optionSymbol = `NP_P${np.option.strike_price || 0}_${np.option.expiry_date || 'noexp'}`;
+      const saved = getPremiumByTickerAndSymbol(ticker, optionSymbol);
+      if (saved && saved.orders_json.length > 0) {
+        result[underlying] = (result[underlying] || 0) + saved.net_per_share;
+      }
+    });
+    return result;
+  }, [categories.nakedPuts, underlyingPrices, getPremiumByTickerAndSymbol]);
+
   // Track if we've saved the cache for the current portfolio + categories
   const lastSavedRef = useRef<string>('');
   
@@ -439,6 +458,10 @@ export function Derivatives() {
                     <Shield className="w-5 h-5 text-primary" />
                     <CardTitle className="text-xl">Covered Call</CardTitle>
                     <Badge variant="secondary" className="text-xs">{categories.coveredCalls.length}</Badge>
+                    <div className="flex items-center gap-2 ml-4" onClick={e => e.stopPropagation()}>
+                      <Switch checked={includePutPremiums} onCheckedChange={setIncludePutPremiums} />
+                      <span className="text-xs text-muted-foreground">Includi premi PUT</span>
+                    </div>
                   </div>
                   {coveredCallOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -472,6 +495,8 @@ export function Derivatives() {
                           ] || cc.contractsCovered
                         }
                         getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                        includePutPremiums={includePutPremiums}
+                        putPremiumForUnderlying={cc.option.underlying ? (nakedPutPremiumsByUnderlying[cc.option.underlying] || 0) : 0}
                       />
                     ))}
                   </div>
@@ -629,7 +654,7 @@ export function Derivatives() {
                 ) : (
                   <div className="space-y-1 overflow-x-auto">
                     {categories.nakedPuts.map((np, index) => (
-                      <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
+                      <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                     ))}
                   </div>
                 )}
@@ -736,9 +761,11 @@ interface CoveredCallRowProps extends RowPropsWithPrices {
   coveredCall: CoveredCallPosition;
   totalContractsForUnderlying: number;
   getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined;
+  includePutPremiums: boolean;
+  putPremiumForUnderlying: number;
 }
 
-function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying, getPremiumByTickerAndSymbol }: CoveredCallRowProps) {
+function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, underlyingPrices, totalContractsForUnderlying, getPremiumByTickerAndSymbol, includePutPremiums, putPremiumForUnderlying }: CoveredCallRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const { option, underlying, contractsCovered } = coveredCall;
@@ -778,7 +805,11 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
   
   // Get saved premium data for this specific option position
   const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
-  const netPerShare = savedPremium?.net_per_share;
+  const baseNetPerShare = savedPremium?.net_per_share;
+  // When PUT premiums toggle is active, add PUT premiums to the UNIT value
+  const netPerShare = baseNetPerShare !== undefined 
+    ? (includePutPremiums ? baseNetPerShare + putPremiumForUnderlying : baseNetPerShare)
+    : (includePutPremiums && putPremiumForUnderlying !== 0 ? putPremiumForUnderlying : undefined);
   
   return (
     <>
@@ -905,7 +936,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Netto unitario premi CALL (dalla calcolatrice)</p>
+                <p>{includePutPremiums ? 'Netto unitario premi CALL + PUT (dalla calcolatrice)' : 'Netto unitario premi CALL (dalla calcolatrice)'}</p>
               </TooltipContent>
             </Tooltip>
             
@@ -2253,17 +2284,15 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
   );
 }
 
-function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underlyingPrices }: { nakedPut: NakedPutPosition } & RowPropsWithPrices) {
+function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underlyingPrices, getPremiumByTickerAndSymbol }: { nakedPut: NakedPutPosition; getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
   const { option, underlying, contracts } = nakedPut;
   
   const hasOverride = !!getOverrideForPosition(option.id);
   
   // Calculate ITM/OTM status for PUT options
-  // PUT is ITM when underlying price < strike price (you can sell at higher than market)
-  // PUT is OTM when underlying price > strike price
   const strikePrice = option.strike_price || 0;
-  // Get underlying price from live Yahoo data (updated every 5 min by cron)
   const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;
   const hasUnderlyingPrice = underlyingPrice > 0;
   const isITM = hasUnderlyingPrice && underlyingPrice < strikePrice;
@@ -2272,142 +2301,219 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
   const avgCost = option.avg_cost || 0;
   const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
   
+  // Get ticker for calculator
+  const ticker = option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined;
+  
+  // Derive option_symbol for naked put
+  const optionSymbol = `NP_P${option.strike_price || 0}_${option.expiry_date || 'noexp'}`;
+  
+  // Get saved premium data
+  const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
+  const netPerShare = savedPremium?.net_per_share;
+  
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div 
-        role="button"
-        tabIndex={0}
-        onClick={() => setIsOpen(!isOpen)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[800px]"
-      >
-          {/* Col 1: Chevron */}
-          {isOpen ? (
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          )}
-          
-          {/* Col 2: V Badge */}
-          <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
-          
-          {/* Col 3: Descrizione */}
-          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
-          
-          {/* Col 4: OptionStrat */}
-          <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildNakedPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
-          
-          {/* Col 5: ITM/OTM */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge 
-                variant="outline"
-                className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{!hasUnderlyingPrice ? 'Prezzo sottostante non disponibile' : isITM ? 'In The Money: il sottostante è sotto lo strike' : 'Out of The Money: il sottostante è sopra lo strike'}</p>
-            </TooltipContent>
-          </Tooltip>
-          
-          {/* Col 6: Override Badge */}
-          <div className="flex items-center">
-            {hasOverride && <OverrideBadge />}
-          </div>
-          
-          {/* Col 7: Menu */}
-          <MoveOptionMenu 
-            option={option} 
-            availableStocks={stockPositions} 
-            currentCategory="naked_put" 
-          />
-          
-          {/* Col 7: PS */}
-          <div className="text-right flex items-center justify-end">
-            {hasUnderlyingPrice ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Prezzo Sottostante</p>
-                  </TooltipContent>
-                </Tooltip>
-                {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
-                  <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-                )}
-              </>
+    <>
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <div 
+          role="button"
+          tabIndex={0}
+          onClick={() => setIsOpen(!isOpen)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+          className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_2rem_8rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[1000px]"
+        >
+            {/* Col 1: Chevron */}
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
             ) : (
-              <span className="text-sm text-muted-foreground">-</span>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
             )}
-          </div>
-          
-          {/* Col 8: Contratti */}
-          <span className="text-sm text-muted-foreground text-right">
-            {contracts} × 100
-          </span>
-          
-          {/* Col 9: PMC */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Prezzo Medio di Carico Opzione</p>
-            </TooltipContent>
-          </Tooltip>
-          
-          {/* Col 10: Prezzo */}
-          <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-            <span className="font-semibold text-sm">
-              {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
+            
+            {/* Col 2: V Badge */}
+            <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
+            
+            {/* Col 3: Descrizione */}
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            
+            {/* Col 4: OptionStrat */}
+            <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildNakedPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
+            
+            {/* Col 5: ITM/OTM */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge 
+                  variant="outline"
+                  className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{!hasUnderlyingPrice ? 'Prezzo sottostante non disponibile' : isITM ? 'In The Money: il sottostante è sotto lo strike' : 'Out of The Money: il sottostante è sopra lo strike'}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 6: Override Badge */}
+            <div className="flex items-center">
+              {hasOverride && <OverrideBadge />}
+            </div>
+            
+            {/* Col 7: Menu */}
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="naked_put" 
+            />
+            
+            {/* Col 8: Calculator */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-7 w-7 ${
+                    savedPremium && savedPremium.orders_json.length > 0
+                      ? 'text-primary hover:text-primary hover:bg-primary/20'
+                      : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCalculator(true);
+                  }}
+                >
+                  <Calculator className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Calcola flussi di cassa PUT</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 9: UNIT */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span 
+                  className={`text-sm text-right cursor-help font-medium whitespace-nowrap ${
+                    netPerShare !== undefined 
+                      ? netPerShare >= 0 
+                        ? 'text-green-500' 
+                        : 'text-red-500'
+                      : 'text-muted-foreground'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {netPerShare !== undefined 
+                    ? <>
+                        UNIT: {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
+                          <span className="text-muted-foreground">
+                            ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
+                          </span>
+                        )}
+                      </>
+                    : '-'
+                  }
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Netto unitario flussi di cassa PUT (dalla calcolatrice)</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 10: PS */}
+            <div className="text-right flex items-center justify-end">
+              {hasUnderlyingPrice ? (
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                        PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Prezzo Sottostante</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
+                    <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
+                  )}
+                </>
+              ) : (
+                <span className="text-sm text-muted-foreground">-</span>
+              )}
+            </div>
+            
+            {/* Col 11: Contratti */}
+            <span className="text-sm text-muted-foreground text-right">
+              {contracts} × 100
             </span>
-            {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
-              <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
-            )}
-            {priceChangePct !== null && (
-              <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+            
+            {/* Col 11: PMC */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                  {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Medio di Carico Opzione</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 12: Prezzo */}
+            <div className="flex items-center gap-1 justify-end whitespace-nowrap">
+              <span className="font-semibold text-sm">
+                {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
               </span>
+              {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
+                <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+              )}
+              {priceChangePct !== null && (
+                <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+        </div>
+        <CollapsibleContent>
+          <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground text-xs">Sottostante</p>
+                <p className="font-medium">{option.underlying || option.description}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Strike</p>
+                <p className="font-medium">{option.strike_price}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Scadenza</p>
+                <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
+                <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
+              </div>
+            </div>
+            {option.profit_loss_pct !== null && (
+              <div className="text-xs text-muted-foreground">
+                P/L: {formatPercentage(option.profit_loss_pct)}
+              </div>
             )}
           </div>
-      </div>
-      <CollapsibleContent>
-        <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground text-xs">Sottostante</p>
-              <p className="font-medium">{option.underlying || option.description}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Strike</p>
-              <p className="font-medium">{option.strike_price}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Scadenza</p>
-              <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground text-xs">Prezzo Opzione</p>
-              <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
-            </div>
-          </div>
-          {option.profit_loss_pct !== null && (
-            <div className="text-xs text-muted-foreground">
-              P/L: {formatPercentage(option.profit_loss_pct)}
-            </div>
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+        </CollapsibleContent>
+      </Collapsible>
+      
+      <CallPremiumCalculatorDialog
+        open={showCalculator}
+        onOpenChange={setShowCalculator}
+        underlying={option.underlying || option.description || ''}
+        ticker={ticker}
+        optionSymbol={optionSymbol}
+        contractsInPortfolio={contracts}
+        underlyingPrice={underlyingPrice}
+        strategyType="other_strategy"
+      />
+    </>
   );
 }
 

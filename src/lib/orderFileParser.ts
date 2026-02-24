@@ -628,6 +628,119 @@ export function filterAndCalculateCallPremiums(
 }
 
 /**
+ * Extract expiry date from option symbol (e.g., "UBERG6P95" -> month code G=Jul, year 6=2026)
+ * Month codes: A=Jan, B=Feb, C=Mar, D=Apr, E=May, F=Jun, G=Jul, H=Aug, I=Sep, J=Oct, K=Nov, L=Dec
+ */
+function extractExpiryFromSymbol(symbol: string): string | null {
+  const monthCodes: Record<string, string> = {
+    A: '01', B: '02', C: '03', D: '04', E: '05', F: '06',
+    G: '07', H: '08', I: '09', J: '10', K: '11', L: '12',
+  };
+  // Pattern: TICKER + MONTH_LETTER + YEAR_DIGIT + C/P + STRIKE
+  const match = symbol.match(/[A-Z]{1,5}([A-L])(\d)[CP]\d/i);
+  if (match) {
+    const month = monthCodes[match[1].toUpperCase()];
+    const year = 2020 + parseInt(match[2]);
+    if (month) return `${year}-${month}-21`; // Third Friday approximation
+  }
+  return null;
+}
+
+/**
+ * Filter orders for a specific ticker's PUT options and calculate premiums.
+ * Excludes protection PUTs:
+ * 1. Buy-only symbols (pure protection bought)
+ * 2. Symbols with anomalous expiry (>6 months from median → likely LEAP protection closed)
+ */
+export function filterAndCalculatePutPremiums(
+  orders: ParsedOrder[],
+  ticker: string,
+  referenceExpiry?: string
+): OrderParseResult {
+  // Step 1: Filter for executed PUT orders matching the ticker
+  const baseFiltered = orders.filter(order => {
+    const isExecuted = order.status.toLowerCase() === 'eseguito';
+    const isPut = order.optionType === 'PUT';
+    const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
+    return isExecuted && isPut && matchesTicker;
+  });
+  
+  // Step 2: Identify symbols that have at least one sell (Naked Put or rolling)
+  const symbolsWithSells = new Set<string>();
+  for (const order of baseFiltered) {
+    if (order.operation === 'sell') {
+      symbolsWithSells.add(order.symbol);
+    }
+  }
+  
+  // Step 3: Filter out buy-only PUTs (pure protections)
+  let filteredOrders = baseFiltered.filter(order => {
+    if (symbolsWithSells.has(order.symbol)) {
+      return true;
+    }
+    if (import.meta.env.DEV) {
+      console.log(`[PUT filter] Excluded buy-only PUT ${order.symbol}`);
+    }
+    return false;
+  });
+  
+  // Step 4: If referenceExpiry provided, exclude symbols with anomalous expiry
+  // (bought and sold but with expiry >> median → protection closed)
+  if (referenceExpiry) {
+    const refDate = new Date(referenceExpiry);
+    const sixMonthsMs = 6 * 30 * 24 * 60 * 60 * 1000;
+    const anomalousSymbols = new Set<string>();
+    
+    // Collect unique symbols and their expiries
+    const symbolExpiries = new Map<string, string>();
+    for (const order of filteredOrders) {
+      if (!symbolExpiries.has(order.symbol)) {
+        const expiry = extractExpiryFromSymbol(order.symbol) || (order.expiryDate ? toIsoDateFromIT(order.expiryDate) : null);
+        if (expiry) symbolExpiries.set(order.symbol, expiry);
+      }
+    }
+    
+    for (const [sym, expiry] of symbolExpiries) {
+      const expiryDate = new Date(expiry);
+      if (expiryDate.getTime() - refDate.getTime() > sixMonthsMs) {
+        anomalousSymbols.add(sym);
+        if (import.meta.env.DEV) {
+          console.log(`[PUT filter] Excluded anomalous expiry PUT ${sym} (expiry ${expiry} vs ref ${referenceExpiry})`);
+        }
+      }
+    }
+    filteredOrders = filteredOrders.filter(o => !anomalousSymbols.has(o.symbol));
+  }
+  
+  // Step 5: Calculate premiums
+  let totalBuys = 0;
+  let totalSells = 0;
+  let netPremium = 0;
+  
+  filteredOrders.forEach(order => {
+    if (order.operation === 'sell') {
+      totalSells++;
+      netPremium += order.orderValue;
+    } else {
+      totalBuys++;
+      netPremium -= order.orderValue;
+    }
+  });
+  
+  const firstOperationDate = findFirstOperationDate(filteredOrders.map(o => o.validityDate));
+  
+  return {
+    allOrders: orders,
+    filteredOrders,
+    totalBuys,
+    totalSells,
+    netPremium,
+    grossPremium: netPremium,
+    firstOperationDate,
+  };
+}
+
+/**
  * Calculate premium metrics
  */
 export interface PremiumMetrics {
