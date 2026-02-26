@@ -30,7 +30,7 @@ import { formatNumber } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
-type TimeRange = '1Y' | '2Y' | '3Y' | 'MAX';
+type TimeRange = '1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX';
 
 interface PerformanceEvolutionChartProps {
   historicalData: HistoricalDataEntry[];
@@ -228,7 +228,7 @@ function CustomLegend({
       <div className="flex items-center gap-3">
         {/* Time range selector */}
         <div className="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
-          {(['1Y', '2Y', '3Y', 'MAX'] as const).map((range) => (
+          {(['1M', '3M', '6M', '1Y', '2Y', '3Y', 'MAX'] as const).map((range) => (
             <button
               key={range}
               onClick={() => onTimeRangeChange(range)}
@@ -323,8 +323,16 @@ export function PerformanceEvolutionChart({
     if (timeRange === 'MAX') return historicalData;
     
     const now = new Date();
-    const years = timeRange === '1Y' ? 1 : timeRange === '2Y' ? 2 : 3;
-    const cutoffDate = new Date(now.getFullYear() - years, now.getMonth(), now.getDate());
+    let cutoffDate: Date;
+    switch (timeRange) {
+      case '1M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()); break;
+      case '3M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
+      case '6M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()); break;
+      case '1Y': cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+      case '2Y': cutoffDate = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()); break;
+      case '3Y': cutoffDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()); break;
+      default: cutoffDate = new Date(0); break;
+    }
     
     return historicalData.filter(entry => 
       new Date(entry.snapshot_date) >= cutoffDate
@@ -367,8 +375,16 @@ export function PerformanceEvolutionChart({
     if (timeRange === 'MAX') return deposits;
     
     const now = new Date();
-    const years = timeRange === '1Y' ? 1 : timeRange === '2Y' ? 2 : 3;
-    const cutoffDate = new Date(now.getFullYear() - years, now.getMonth(), now.getDate());
+    let cutoffDate: Date;
+    switch (timeRange) {
+      case '1M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()); break;
+      case '3M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
+      case '6M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()); break;
+      case '1Y': cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+      case '2Y': cutoffDate = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()); break;
+      case '3Y': cutoffDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()); break;
+      default: cutoffDate = new Date(0); break;
+    }
     
     return deposits.filter(d => new Date(d.deposit_date) >= cutoffDate);
   }, [deposits, timeRange]);
