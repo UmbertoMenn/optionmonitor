@@ -1,107 +1,43 @@
 
 
-## Piano: Filtro direzione sugli avvisi di distanza
+## Piano: Asse X lineare nel tempo + etichette sintetiche
 
-### Il problema
+### Problema
+Entrambi i grafici (PerformanceEvolutionChart e PortfolioEvolutionChart) usano `type="category"` sull'asse X, che distribuisce i punti in modo equidistante indipendentemente dalla distanza temporale reale. Inoltre `interval={0}` mostra tutte le etichette, illeggibili con molti datapoint (es. aggregato).
 
-Scenario con Naked Put (strike = 100, soglia distanza = 2%):
+### Soluzione
+Passare a `type="number"` con un campo `timestamp` (epoch ms) come `dataKey` dell'asse X. Questo distribuisce i punti proporzionalmente al tempo reale. Per le etichette, usare un `tickFormatter` che converte il timestamp in data leggibile e limitare il numero di tick con una funzione che calcola `ticks` appropriati in base al range temporale.
 
-```text
-Prezzo  Stato ITM    Stato distanza   Cosa succede
-─────── ──────────── ──────────────── ──────────────────────────
- 105    safe         safe             Tutto ok
-  95    → alerted    safe (reset)     Avviso ITM inviato ✓
-  90    alerted      safe             Prezzo ancora giù
- 101    → safe       safe             ITM si resetta a safe
-                                      Distanza = 1% < 2%
-                                      Stato dist = safe
-                                      → AVVISO SPURIO: "si avvicina allo strike" ✗
-```
+### Modifiche
 
-Il prezzo sta **risalendo** (allontanandosi dal pericolo), ma l'avviso scatta lo stesso perché la state machine non sa da che direzione arriva il prezzo.
+**File 1: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
+1. Aggiungere campo `timestamp: number` (epoch ms) a `ChartDataPoint`
+2. Popolare `timestamp` con `new Date(entry.snapshot_date).getTime()` in `chartData`
+3. Modificare XAxis:
+   - `dataKey="timestamp"` + `type="number"` + `domain={['dataMin', 'dataMax']}`
+   - `scale="time"` rimosso (usiamo number puro)
+   - `tickFormatter` che formatta timestamp → `"MMM ''yy"` (es. "Gen '25")
+   - `ticks` calcolati: ~5-7 tick equidistanti nel range temporale
+   - Rimuovere `interval={0}`
+4. Tooltip `labelFormatter`: riceve il timestamp, formattare come `"dd MMM ''yy"`
 
-### La soluzione (zero modifiche allo schema)
+**File 2: `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`**
+1. Stesse modifiche: aggiungere `timestamp`, cambiare XAxis a `type="number"`, tick formatter, ticks calcolati
+2. Tooltip `labelFormatter`: formattare timestamp → data leggibile
 
-La fix è puramente logica dentro la state machine esistente: **quando uno stato critico (ITM/OOR) passa da `alerted` → `safe`, pre-impostare lo stato di distanza corrispondente a `alerted`** invece che `safe`.
-
-Questo significa che:
-- L'avviso di distanza **non scatterà** durante il ritorno dal lato pericoloso
-- Lo stato di distanza si resetterà a `safe` **solo quando il prezzo si allontana oltre la soglia** (cioè esce dalla zona di pericolo)
-- Solo a quel punto, un **nuovo avvicinamento genuino** potrà generare un avviso
-
-```text
-Prezzo  Stato ITM    Stato distanza   Cosa succede (con fix)
-─────── ──────────── ──────────────── ──────────────────────────
- 105    safe         safe             Tutto ok
-  95    → alerted    safe (reset)     Avviso ITM ✓
-  90    alerted      safe             Ancora ITM
- 101    → safe       → alerted (!)    ITM resettato; distanza PRE-SETTATA
-                                      a "alerted" → NESSUN avviso spurio ✓
- 104    safe         → safe           Prezzo oltre soglia, distanza resettata
-  98    safe         → alerted        Genuino avvicinamento: avviso ✓
-```
-
-### Modifiche tecniche
-
-**Unico file: `supabase/functions/check-alerts/index.ts`**
-
-Ci sono 6 punti nel codice dove uno stato critico passa da `alerted` → `safe`. In ognuno di questi, aggiungo un upsert che imposta lo stato di distanza corrispondente a `alerted`:
-
-1. **Covered Call ITM → safe** (riga ~496-500): pre-settare `cc_dist_` a `alerted`
-2. **Naked Put ITM → safe** (riga ~607-611): pre-settare `np_dist_` a `alerted`
-3. **Iron Condor OOR → safe** (riga ~722-726): pre-settare `ic_put_dist_` e `ic_call_dist_` a `alerted`
-4. **Double Diagonal OOR → safe** (riga ~894-898): pre-settare `dd_put_dist_` e `dd_call_dist_` a `alerted`
-
-Inoltre, **rimuovere** i blocchi che resettano la distanza a `safe` quando la posizione è ITM/OOR (righe ~548-558, ~659-669, ~774-784, ~831-841, e i corrispondenti per DD). Questi blocchi sono controproducenti: resettano lo stato di distanza a `safe` durante l'ITM, preparando il terreno per l'avviso spurio al ritorno.
-
-### Esempio di codice per Naked Put
-
+### Funzione helper per calcolo ticks
 ```typescript
-// PRIMA (riga ~607-611):
-} else if (!isITM && currentState?.current_state === 'alerted') {
-  await supabase.from('alert_states')
-    .update({ current_state: 'safe' })
-    .eq('id', currentState.id);
-}
-
-// DOPO:
-} else if (!isITM && currentState?.current_state === 'alerted') {
-  // Reset ITM state to safe
-  await supabase.from('alert_states')
-    .update({ current_state: 'safe' })
-    .eq('id', currentState.id);
-  
-  // Pre-set distance state to 'alerted' to suppress spurious alert
-  // during recovery from ITM side
-  const distPositionKey = `np_dist_${strategy.strategy_key}`;
-  await supabase.from('alert_states').upsert({
-    user_id: userId,
-    portfolio_id: portfolioId,
-    position_key: distPositionKey,
-    alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
-    current_state: 'alerted',
-    last_alerted_at: new Date().toISOString(),
-  }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
+function computeTimeTicks(data: { timestamp: number }[], maxTicks = 6): number[] {
+  if (data.length <= maxTicks) return data.map(d => d.timestamp);
+  const min = data[0].timestamp;
+  const max = data[data.length - 1].timestamp;
+  const step = (max - min) / (maxTicks - 1);
+  return Array.from({ length: maxTicks }, (_, i) => min + step * i);
 }
 ```
 
-E **rimuovere** il blocco "Reset distance alert state to 'safe' when ITM":
-
-```typescript
-// RIMUOVERE (riga ~659-669):
-} else if (isITM) {
-  const distPositionKey = `np_dist_${strategy.strategy_key}`;
-  // ... reset to safe ...
-}
-```
-
-### Riepilogo
-
-| Aspetto | Dettaglio |
-|---------|-----------|
-| File modificato | `supabase/functions/check-alerts/index.ts` |
-| Schema DB | Nessuna modifica |
-| Logica | Pre-set distanza a `alerted` al recovery da ITM/OOR |
-| Strategia coperte | Covered Call, Naked Put, Iron Condor (PUT+CALL), Double Diagonal (PUT+CALL) |
-| Effetto collaterale | L'avviso di distanza scatterà solo per avvicinamenti genuini dal lato sicuro |
+Questo garantisce:
+- Spaziatura proporzionale al tempo reale
+- Max ~6 etichette leggibili anche con 100+ datapoint (aggregato)
+- Formato compatto "Gen '25" per le etichette asse
 
