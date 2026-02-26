@@ -1,49 +1,29 @@
 
 
-## Piano aggiornato: Riduzione punti + normalizzazione curva
-
-### Problema completo
-Con molti snapshot: (1) troppi dot visibili, (2) la curva stessa è frastagliata perché passa per ogni singolo punto, creando un andamento erratico.
-
-### Soluzione: downsampling dei dati del grafico
-
-Invece di passare tutti i punti a Recharts e nascondere solo i dot, **ridurre i datapoint stessi** passati al grafico. Questo normalizza la curva perché Recharts interpola con `type="monotone"` solo tra i punti forniti.
-
-**Algoritmo di downsampling (Largest-Triangle-Three-Buckets - semplificato):**
-- Se i punti sono ≤ `maxPoints` (es. 30): usa tutti
-- Altrimenti: mantieni sempre primo e ultimo, seleziona ~28 punti intermedi equidistanti nel tempo
-- Il punto `isCurrent` viene sempre preservato
-
-```typescript
-function downsampleData<T extends { timestamp: number }>(
-  data: T[], 
-  maxPoints = 30
-): T[] {
-  if (data.length <= maxPoints) return data;
-  const first = data[0];
-  const last = data[data.length - 1];
-  const step = (data.length - 2) / (maxPoints - 2);
-  const result: T[] = [first];
-  for (let i = 1; i < maxPoints - 1; i++) {
-    result.push(data[Math.round(i * step)]);
-  }
-  result.push(last);
-  return result;
-}
-```
+## Piano: Aggiungere filtri temporali 1M, 3M, 6M
 
 ### Modifiche
 
-**File 1: `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`**
-1. Aggiungere funzione `downsampleData`
-2. Nel `useMemo` di `chartData`, applicare il downsampling **dopo** l'ordinamento, preservando il punto `isCurrent`
-3. Ridurre i dot: mostrare dot solo su primo, ultimo e `isCurrent`; gli altri punti intermedi senza dot (restituire `<circle r={0} />`)
+**File: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
 
-**File 2: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
-1. Stessa funzione `downsampleData` 
-2. Applicare al `chartData` nel `useMemo` prima del return
-3. Dot della linea principale: funzione che mostra dot solo su primo/ultimo, nasconde gli intermedi
-4. Dot della linea benchmark: stessa logica
+1. **Tipo TimeRange** (riga 33): estendere da `'1Y' | '2Y' | '3Y' | 'MAX'` a `'1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX'`
 
-**Parametri:** `maxPoints = 30` — abbastanza punti per una curva morbida, pochi abbastanza per evitare l'effetto erratico.
+2. **Bottoni selettore** (riga 231): aggiungere `'1M', '3M', '6M'` all'array dei range
+
+3. **Filtro dati storici** (righe 322-332): aggiornare la logica di calcolo `cutoffDate` per gestire mesi:
+   ```typescript
+   if (timeRange === 'MAX') return historicalData;
+   const now = new Date();
+   let cutoffDate: Date;
+   switch (timeRange) {
+     case '1M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()); break;
+     case '3M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
+     case '6M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()); break;
+     case '1Y': cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+     case '2Y': cutoffDate = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()); break;
+     case '3Y': cutoffDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()); break;
+   }
+   ```
+
+4. **Filtro depositi** (righe 366-374): stessa logica switch per il cutoff dei depositi
 
