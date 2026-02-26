@@ -45,9 +45,27 @@ interface PortfolioEvolutionChartProps {
 
 interface ChartDataPoint {
   date: string;
+  timestamp: number;
   formattedDate: string;
   value: number;
   isCurrent?: boolean;
+}
+
+function computeTimeTicks(data: { timestamp: number }[], maxTicks = 6): number[] {
+  if (data.length === 0) return [];
+  if (data.length <= maxTicks) return data.map(d => d.timestamp);
+  const min = data[0].timestamp;
+  const max = data[data.length - 1].timestamp;
+  const step = (max - min) / (maxTicks - 1);
+  return Array.from({ length: maxTicks }, (_, i) => min + step * i);
+}
+
+function formatTickDate(timestamp: number): string {
+  return format(new Date(timestamp), "MMM ''yy", { locale: it });
+}
+
+function formatTooltipDate(timestamp: number): string {
+  return format(new Date(timestamp), "dd MMM ''yy", { locale: it });
 }
 
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
@@ -93,6 +111,7 @@ export function PortfolioEvolutionChart({
 
     const data: ChartDataPoint[] = sorted.map((entry) => ({
       date: entry.snapshot_date,
+      timestamp: new Date(entry.snapshot_date).getTime(),
       formattedDate: format(parseISO(entry.snapshot_date), "dd MMM ''yy", { locale: it }),
       value: getValueForViewMode(entry, viewMode),
     }));
@@ -101,6 +120,7 @@ export function PortfolioEvolutionChart({
     if (canAppendCurrent && currentDate && !data.some(d => d.date === currentDate)) {
       data.push({
         date: currentDate,
+        timestamp: new Date(currentDate).getTime(),
         formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
         value: currentValue,
         isCurrent: true,
@@ -137,12 +157,14 @@ export function PortfolioEvolutionChart({
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
         <XAxis
-          dataKey="formattedDate"
+          dataKey="timestamp"
+          type="number"
+          domain={['dataMin', 'dataMax']}
+          ticks={computeTimeTicks(chartData)}
+          tickFormatter={formatTickDate}
           tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
           tickLine={false}
           axisLine={{ stroke: 'hsl(var(--border))' }}
-          interval={0}
-          type="category"
         />
         <YAxis
           domain={[minValue - padding, maxValue + padding]}
@@ -160,7 +182,7 @@ export function PortfolioEvolutionChart({
             fontSize: '12px',
           }}
           formatter={(value: number) => [formatCurrency(value), 'Patrimonio']}
-          labelFormatter={(label) => `Data: ${label}`}
+          labelFormatter={(ts: number) => `Data: ${formatTooltipDate(ts)}`}
         />
         <Area
           type="monotone"

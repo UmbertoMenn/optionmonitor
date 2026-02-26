@@ -42,6 +42,7 @@ interface PerformanceEvolutionChartProps {
 
 interface ChartDataPoint {
   date: string;
+  timestamp: number;
   formattedDate: string;
   value: number;
   returnPct: number;
@@ -53,6 +54,23 @@ interface ChartDataPoint {
   benchmarkEquityPctUsed?: number;
   benchmarkEurusdVariation?: number;
   benchmarkUsdPctUsed?: number;
+}
+
+function computeTimeTicks(data: { timestamp: number }[], maxTicks = 6): number[] {
+  if (data.length === 0) return [];
+  if (data.length <= maxTicks) return data.map(d => d.timestamp);
+  const min = data[0].timestamp;
+  const max = data[data.length - 1].timestamp;
+  const step = (max - min) / (maxTicks - 1);
+  return Array.from({ length: maxTicks }, (_, i) => min + step * i);
+}
+
+function formatTickDate(timestamp: number): string {
+  return format(new Date(timestamp), "MMM ''yy", { locale: it });
+}
+
+function formatTooltipDate(timestamp: number): string {
+  return format(new Date(timestamp), "dd MMM ''yy", { locale: it });
 }
 
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
@@ -404,6 +422,7 @@ export function PerformanceEvolutionChart({
       const bm = benchmarkByDate[entry.snapshot_date];
       return {
         date: entry.snapshot_date,
+        timestamp: snapshotDate.getTime(),
         formattedDate: format(parseISO(entry.snapshot_date), "dd MMM ''yy", { locale: it }),
         value,
         returnPct,
@@ -434,6 +453,7 @@ export function PerformanceEvolutionChart({
       const bmCurrent = benchmarkByDate[currentDate];
       data.push({
         date: currentDate,
+        timestamp: new Date(currentDate).getTime(),
         formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
         value: currentValue,
         returnPct,
@@ -492,12 +512,14 @@ export function PerformanceEvolutionChart({
           <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
             <XAxis
-              dataKey="formattedDate"
+              dataKey="timestamp"
+              type="number"
+              domain={['dataMin', 'dataMax']}
+              ticks={computeTimeTicks(chartData)}
+              tickFormatter={formatTickDate}
               tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
               tickLine={false}
               axisLine={{ stroke: 'hsl(var(--border))' }}
-              interval={0}
-              type="category"
             />
             <YAxis
               tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
@@ -536,7 +558,7 @@ export function PerformanceEvolutionChart({
 
                 return (
                   <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
-                    <p className="text-foreground font-medium text-sm mb-2">Data: {label}</p>
+                    <p className="text-foreground font-medium text-sm mb-2">Data: {formatTooltipDate(label as number)}</p>
                     
                     {/* Portfolio return */}
                     <div className="flex items-center gap-2 mb-1">
