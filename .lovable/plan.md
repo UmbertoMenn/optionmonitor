@@ -1,43 +1,49 @@
 
 
-## Piano: Asse X lineare nel tempo + etichette sintetiche
+## Piano aggiornato: Riduzione punti + normalizzazione curva
 
-### Problema
-Entrambi i grafici (PerformanceEvolutionChart e PortfolioEvolutionChart) usano `type="category"` sull'asse X, che distribuisce i punti in modo equidistante indipendentemente dalla distanza temporale reale. Inoltre `interval={0}` mostra tutte le etichette, illeggibili con molti datapoint (es. aggregato).
+### Problema completo
+Con molti snapshot: (1) troppi dot visibili, (2) la curva stessa è frastagliata perché passa per ogni singolo punto, creando un andamento erratico.
 
-### Soluzione
-Passare a `type="number"` con un campo `timestamp` (epoch ms) come `dataKey` dell'asse X. Questo distribuisce i punti proporzionalmente al tempo reale. Per le etichette, usare un `tickFormatter` che converte il timestamp in data leggibile e limitare il numero di tick con una funzione che calcola `ticks` appropriati in base al range temporale.
+### Soluzione: downsampling dei dati del grafico
 
-### Modifiche
+Invece di passare tutti i punti a Recharts e nascondere solo i dot, **ridurre i datapoint stessi** passati al grafico. Questo normalizza la curva perché Recharts interpola con `type="monotone"` solo tra i punti forniti.
 
-**File 1: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
-1. Aggiungere campo `timestamp: number` (epoch ms) a `ChartDataPoint`
-2. Popolare `timestamp` con `new Date(entry.snapshot_date).getTime()` in `chartData`
-3. Modificare XAxis:
-   - `dataKey="timestamp"` + `type="number"` + `domain={['dataMin', 'dataMax']}`
-   - `scale="time"` rimosso (usiamo number puro)
-   - `tickFormatter` che formatta timestamp → `"MMM ''yy"` (es. "Gen '25")
-   - `ticks` calcolati: ~5-7 tick equidistanti nel range temporale
-   - Rimuovere `interval={0}`
-4. Tooltip `labelFormatter`: riceve il timestamp, formattare come `"dd MMM ''yy"`
+**Algoritmo di downsampling (Largest-Triangle-Three-Buckets - semplificato):**
+- Se i punti sono ≤ `maxPoints` (es. 30): usa tutti
+- Altrimenti: mantieni sempre primo e ultimo, seleziona ~28 punti intermedi equidistanti nel tempo
+- Il punto `isCurrent` viene sempre preservato
 
-**File 2: `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`**
-1. Stesse modifiche: aggiungere `timestamp`, cambiare XAxis a `type="number"`, tick formatter, ticks calcolati
-2. Tooltip `labelFormatter`: formattare timestamp → data leggibile
-
-### Funzione helper per calcolo ticks
 ```typescript
-function computeTimeTicks(data: { timestamp: number }[], maxTicks = 6): number[] {
-  if (data.length <= maxTicks) return data.map(d => d.timestamp);
-  const min = data[0].timestamp;
-  const max = data[data.length - 1].timestamp;
-  const step = (max - min) / (maxTicks - 1);
-  return Array.from({ length: maxTicks }, (_, i) => min + step * i);
+function downsampleData<T extends { timestamp: number }>(
+  data: T[], 
+  maxPoints = 30
+): T[] {
+  if (data.length <= maxPoints) return data;
+  const first = data[0];
+  const last = data[data.length - 1];
+  const step = (data.length - 2) / (maxPoints - 2);
+  const result: T[] = [first];
+  for (let i = 1; i < maxPoints - 1; i++) {
+    result.push(data[Math.round(i * step)]);
+  }
+  result.push(last);
+  return result;
 }
 ```
 
-Questo garantisce:
-- Spaziatura proporzionale al tempo reale
-- Max ~6 etichette leggibili anche con 100+ datapoint (aggregato)
-- Formato compatto "Gen '25" per le etichette asse
+### Modifiche
+
+**File 1: `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`**
+1. Aggiungere funzione `downsampleData`
+2. Nel `useMemo` di `chartData`, applicare il downsampling **dopo** l'ordinamento, preservando il punto `isCurrent`
+3. Ridurre i dot: mostrare dot solo su primo, ultimo e `isCurrent`; gli altri punti intermedi senza dot (restituire `<circle r={0} />`)
+
+**File 2: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
+1. Stessa funzione `downsampleData` 
+2. Applicare al `chartData` nel `useMemo` prima del return
+3. Dot della linea principale: funzione che mostra dot solo su primo/ultimo, nasconde gli intermedi
+4. Dot della linea benchmark: stessa logica
+
+**Parametri:** `maxPoints = 30` — abbastanza punti per una curva morbida, pochi abbastanza per evitare l'effetto erratico.
 
