@@ -9,17 +9,9 @@ import { ViewMode } from './ViewModeSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
-import { differenceInDays, parseISO, format, getYear } from 'date-fns';
+import { differenceInDays, parseISO, format } from 'date-fns';
 import { it } from 'date-fns/locale';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectLabel,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { DateSelectorDual } from './DateSelectorDual';
 
 interface StatsCardsProps {
   summary: PortfolioSummary;
@@ -403,39 +395,11 @@ export function StatsCards({
               )}
               
               {'hasDateSelector' in stat && stat.hasDateSelector && (
-                <div className="mt-2">
-                  <Select
-                    value={selectedHistoricalDate || 'none'}
-                    onValueChange={(value) => onHistoricalDateChange(value === 'none' ? null : value)}
-                  >
-                    <SelectTrigger className="h-7 text-xs">
-                      <Calendar className="w-3 h-3 mr-1" />
-                      <SelectValue placeholder="Data riferimento" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[250px] overflow-y-auto">
-                      <SelectItem value="none">Nessuna data</SelectItem>
-                      {(() => {
-                        const grouped = historicalData.reduce((acc, entry) => {
-                          const year = getYear(new Date(entry.snapshot_date));
-                          if (!acc[year]) acc[year] = [];
-                          acc[year].push(entry);
-                          return acc;
-                        }, {} as Record<number, typeof historicalData>);
-                        const years = Object.keys(grouped).map(Number).sort((a, b) => b - a);
-                        return years.map(year => (
-                          <SelectGroup key={year}>
-                            <SelectLabel className="text-xs text-muted-foreground">── {year} ──</SelectLabel>
-                            {grouped[year].map((entry) => (
-                              <SelectItem key={entry.id} value={entry.snapshot_date}>
-                                {format(new Date(entry.snapshot_date), 'dd MMM', { locale: it })}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ));
-                      })()}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <DateSelectorDual
+                  historicalData={historicalData}
+                  selectedDate={selectedHistoricalDate}
+                  onDateChange={onHistoricalDateChange}
+                />
               )}
             </div>
             <div className={cn(
