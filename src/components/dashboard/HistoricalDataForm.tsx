@@ -203,16 +203,18 @@ export function HistoricalDataForm({
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
                 {(() => {
                   const grouped = historicalData.reduce((acc, entry) => {
-                    const year = new Date(entry.snapshot_date).getFullYear();
-                    if (!acc[year]) acc[year] = [];
-                    acc[year].push(entry);
+                    const monthKey = format(new Date(entry.snapshot_date), 'yyyy-MM');
+                    if (!acc[monthKey]) acc[monthKey] = [];
+                    acc[monthKey].push(entry);
                     return acc;
-                  }, {} as Record<number, typeof historicalData>);
-                  const years = Object.keys(grouped).map(Number).sort((a, b) => b - a);
-                  return years.map(year => (
-                    <div key={year}>
-                      <p className="text-xs text-muted-foreground font-medium text-center py-1">── {year} ──</p>
-                      {grouped[year].map((entry) => (
+                  }, {} as Record<string, typeof historicalData>);
+                  const months = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+                  return months.map(monthKey => (
+                    <div key={monthKey}>
+                      <p className="text-xs text-muted-foreground font-medium text-center py-1">
+                        ── {format(new Date(monthKey + '-01'), 'MMMM yyyy', { locale: it })} ──
+                      </p>
+                      {grouped[monthKey].map((entry) => (
                         <div
                           key={entry.id}
                           className={cn(
@@ -260,7 +262,7 @@ export function HistoricalDataForm({
                             <div className="flex items-start justify-between">
                               <div className="space-y-1">
                                 <p className="font-medium">
-                                  {format(new Date(entry.snapshot_date), 'dd MMMM', { locale: it })}
+                                  {format(new Date(entry.snapshot_date), 'dd/MM/yyyy')}
                                 </p>
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                                   <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
