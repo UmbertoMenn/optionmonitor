@@ -239,7 +239,7 @@ function CustomLegend({
                   : "hover:bg-muted text-foreground"
               )}
             >
-              {range === 'MAX' ? 'MAX' : range.replace('Y', 'A')}
+              {range === 'MAX' || range === 'YTD' ? range : range.replace('Y', 'A')}
             </button>
           ))}
         </div>
