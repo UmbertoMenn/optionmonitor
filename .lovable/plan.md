@@ -1,29 +1,28 @@
 
 
-## Piano: Aggiungere filtri temporali 1M, 3M, 6M
+## Piano: YTD + normalizzazione curve
 
-### Modifiche
+### 1. Aggiungere filtro YTD
 
 **File: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
 
-1. **Tipo TimeRange** (riga 33): estendere da `'1Y' | '2Y' | '3Y' | 'MAX'` a `'1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX'`
+- **Tipo** (riga 33): `'1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y' | 'MAX' | 'YTD'`
+- **Bottoni** (riga 231): aggiungere `'YTD'` dopo `'MAX'` nell'array
+- **Label**: YTD non necessita di sostituzione (non contiene "Y" + cifra), viene visualizzato così com'è
+- **Filtro dati** (righe 327-334): aggiungere caso `case 'YTD': cutoffDate = new Date(now.getFullYear(), 0, 1); break;` — filtra dal 1° gennaio dell'anno corrente
+- **Filtro depositi** (righe 379-386): stesso caso YTD
 
-2. **Bottoni selettore** (riga 231): aggiungere `'1M', '3M', '6M'` all'array dei range
+### 2. Normalizzare le curve (ridurre punti interattivi)
 
-3. **Filtro dati storici** (righe 322-332): aggiornare la logica di calcolo `cutoffDate` per gestire mesi:
-   ```typescript
-   if (timeRange === 'MAX') return historicalData;
-   const now = new Date();
-   let cutoffDate: Date;
-   switch (timeRange) {
-     case '1M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()); break;
-     case '3M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
-     case '6M': cutoffDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()); break;
-     case '1Y': cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
-     case '2Y': cutoffDate = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()); break;
-     case '3Y': cutoffDate = new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()); break;
-   }
-   ```
+Il downsampling a 30 punti è già attivo, ma il problema è che il tooltip `activeDot` reagisce comunque a tutti i 30 punti. Per range brevi (1M, 3M) i dati originali possono essere pochi e la curva è già liscia, ma per range lunghi con molti snapshot la curva resta erratica perché 30 punti sono ancora troppi per periodi con alta volatilità giornaliera.
 
-4. **Filtro depositi** (righe 366-374): stessa logica switch per il cutoff dei depositi
+**Soluzione**: ridurre `maxPoints` dinamicamente in base al range:
+- `1M`, `3M`: maxPoints = 20 (pochi dati, curva già liscia)
+- `6M`, `1Y`: maxPoints = 25
+- `2Y`, `3Y`, `MAX`, `YTD`: maxPoints = 30
+
+Questo si implementa passando il `timeRange` alla logica di downsampling nel `useMemo` di `chartData` (riga 504).
+
+### File modificato
+Solo `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
 
