@@ -51,7 +51,8 @@ export function ResolutionDiagnostics() {
     );
 
     // Mapping lookup
-    const mappedUnderlyings = new Set(mappings.map(m => m.underlying));
+    const normalize = (s: string) => s.toUpperCase().replace(/[.,]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const mappedUnderlyings = new Set(mappings.map(m => normalize(m.underlying)));
     const mappedTickers = new Set(mappings.map(m => m.ticker));
 
     // Price lookup
@@ -63,7 +64,7 @@ export function ResolutionDiagnostics() {
     );
 
     // 1. Underlying senza mapping (causano edge function AI lenta)
-    const noMapping = [...derivativeUnderlyings].filter(u => !mappedUnderlyings.has(u)).sort();
+    const noMapping = [...derivativeUnderlyings].filter(u => !mappedUnderlyings.has(normalize(u))).sort();
 
     // 2. Underlying con mapping ma senza prezzo
     const noPrice = mappings
