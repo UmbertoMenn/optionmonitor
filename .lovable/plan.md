@@ -1,45 +1,45 @@
 
-Obiettivo: rendere la curva di “Evoluzione Rendimento” davvero leggibile in vista aggregata, eliminando l’effetto erratico nella parte finale.
+Obiettivo: correggere definitivamente il caso SAP (prezzo ADR USD al posto di Xetra EUR) e l’errore “Call non coperte” nel briefing mattutino.
 
-Piano di implementazione (1 file):
-File: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+1) Diagnosi confermata (con dati reali)
+- In database c’è una mappatura errata: `underlying_mappings` contiene `SAP -> SAP` (fonte auto), mentre dovrebbe essere `SAP -> SAP.DE`.
+- In `underlying_prices` esistono entrambi i prezzi:
+  - `SAP` in USD (ADR USA)
+  - `SAP.DE` in EUR (Xetra)
+- Nel briefing, per AndreaZ:
+  - lo stock `SAP SE` viene risolto su chiave `SAP.DE`
+  - ma `strategy_cache` salva le strategie SAP con `ticker = SAP`
+  - risultato: chiavi diverse (`SAP.DE` vs `SAP`) e falsa segnalazione “Call non coperte”.
 
-1) Sostituire il downsampling attuale (a indice) con downsampling a bucket temporali
-- Problema attuale: `downsampleData` seleziona punti per indice (`Math.round(i * step)`), quindi se i dati sono densi a fine periodo (tipico dell’aggregato), la coda del grafico resta troppo “nervosa”.
-- Fix: creare bucket uniformi sul tempo (timestamp), non sul numero di record, e prendere 1 punto rappresentativo per bucket.
-- Preservare sempre:
-  - primo punto
-  - ultimo punto
-  - eventuale punto corrente (`currentDate`) se presente
+2) Fix codice (backend + frontend)
+- File: `supabase/functions/fetch-underlying-prices/index.ts`
+  - Spostare la priorità: prima `SPECIAL_MAPPINGS` (dove SAP=SAP.DE), poi il controllo “input sembra ticker”.
+  - Evitare che un simbolo ambiguo (es. SAP) bypassi il mapping europeo.
+- File: `src/lib/strategyCache.ts`
+  - In `resolveTicker`, usare prima il ticker risolto da `underlyingPrices[underlying]`.
+  - Solo in fallback usare il pattern “sembra ticker”.
+  - Così “SAP” non viene più forzato a ADR quando il mapping corretto è `SAP.DE`.
+- File: `supabase/functions/daily-briefing/index.ts`
+  - Per il blocco “Call non coperte”, usare una chiave unificata derivata da mapping (`resolveStockTicker`) anche lato strategie, non solo `s.ticker`.
+  - Per il prezzo strategia, privilegiare ticker risolto da mapping prima di `s.ticker` cache.
+  - Questo elimina i falsi positivi anche se cache vecchia.
 
-2) Ridurre in modo più aggressivo il numero massimo di punti renderizzati
-- Aggiornare la logica `maxPoints` nel `useMemo` di `chartData` con soglie più basse di quelle attuali.
-- Proposta:
-  - `1M`: 10
-  - `3M`: 12
-  - `6M`: 14
-  - `1Y`: 18
-  - `2Y`: 22
-  - `3Y` / `MAX` / `YTD`: 24
-- Risultato: meno ancore di tooltip/cursore e linee molto più pulite.
+3) Correzione dati esistenti (migrazione)
+- Aggiungere una migration SQL che:
+  - corregge `underlying_mappings` per SAP (`SAP -> SAP.DE`)
+  - riallinea `strategy_cache.ticker` per righe SAP chiaramente europee (portafogli con stock `SAP SE`/opzioni EUREX in EUR), così il briefing torna corretto subito senza attendere rigenerazioni casuali.
 
-3) Rifinire interazione cursore/dot
-- Lasciare i dot visibili solo su primo/ultimo (già presente), ma rendere l’`activeDot` più discreto o condizionato.
-- Effetto: il cursore non dà più la sensazione di “agganciarsi” a troppi micro-movimenti.
+4) Verifica finale
+- DB check:
+  - `underlying_mappings` mostra `SAP -> SAP.DE`
+  - `strategy_cache` per AndreaZ mostra ticker `SAP.DE`
+- UI check:
+  - in Derivatives/Dashboard, SAP usa prezzo EUR (non ADR USD)
+  - in riepilogo monitoraggio non compare più “Call non coperte” su SAP quando c’è copertura 100 azioni / 1 call
+- Briefing check:
+  - al prossimo giro briefing, SAP non deve più apparire come uncovered nel caso di AndreaZ.
 
-4) Non toccare la logica YTD già corretta
-- `YTD` resta visibile come etichetta `YTD` (non convertita).
-- Filtro data da 1 gennaio invariato.
-
-Verifica end-to-end (obbligatoria)
-- Aprire dashboard su “Il mio aggregato”.
-- Testare range: `6M`, `1Y`, `YTD`, `MAX`.
-- Verificare:
-  - coda curva visivamente più stabile
-  - meno stop del tooltip con il mouse
-  - nessuna regressione su benchmark/admin
-  - etichetta `YTD` corretta.
-
-Dettagli tecnici
-- Punto chiave: il bug visivo non è nel filtro temporale, ma nel campionamento “per indice”.
-- In serie aggregate, la distribuzione date non è uniforme: il campionamento temporale uniforme risolve proprio la coda erratica che stai vedendo.
+Dettagli tecnici (sintesi)
+- Root cause 1: ordine di risoluzione ticker sbagliato nel fetch auto (ticker-like prima del mapping statico).
+- Root cause 2: mismatch di chiavi tra stock e strategie nel briefing (`SAP.DE` vs `SAP`) dovuto a cache ticker non canonica.
+- La soluzione rende coerenti: mapping DB, cache strategie, calcolo briefing.
