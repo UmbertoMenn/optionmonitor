@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { computeAndUpsertStagingValues } from '@/lib/stagingCalculator';
+import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 
 const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
