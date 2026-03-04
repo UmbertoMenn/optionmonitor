@@ -465,11 +465,19 @@ function calcAnnualizedPremiumPct(
 
   if (count === 0 || sumUnderlyingPrice === 0) return 0;
 
-  const avgUnderlying = sumUnderlyingPrice / count;
-  const daysDiff = (now.getTime() - oneYearAgo.getTime()) / (1000 * 60 * 60 * 24);
-  const actualDays = Math.min(daysDiff, 365);
+  // Find the date of the first adjustment in the lookback window
+  let firstAdjMs = now.getTime();
+  for (const adj of adjustmentLog) {
+    const adjMs = new Date(adj.date).getTime();
+    if (adjMs >= oneYearAgo.getTime() && adjMs <= now.getTime() && adjMs < firstAdjMs) {
+      firstAdjMs = adjMs;
+    }
+  }
 
-  // Annualize: (totalNetPremium / avgUnderlying / 100) * (365 / actualDays) * 100
+  const actualDays = (now.getTime() - firstAdjMs) / (1000 * 60 * 60 * 24);
+  if (actualDays < 1) return 0;
+
+  const avgUnderlying = sumUnderlyingPrice / count;
   // Per 100 shares basis
   const premiumPctRaw = (totalNetPremium / (avgUnderlying * 100)) * 100;
   const annualized = premiumPctRaw * (365 / actualDays);
