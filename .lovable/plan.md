@@ -1,36 +1,44 @@
 
 
-## Problema: Prezzo opzioni EUREX/IDEM preso dal mercato USA
+## Diagnosi: Auto-Snapshot non crea record
 
-### Diagnosi
+### Il problema
 
-La call SAP 185 marzo mostra `current_price = 19.10` invece del valore corretto dall'Excel (`snapshot_price = 2.03`).
+Il cron job pg_cron alle 23:59 **funziona correttamente** — viene eseguito ogni notte con status `succeeded`. Ma la edge function `auto-snapshot` non produce risultati perché i dati di staging in `portfolio_latest_values` sono troppo vecchi.
 
-Il cron `update-option-prices-cron` risolve SAP → `SAP.DE`, ma Yahoo Finance restituisce la option chain delle opzioni **americane** SAP (non EUREX). Il simbolo OCC `SAP260320C00185000` corrisponde a un contratto US, non europeo. Il prezzo 19.10 USD è completamente sbagliato.
+### Causa root
 
-Stesso problema per tutte le opzioni EUREX/IDEM (SAP, FERRARI, TELECOM ITALIA, etc.): Yahoo non supporta le option chain europee.
+1. `portfolio_latest_values` viene aggiornata **solo quando un utente apre la Dashboard** (useEffect in Dashboard.tsx, riga 106-122)
+2. La edge function ha un controllo di sicurezza: se `updated_at` è più vecchio di 48 ore, salta il portfolio
+3. Attualmente, `portfolio_latest_values` ha `updated_at` del **24 febbraio** per tutti i portfoli — oltre 7 giorni fa
+4. Quindi il cron gira, ma la funzione risponde `skipped: 7, created: 0` ogni notte
 
-### Soluzione
+In pratica: se nessun utente apre la Dashboard nel giorno dell'upload, lo staging non viene aggiornato e lo snapshot automatico non viene mai creato.
 
-Modificare `update-option-prices-cron` per **escludere le opzioni EUREX/IDEM** dall'aggiornamento prezzi, mantenendo il prezzo snapshot dall'Excel come unica fonte affidabile.
+### Evidenza dai dati
 
-**File: `supabase/functions/update-option-prices-cron/index.ts`**
+- L'unico snapshot auto-generato dal cron è quello del **25/02 alle 23:59** (portfolio MELD) — perché il 24/02 un utente aveva aperto la Dashboard
+- Tutti gli altri snapshot recenti (26/02, 28/02, 04/03) sono stati creati **manualmente** dagli utenti durante il giorno
 
-1. Nella query iniziale (Step 1), recuperare anche il campo `description` per ogni derivato
-2. Dopo aver ottenuto i derivati, filtrare via tutte le posizioni la cui `description` inizia con `EUREX,` o `IDEM,` — queste opzioni europee non hanno chain su Yahoo
-3. Loggare quante posizioni EUREX/IDEM sono state saltate
-4. Per le posizioni saltate, **non toccare** `current_price` (rimane il valore snapshot dall'Excel)
+### Soluzione proposta
 
-### Risultato
+Spostare l'aggiornamento di `portfolio_latest_values` dal Dashboard (che richiede interazione utente) al **momento dell'upload Excel** nel FileUploader. Così i valori vengono sempre aggiornati quando c'è un nuovo file, indipendentemente dal fatto che l'utente navighi nella Dashboard.
 
-- Le opzioni US continuano ad essere aggiornate via Yahoo (funziona correttamente)
-- Le opzioni EUREX/IDEM mantengono il prezzo Excel (`snapshot_price`) senza sovrascritture errate
-- La call SAP 185 marzo mostrerà 2.03 EUR (dal file) invece di 19.10 USD (sbagliato)
+**Modifiche:**
 
-### Correzione immediata dati
+1. **`src/components/dashboard/FileUploader.tsx`** — Dopo il salvataggio delle posizioni e del portfolio, calcolare e scrivere i valori in `portfolio_latest_values` con i dati appena parsati dall'Excel (totalValue, netting, esposizioni). Questo garantisce che i dati di staging siano sempre freschi al momento dell'upload.
 
-Dopo il deploy, eseguire una migration SQL per ripristinare `current_price = snapshot_price` su tutte le posizioni EUREX/IDEM attualmente corrotte.
+2. **`supabase/functions/auto-snapshot/index.ts`** — Mantenere il controllo 48h come safety net, ma il problema si risolve alla fonte: i dati saranno freschi perché aggiornati all'upload.
 
-### File modificati
-- `supabase/functions/update-option-prices-cron/index.ts` — filtro EUREX/IDEM + select description
+3. **Opzionale**: Mantenere anche l'aggiornamento nel Dashboard.tsx come backup (doppia scrittura non crea problemi grazie all'upsert).
+
+### Complessità
+
+Il FileUploader ha già accesso a `summary` (totalValue) e alle posizioni parsate. Servono i calcoli di netting e esposizioni che attualmente avvengono nel Dashboard. Due opzioni:
+
+**Opzione A** (semplice): Salvare solo `total_value` dal FileUploader e calcolare netting/esposizioni a zero — lo snapshot avrà almeno il valore totale corretto. Il Dashboard sovrascriverà con i valori completi quando l'utente lo apre.
+
+**Opzione B** (completa): Replicare i calcoli di netting e esposizione nel FileUploader, utilizzando le stesse funzioni di `riskCalculator.ts` e `currencyExposure.ts`.
+
+Raccomando **Opzione B** per avere snapshot completi e accurati senza dipendere dall'apertura della Dashboard.
 
