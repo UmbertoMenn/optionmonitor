@@ -146,7 +146,7 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
                   {rules.profitRule.action === 'dynamic' && (
                     <div className="pl-6 space-y-2">
                       <p className="text-xs text-muted-foreground">
-                        Se l'opzione sta guadagnando più della soglia e i premi netti annualizzati (max 1 anno di lookback) superano la soglia, rollo indietro sulla prima scadenza disponibile, anche in perdita.
+                        Se l'opzione sta guadagnando più della soglia e i premi netti annualizzati (max 1 anno di lookback) superano la soglia, cerca la scadenza più vicina con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati restano ≥ soglia.
                       </p>
                       <div className="flex items-center gap-1">
                         <Label className="text-xs whitespace-nowrap">Premi annualizzati min</Label>
