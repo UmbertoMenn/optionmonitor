@@ -1,41 +1,29 @@
 
-Hai ragione: il problema non è il raggio del pallino ma il meccanismo tooltip di `ComposedChart` (modalità axis), che non usa davvero la vicinanza al marker per mostrare i dettagli operazione.  
-Per risolverlo in modo definitivo senza rompere l’allineamento, cambio approccio: tooltip operazione gestito direttamente dai pallini (eventi sul marker), non dallo snap dell’asse X.
 
-## Piano definitivo (senza regressioni)
+## Cambio logica Rolling Dinamico
 
-### 1) Non toccare il mapping dati (evita errori precedenti)
-File: `src/components/simulator/BacktestChart.tsx`
-- Mantengo **un solo dataset**: `chartData` condiviso tra `Line` e `Scatter`.
-- Nessun `scatterData` filtrato separato (così i pallini restano perfettamente allineati alla linea prezzo).
+### Cosa cambia
 
-### 2) Tooltip operazione “prossimità reale” sui pallini
-- Introduco stato locale: `hoveredOperation` (dato operazione + posizione mouse).
-- Nel `CustomScatterDot`:
-  - pallino visibile arancione (`r=7`);
-  - hit-area ampia (`r=22/24`) quasi invisibile (`rgba(..., 0.001)`), `pointerEvents="all"`;
-  - eventi `onMouseEnter` + `onMouseMove` per aprire/aggiornare tooltip immediatamente;
-  - `onMouseLeave` per chiudere.
-- Il tooltip viene renderizzato come overlay HTML custom (non dipendente dallo snap asse X), quindi si attiva appena sei vicino al pallino.
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-### 3) Evitare conflitti/flicker tooltip
-- Quando il tooltip operazione custom è attivo, sopprimo il tooltip Recharts standard (quello axis) per evitare doppio tooltip.
-- Tooltip custom con `pointer-events: none` per evitare sfarfallio quando il cursore passa vicino al box tooltip.
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-### 4) Sicurezza anti-regressione grafica
-- Non cambio assi, brush, linea prezzo, dominio Y o ordinamento date.
-- Mantengo la logica descrizioni operazioni (join per date uguali) invariata.
-- Il `CustomTooltip` attuale resta come fallback quando non c’è hover operazione custom.
+### Logica implementativa
 
-## Dettagli tecnici implementativi
-- `useState<HoveredOperation | null>` nel componente.
-- `CustomScatterDot` convertito in renderer collegato allo stato (con handler mouse).
-- Tooltip custom posizionato con coordinate cursore (`clientX/clientY` o coordinate chart convertite), offset leggero per leggibilità.
-- Condizione render: solo se `payload.adjustmentDesc` presente.
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
 
-## Verifica E2E (obbligatoria)
-1. Esegui backtest su `/simulator` con più operazioni.
-2. Muovi il mouse **vicino** ai pallini (senza centrarli): tooltip deve comparire subito.
-3. Verifica che i pallini restino allineati alla linea prezzo.
-4. Verifica assenza flicker e assenza doppio tooltip.
-5. Test rapido desktop + viewport mobile/tablet per assicurare usabilità hover/focus.
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
+
+### File modificati
+
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+
