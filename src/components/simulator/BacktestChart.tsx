@@ -43,7 +43,15 @@ function CustomDot(props: any) {
   const { cx, cy, payload } = props;
   if (!payload?.adjustmentDesc) return null;
   return (
-    <circle cx={cx} cy={cy} r={5} fill="hsl(var(--primary))" stroke="hsl(var(--background))" strokeWidth={2} />
+    <circle cx={cx} cy={cy} r={7} fill="#f97316" stroke="hsl(var(--background))" strokeWidth={2} />
+  );
+}
+
+function CustomActiveDot(props: any) {
+  const { cx, cy, payload } = props;
+  if (!payload?.adjustmentDesc) return null;
+  return (
+    <circle cx={cx} cy={cy} r={10} fill="#fb923c" stroke="hsl(var(--background))" strokeWidth={2} opacity={0.9} />
   );
 }
 
@@ -89,7 +97,7 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
             <Line
               type="monotone" dataKey="price"
               stroke="hsl(var(--primary))" strokeWidth={2}
-              dot={<CustomDot />} name="Prezzo"
+              dot={<CustomDot />} activeDot={<CustomActiveDot />} name="Prezzo"
             />
             <Brush dataKey="date" height={20} stroke="hsl(var(--primary))" />
           </ComposedChart>
