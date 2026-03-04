@@ -36,7 +36,7 @@ function getEffectiveExchangeRate(position: Position): number {
 }
 
 /** Compute netting for a single portfolio's positions */
-function computeSinglePortfolioNetting(
+export function computeSinglePortfolioNetting(
   positions: Position[],
   overrides: DerivativeOverride[],
   underlyingPrices?: Record<string, UnderlyingPrice>
