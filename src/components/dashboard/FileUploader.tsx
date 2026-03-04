@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
+import { computeAndUpsertStagingValues } from '@/lib/stagingCalculator';
 
 const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
   '7515bcc7-11b3-42c0-927d-4b2526f3a2b4': [{ mid: '2789', last: '0' }],
@@ -84,6 +85,13 @@ export function FileUploader() {
       // Passa targetPortfolioId alla mutation per garantire coerenza
       updatePositions({ positions, targetPortfolioId });
       setUploadSuccess(true);
+      
+      // Stage latest values for auto-snapshot cron (runs in background, non-blocking)
+      computeAndUpsertStagingValues({
+        portfolioId: targetPortfolioId,
+        positions,
+        cashValue,
+      });
       
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
       toast.success('Portfolio caricato!', {
