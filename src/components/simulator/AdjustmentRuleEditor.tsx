@@ -39,8 +39,11 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
         {/* ── RULE 1: Price approaches sold call ── */}
         <div className="space-y-4">
           <h3 className="font-semibold text-sm">📈 Se il prezzo si avvicina alla call venduta</h3>
+          <p className="text-xs text-muted-foreground">
+            Rollo sulla prima scadenza successiva con strike più alto, solo se il premio netto aggiuntivo è almeno la percentuale indicata rispetto al prezzo del sottostante.
+          </p>
 
-          <div className="pl-4 border-l-2 border-primary/20 space-y-4">
+          <div className="pl-4 border-l-2 border-primary/20 space-y-3">
             <div className="flex items-center gap-2">
               <Label className="text-xs whitespace-nowrap">Distanza di attivazione</Label>
               <Input
@@ -52,85 +55,27 @@ export function AdjustmentRuleEditor({ rules, onRulesChange }: AdjustmentRuleEdi
               <span className="text-xs text-muted-foreground">%</span>
             </div>
 
-            <div>
-              <Label className="text-xs mb-2 block">Cosa fai?</Label>
-              <RadioGroup
-                value={rules.approachRule.action}
-                onValueChange={v => updateApproach({ action: v as CoveredCallRules['approachRule']['action'] })}
-                className="space-y-3"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-start gap-2">
-                    <RadioGroupItem value="roll_up_always" id="approach_a" className="mt-1" />
-                    <Label htmlFor="approach_a" className="text-xs leading-relaxed cursor-pointer">
-                      Rollo su scadenza successiva con strike più alto (anche se debito)
-                    </Label>
-                  </div>
-                  {rules.approachRule.action === 'roll_up_always' && (
-                    <div className="pl-6 flex items-center gap-1">
-                      <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
-                      <Input
-                        type="number"
-                        value={rules.approachRule.rollUpMinDistancePct}
-                        onChange={e => updateApproach({ rollUpMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                        className="w-16 h-7 text-xs"
-                      />
-                      <span className="text-xs">%</span>
-                    </div>
-                  )}
-                </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
+              <Input
+                type="number"
+                value={rules.approachRule.rollUpMinDistancePct}
+                onChange={e => updateApproach({ rollUpMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                className="w-16 h-8 text-xs"
+              />
+              <span className="text-xs text-muted-foreground">%</span>
+            </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-start gap-2">
-                    <RadioGroupItem value="roll_up_positive" id="approach_b" className="mt-1" />
-                    <Label htmlFor="approach_b" className="text-xs leading-relaxed cursor-pointer">
-                      Rollo su scadenza successiva con strike più alto, solo se la differenza è positiva di almeno:
-                    </Label>
-                  </div>
-                  {rules.approachRule.action === 'roll_up_positive' && (
-                    <div className="pl-6 space-y-2">
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          value={rules.approachRule.minPremiumUsd}
-                          onChange={e => updateApproach({ minPremiumUsd: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                          className="w-16 h-7 text-xs"
-                        />
-                        <span className="text-xs">USD</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Label className="text-xs whitespace-nowrap">Distanza min strike</Label>
-                        <Input
-                          type="number"
-                          value={rules.approachRule.rollUpMinDistancePct}
-                          onChange={e => updateApproach({ rollUpMinDistancePct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                          className="w-16 h-7 text-xs"
-                        />
-                        <span className="text-xs">%</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-start gap-2">
-                    <RadioGroupItem value="do_nothing" id="approach_c" className="mt-1" />
-                    <Label htmlFor="approach_c" className="text-xs leading-relaxed cursor-pointer">
-                      Non faccio nulla ed alla scadenza rivendo una nuova call con barriera:
-                    </Label>
-                  </div>
-                  {rules.approachRule.action === 'do_nothing' && (
-                    <div className="pl-6 flex items-center gap-1">
-                      <Input
-                        type="number"
-                        value={rules.approachRule.newCallBarrierPct}
-                        onChange={e => updateApproach({ newCallBarrierPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                        className="w-16 h-7 text-xs"
-                      />
-                      <span className="text-xs">%</span>
-                    </div>
-                  )}
-                </div>
-              </RadioGroup>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs whitespace-nowrap">Premio minimo aggiuntivo</Label>
+              <Input
+                type="number"
+                value={rules.approachRule.minPremiumPct}
+                onChange={e => updateApproach({ minPremiumPct: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                className="w-16 h-8 text-xs"
+                step="0.1"
+              />
+              <span className="text-xs text-muted-foreground">% del sottostante</span>
             </div>
           </div>
         </div>

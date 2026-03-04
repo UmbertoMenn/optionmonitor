@@ -197,23 +197,6 @@ export function runBacktest(config: BacktestConfig): BacktestResult {
         // Handle expiry logic - ensure a replacement call is ALWAYS created
         let expiryHandled = false;
 
-        if (false) { // do_nothing removed
-          const adj = handleExpiryDoNothing(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
-          if (adj) {
-            dayAdjustments.push(adj);
-            allAdjustments.push(adj);
-            totalAdjustmentCost += adj.cost;
-            tradeCount += adj.legsRemoved.length + adj.legsAdded.length;
-            for (const added of adj.legsAdded) {
-              if (added.quantity < 0) totalGrossPremiums += added.entryPrice * Math.abs(added.quantity) * 100;
-            }
-            for (const removed of adj.legsRemoved) {
-              if (removed.quantity < 0 && removed.closePrice != null) totalGrossPremiums -= removed.closePrice * Math.abs(removed.quantity) * 100;
-            }
-            expiryHandled = true;
-          }
-        }
-
         if (!expiryHandled && leg.active) {
           const adj = sellNewCallAfterExpiry(leg, S, date, ccRules, ivSurface, riskFreeRate, activeLegs, allExpiries);
           if (adj) {
@@ -373,9 +356,6 @@ function executeApproachRule(
 ): AdjustmentLog | null {
   const { approachRule, strikeStep } = ccRules;
 
-  // do_nothing: no roll, let it expire naturally and sell new call at expiry
-  if (approachRule.action === 'do_nothing') return null;
-
   // Search across all future expiries starting from the one after the current leg's expiry
   const futureExpiries = allExpiries.filter(e => e > leg.expiryDate.slice(0, 10));
   if (futureExpiries.length === 0) return null;
@@ -384,6 +364,8 @@ function executeApproachRule(
   let newStrike = roundStrike(S * (1 + approachRule.rollUpMinDistancePct / 100), strikeStep);
   if (newStrike <= leg.strike) newStrike = leg.strike + strikeStep;
 
+  const minRequiredPremium = S * (approachRule.minPremiumPct / 100);
+
   for (const candidateExpiry of futureExpiries) {
     const newT = yearsBetween(date, candidateExpiry);
     if (newT <= 0) continue;
@@ -391,11 +373,8 @@ function executeApproachRule(
     const newIV = ivSurface.getIV(newStrike, candidateExpiry, 'call');
     const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
 
-    if (approachRule.action === 'roll_up_positive') {
-      const netPremium = newPrice - currentPrice;
-      const meetsUsd = netPremium >= approachRule.minPremiumUsd;
-      if (!meetsUsd) continue; // try next expiry
-    }
+    const netPremium = newPrice - currentPrice;
+    if (netPremium < minRequiredPremium) continue; // try next expiry
 
     // Found a valid expiry: execute the roll
     leg.active = false;
@@ -421,50 +400,6 @@ function executeApproachRule(
   return null; // no expiry meets the conditions
 }
 
-// ---- Expiry handling for do_nothing ----
-
-function handleExpiryDoNothing(
-  leg: BacktestLeg, S: number, date: string,
-  ccRules: CoveredCallRules, ivSurface: IVSurface, riskFreeRate: number,
-  activeLegs: BacktestLeg[], allExpiries: string[]
-): AdjustmentLog | null {
-  const { approachRule, strikeStep } = ccRules;
-  const isOTM = S < leg.strike;
-
-  const nextExpiry = findNextExpiry(date, allExpiries);
-  if (!nextExpiry) return null;
-
-  const newStrike = roundStrike(S * (1 + approachRule.newCallBarrierPct / 100), strikeStep);
-  const newT = yearsBetween(date, nextExpiry);
-  if (newT <= 0) return null;
-
-  const newIV = ivSurface.getIV(newStrike, nextExpiry, 'call');
-  const newPrice = bsPrice(S, newStrike, newT, riskFreeRate, newIV, 'call');
-
-  // Compute intrinsic value at expiry as close price
-  const expiryClosePrice = leg.type === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
-
-  const newLeg: BacktestLeg = {
-    id: `${leg.id}_expiry_${date}`,
-    type: 'call', strike: newStrike, quantity: -1,
-    entryDate: date, expiryDate: nextExpiry, entryPrice: newPrice, active: true,
-  };
-  activeLegs.push(newLeg);
-
-  const removedLeg = { ...leg, closePrice: expiryClosePrice };
-
-  const desc = isOTM
-    ? `Scadenza OTM: nuova call ${newStrike} (exp ${nextExpiry})`
-    : `Scadenza ITM: ricompra + nuova call ${newStrike} (exp ${nextExpiry})`;
-
-  return {
-    date, ruleName: 'Scadenza do_nothing',
-    description: desc,
-    legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
-    cost: newPrice * (-1) * 100,
-    underlyingPrice: S,
-  };
-}
 
 function sellNewCallAfterExpiry(
   leg: BacktestLeg, S: number, date: string,

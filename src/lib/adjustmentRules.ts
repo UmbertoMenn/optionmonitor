@@ -4,15 +4,7 @@
 
 export interface ApproachRule {
   activationPct: number; // % distance from sold call strike
-  action: 'roll_up_always' | 'roll_up_positive' | 'do_nothing';
-
-  // roll_up_positive params
-  minPremiumUsd: number;
-
-  // expiry params (always visible)
-  newCallBarrierPct: number;
-
-  // roll up min distance
+  minPremiumPct: number; // min additional premium as % of underlying price
   rollUpMinDistancePct: number; // min % distance of new strike from underlying price
 }
 
@@ -43,9 +35,7 @@ export function getDefaultCoveredCallRules(): CoveredCallRules {
     strikeStep: 5,
     approachRule: {
       activationPct: 2,
-      action: 'roll_up_always',
-      minPremiumUsd: 0.50,
-      newCallBarrierPct: 5,
+      minPremiumPct: 0.5,
       rollUpMinDistancePct: 5,
     },
     profitRule: {
