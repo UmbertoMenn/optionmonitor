@@ -54,8 +54,6 @@ function extractTickerFromFilename(filename: string): string {
   return match ? match[1].toUpperCase() : '';
 }
 
-const KNOWN_EXCHANGES = new Set(['BATS', 'NYSE', 'NASDAQ', 'ARCA', 'AMEX', 'IEX', 'CBOE', 'NSDQ', 'XNYS', 'XNAS', 'ARCX']);
-
 function parseCsvContent(text: string, filename: string): { ticker: string; priceData: { date: string; close: number }[] } {
   const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
   if (lines.length < 2) throw new Error('Il file deve avere almeno 2 righe (header + dati)');
@@ -66,9 +64,7 @@ function parseCsvContent(text: string, filename: string): { ticker: string; pric
   const dateIdx = findColumn(headers, ['datetime', 'date', 'time', 'data', 'timestamp']);
   const timeIdx = findColumn(headers, ['time', 'ora']);
   const closeIdx = findColumn(headers, ['close', 'chiusura', 'price', 'prezzo', 'last', 'ultimo', 'adj close']);
-  const symbolIdx = findColumn(headers, ['symbol', 'simbolo']);
-  const tickerIdx = findColumn(headers, ['ticker']);
-  const bestTickerIdx = symbolIdx >= 0 ? symbolIdx : tickerIdx;
+  const tickerIdx = findColumn(headers, ['ticker', 'symbol', 'simbolo']);
 
   if (dateIdx < 0) throw new Error(`Colonna data non trovata. Header: ${headers.join(', ')}`);
   if (closeIdx < 0) throw new Error(`Colonna prezzo non trovata. Header: ${headers.join(', ')}`);
@@ -80,11 +76,8 @@ function parseCsvContent(text: string, filename: string): { ticker: string; pric
     const cols = lines[i].split(sep).map(c => c.trim().replace(/^["']|["']$/g, ''));
     if (cols.length <= Math.max(dateIdx, closeIdx)) continue;
 
-    if (!extractedTicker && bestTickerIdx >= 0 && cols[bestTickerIdx]) {
-      const val = cols[bestTickerIdx].toUpperCase();
-      if (!KNOWN_EXCHANGES.has(val)) {
-        extractedTicker = val;
-      }
+    if (!extractedTicker && tickerIdx >= 0 && cols[tickerIdx]) {
+      extractedTicker = cols[tickerIdx].toUpperCase();
     }
 
     const dateStr = cols[dateIdx];

@@ -1,22 +1,51 @@
 
 
-## Fix estrazione ticker dal CSV
+## Ristrutturazione regola di profitto: Rolling Dinamico e Rolling Statico
 
-### Problema
+### Cosa cambia
 
-`findColumn(headers, ['ticker', 'symbol', 'simbolo'])` trova la prima colonna che matcha — se il CSV ha una colonna "ticker" contenente il nome dell'exchange (es. "BATS") e una colonna "symbol" con il ticker reale (es. "AAPL"), il codice prende "BATS".
+La sezione "Se l'opzione venduta sta guadagnando" passa da due opzioni (Roll attivo / Aspetto scadenza) a due nuove opzioni: **Rolling Dinamico** e **Rolling Statico**. Entrambe condividono la stessa sotto-regola per la prima scadenza, ma differiscono nel comportamento su scadenze successive. Tutti i parametri USD diventano **percentuali sul prezzo del sottostante**.
 
-### Soluzione
+### Nuova struttura ProfitRule
 
-In `src/components/simulator/TickerSelector.tsx`, nella funzione `parseCsvContent`:
+```text
+ProfitRule {
+  profitPct: number           // soglia guadagno (invariato)
+  action: 'dynamic' | 'static'
 
-1. Cercare separatamente la colonna "symbol" e la colonna "ticker"/"exchange"
-2. Prioritizzare la colonna "symbol" per l'estrazione del ticker
-3. Aggiungere una lista di exchange noti (BATS, NYSE, NASDAQ, ARCA, AMEX, IEX, CBOE) come fallback: se il valore estratto è un exchange noto, passare alla colonna successiva o al filename
+  // Prima scadenza (comune a entrambi)
+  firstExpiryMinDistancePct: number   // distanza min strike dal sottostante
+  firstExpiryMinPremiumPct: number    // premio min come % del sottostante
 
-Logica aggiornata:
-- `symbolIdx = findColumn(headers, ['symbol', 'simbolo'])`
-- `tickerIdx = findColumn(headers, ['ticker'])`
-- Usare `symbolIdx` se disponibile, altrimenti `tickerIdx`
-- Se il valore trovato è in `KNOWN_EXCHANGES`, ignorarlo e usare il fallback dal filename
+  // Rolling Dinamico – scadenze successive
+  dynamicAnnualizedPremiumPct: number // soglia premi annualizzati netti %
+  dynamicMinDistancePct: number       // distanza min strike dal sottostante
+
+  // Rolling Statico – scadenze successive  
+  staticMinDistancePct: number        // distanza min strike dal sottostante
+  staticMinPremiumPct: number         // premio netto min come % del sottostante
+}
+```
+
+### Modifiche per file
+
+**1. `src/lib/adjustmentRules.ts`**
+- Sostituire `ProfitRule` con la nuova interfaccia (rimuovere `wait_and_sell`, `newCallBarrierPct`, `minPremiumUsd`, `rollDownMinPremiumUsd`)
+- Aggiornare `getDefaultCoveredCallRules()` con valori di default ragionevoli
+
+**2. `src/components/simulator/AdjustmentRuleEditor.tsx`**
+- RadioGroup con due opzioni: "Rolling Dinamico" e "Rolling Statico"
+- Parametri prima scadenza condivisi (mostrati sempre)
+- Parametri scadenze successive condizionali in base alla scelta
+- Rolling Dinamico: soglia premi annualizzati %, distanza min strike %
+- Rolling Statico: distanza min %, premio netto min %
+
+**3. `src/lib/backtestEngine.ts`**
+- `executeProfitRule`: 
+  - **Prima scadenza** (comune): roll down su strike più basso stessa scadenza se premio netto ≥ `firstExpiryMinPremiumPct`% di S e distanza min `firstExpiryMinDistancePct`%
+  - **Scadenze successive – Dinamico**: calcolo premi netti annualizzati (lookback max 1 anno dall'adjustment log); se guadagno > soglia % E premi annualizzati > soglia %, rollo indietro sulla prima scadenza disponibile anche in perdita, con distanza min strike
+  - **Scadenze successive – Statico**: cerca scadenza più vicina con distanza min % e premio netto ≥ `staticMinPremiumPct`% di S (logica simile all'attuale ma con % invece di USD)
+- Per il calcolo annualizzato nel Dinamico: somma dei premi netti incassati nell'ultimo anno / prezzo medio sottostante, annualizzato
+- Rimuovere il branch `wait_and_sell` da `executeProfitRule` e da `sellNewCallAfterExpiry`
+- In `sellNewCallAfterExpiry`: usare sempre `approachRule.rollUpMinDistancePct` come barriera (non c'è più `wait_and_sell`)
 
