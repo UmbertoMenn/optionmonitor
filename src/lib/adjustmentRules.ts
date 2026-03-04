@@ -16,8 +16,8 @@ export interface ProfitRule {
   firstExpiryMinDistancePct: number; // min % distance of strike from underlying
   firstExpiryMinPremiumPct: number;  // min premium as % of underlying price
 
-  // Rolling Dinamico – later expiries
-  dynamicAnnualizedPremiumPct: number; // annualized net premium threshold %
+  // Rolling Dinamico – later expiries: rolls only if annualized premiums stay ≥ threshold after simulating the roll
+  dynamicAnnualizedPremiumPct: number; // annualized net premium threshold % (must be maintained post-roll)
   dynamicMinDistancePct: number;       // min % distance of strike from underlying
 
   // Rolling Statico – later expiries

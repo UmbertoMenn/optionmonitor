@@ -529,8 +529,9 @@ function executeProfitRule(
 }
 
 /**
- * Rolling Dinamico: if annualized premiums exceed threshold, roll back to first
- * available expiry even at a loss, with min strike distance.
+ * Rolling Dinamico: if annualized premiums exceed threshold, find the closest
+ * expiry where, after buying back the old option and selling the new one,
+ * annualized premiums remain ≥ threshold.
  */
 function executeDynamicRolling(
   leg: BacktestLeg, S: number, date: string, currentPrice: number, closeCost: number,
@@ -540,39 +541,58 @@ function executeDynamicRolling(
 ): AdjustmentLog | null {
   const { profitRule, strikeStep } = ccRules;
 
-  // Check annualized premium threshold
+  // Check current annualized premium threshold
   const annualizedPct = calcAnnualizedPremiumPct(date, adjustmentLog);
   if (annualizedPct < profitRule.dynamicAnnualizedPremiumPct) return null;
 
-  // Roll back to first available expiry
-  const firstExpiry = allExpiries.find(e => e >= date.slice(0, 10));
-  if (!firstExpiry) return null;
-
   const minStrike = roundStrike(S * (1 + profitRule.dynamicMinDistancePct / 100), strikeStep);
-  const T = yearsBetween(date, firstExpiry);
-  if (T <= 0) return null;
 
-  const newIV = ivSurface.getIV(minStrike, firstExpiry, 'call');
-  const newPrice = bsPrice(S, minStrike, T, riskFreeRate, newIV, 'call');
+  // Try each expiry from closest, simulate the roll and check if annualized stays ≥ threshold
+  for (const candidateExpiry of allExpiries.filter(e => e >= date.slice(0, 10))) {
+    const T = yearsBetween(date, candidateExpiry);
+    if (T <= 0) continue;
 
-  // Roll even at a loss (no net premium check)
-  leg.active = false;
-  const newLeg: BacktestLeg = {
-    id: `${leg.id}_rolldyn_${date}`,
-    type: 'call', strike: minStrike, quantity: leg.quantity,
-    entryDate: date, expiryDate: firstExpiry, entryPrice: newPrice, active: true,
-  };
-  activeLegs.push(newLeg);
+    const newIV = ivSurface.getIV(minStrike, candidateExpiry, 'call');
+    const newPrice = bsPrice(S, minStrike, T, riskFreeRate, newIV, 'call');
 
-  const removedLeg = { ...leg, closePrice: currentPrice };
+    // Build a hypothetical adjustment to simulate impact on annualized premiums
+    const hypotheticalAdj: AdjustmentLog = {
+      date,
+      ruleName: '',
+      description: '',
+      legsRemoved: [{ ...leg, closePrice: currentPrice }],
+      legsAdded: [{
+        id: '', type: 'call', strike: minStrike, quantity: leg.quantity,
+        entryDate: date, expiryDate: candidateExpiry, entryPrice: newPrice, active: true,
+      }],
+      cost: closeCost + newPrice * leg.quantity * 100,
+      underlyingPrice: S,
+    };
 
-  return {
-    date, ruleName: 'Profitto: rolling dinamico',
-    description: `Roll dinamico: ${leg.strike} → ${minStrike} (exp ${firstExpiry}, ann. ${annualizedPct.toFixed(1)}%)`,
-    legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
-    cost: closeCost + newPrice * leg.quantity * 100,
-    underlyingPrice: S,
-  };
+    const simulatedAnnualized = calcAnnualizedPremiumPct(date, [...adjustmentLog, hypotheticalAdj]);
+    if (simulatedAnnualized < profitRule.dynamicAnnualizedPremiumPct) continue;
+
+    // This expiry satisfies the threshold — execute
+    leg.active = false;
+    const newLeg: BacktestLeg = {
+      id: `${leg.id}_rolldyn_${date}`,
+      type: 'call', strike: minStrike, quantity: leg.quantity,
+      entryDate: date, expiryDate: candidateExpiry, entryPrice: newPrice, active: true,
+    };
+    activeLegs.push(newLeg);
+
+    const removedLeg = { ...leg, closePrice: currentPrice };
+
+    return {
+      date, ruleName: 'Profitto: rolling dinamico',
+      description: `Roll dinamico: ${leg.strike} → ${minStrike} (exp ${candidateExpiry}, ann. ${simulatedAnnualized.toFixed(1)}%)`,
+      legsRemoved: [removedLeg], legsAdded: [{ ...newLeg }],
+      cost: closeCost + newPrice * leg.quantity * 100,
+      underlyingPrice: S,
+    };
+  }
+
+  return null;
 }
 
 /**
