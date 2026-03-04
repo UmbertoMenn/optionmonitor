@@ -1,33 +1,47 @@
 
+Capito, hai ragione: dalla diff e dallo screenshot il comportamento è regressivo.
 
-## Fix: tooltip operazioni più facile da attivare
+## Cosa è andato storto
 
-### Problema
+Il problema principale è che i pallini (`Scatter`) stanno usando un dataset filtrato (`scatterData`) separato dalla linea (`chartData`) dentro un `ComposedChart` con asse X categoriale.  
+Questo può desincronizzare la posizione dei punti rispetto alla timeline completa (quindi grafico “sballato”) e rende anche il tooltip poco affidabile.
 
-Il `<Tooltip>` di Recharts snappa al punto dati più vicino sull'asse X. Con centinaia di barre giornaliere, i punti con operazioni sono rari e il cursore snappa quasi sempre a una barra adiacente senza operazione. I dot grandi non aiutano perché il tooltip si basa sulla prossimità X, non sulla dimensione del dot.
+In più, l’hit-area usa `fill="transparent"`: in SVG spesso non intercetta bene il puntatore, quindi l’hover resta difficile.
 
-### Soluzione
+## Fix che implementerò
 
-Aggiungere un layer `<Scatter>` sovrapposto alla `<Line>` per i soli punti con operazione. I punti Scatter hanno detection hover **indipendente** dalla Line e possono avere una shape molto grande (raggio 14-16px) con fill trasparente che funge da hit-area ampia. Quando il cursore entra nell'area dello Scatter, il tooltip mostra i dati di quel punto (con l'operazione).
+### 1) Riallineamento totale punti-linea
+In `BacktestChart.tsx` farò usare allo `Scatter` **lo stesso dataset della linea** (quello del `ComposedChart`), eliminando `scatterData` come fonte separata.
 
-### Modifiche in `src/components/simulator/BacktestChart.tsx`
+### 2) Mostrare pallino solo dove c’è operazione
+Nel `CustomScatterDot` userò `payload.adjustmentDesc`:
+- se non c’è operazione → `return null`
+- se c’è operazione → pallino arancione visibile
 
-1. **Import `Scatter`** da recharts
-2. **Preparare dati scatter**: nel `useMemo`, creare un array `scatterData` con solo i punti che hanno `adjustmentDesc`, con proprietà `price` per posizionarli correttamente sull'asse Y
-3. **Custom Scatter shape**: componente che renderizza un cerchio arancione visibile (`r={7}`) più un cerchio trasparente grande (`r={18}`) come hit-area
-4. **Aggiungere `<Scatter>`** al `<ComposedChart>`:
-   - `data={scatterData}`, `dataKey="price"`
-   - `shape={<CustomScatterDot />}` con hit-area ampia
-   - Stesso asse Y della Line
-5. **Rimuovere `dot` e `activeDot`** dalla `<Line>` (i pallini vengono ora dallo Scatter)
-6. **Tooltip**: resta invariato, riceve i dati del punto Scatter quando attivato da hover sullo scatter
+Così i pallini restano perfettamente allineati alla curva del prezzo.
 
-```text
-  ComposedChart
-  ├── Line  (prezzo, senza dot)
-  ├── Scatter (solo punti operazione, dot arancioni grandi con hit-area)
-  └── Tooltip (mostra prezzo + operazione)
-```
+### 3) Tooltip molto più facile da attivare
+Allargerò davvero l’area di aggancio hover:
+- cerchio invisibile grande (`r ~ 20-22`)
+- `fill="rgba(249,115,22,0.001)"` (non `transparent`)
+- `pointerEvents="all"`
 
-Risultato: basta avvicinare il cursore entro ~18px da un pallino arancione per far apparire il tooltip con i dettagli dell'operazione. Non serve più centrare il cursore esattamente sulla data.
+Questo rende il trigger “magnetico” anche quando sei vicino al pallino.
 
+### 4) Tooltip robusto sul punto giusto
+Nel `CustomTooltip` selezionerò, quando presente, il payload con `adjustmentDesc` (priorità al punto operazione), invece di usare sempre il primo elemento del payload.
+
+## Modifiche file (solo uno)
+
+- `src/components/simulator/BacktestChart.tsx`
+  - rimozione logica `scatterData` separata
+  - update `CustomScatterDot` (filtro + hit-area reale)
+  - update `Scatter` per usare data comune del chart
+  - update `CustomTooltip` per scegliere il payload corretto
+
+## Verifica finale (E2E)
+
+1. Eseguire backtest su `/simulator`.
+2. Controllare che i pallini arancioni stiano sulla linea prezzo (non “sparsi” altrove).
+3. Passare il mouse vicino (non sopra preciso): tooltip deve aprirsi con facilità.
+4. Verificare che nel tooltip compaiano data, prezzo e descrizione operazione corretta.
