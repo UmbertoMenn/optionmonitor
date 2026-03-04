@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BacktestDayResult, AdjustmentLog } from '@/lib/backtestEngine';
 import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ComposedChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Brush
 } from 'recharts';
 
@@ -39,24 +39,21 @@ function CustomTooltip({ active, payload }: any) {
   );
 }
 
-function CustomDot(props: any) {
-  const { cx, cy, payload } = props;
-  if (!payload?.adjustmentDesc) return null;
+function CustomScatterDot(props: any) {
+  const { cx, cy } = props;
+  if (cx == null || cy == null) return null;
   return (
-    <circle cx={cx} cy={cy} r={7} fill="#f97316" stroke="hsl(var(--background))" strokeWidth={2} />
-  );
-}
-
-function CustomActiveDot(props: any) {
-  const { cx, cy, payload } = props;
-  if (!payload?.adjustmentDesc) return null;
-  return (
-    <circle cx={cx} cy={cy} r={10} fill="#fb923c" stroke="hsl(var(--background))" strokeWidth={2} opacity={0.9} />
+    <g>
+      {/* Large invisible hit-area */}
+      <circle cx={cx} cy={cy} r={18} fill="transparent" stroke="none" />
+      {/* Visible orange dot */}
+      <circle cx={cx} cy={cy} r={7} fill="#f97316" stroke="hsl(var(--background))" strokeWidth={2} />
+    </g>
   );
 }
 
 export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
-  const chartData = useMemo(() => {
+  const { chartData, scatterData } = useMemo(() => {
     const descMap = new Map<string, string[]>();
     for (const adj of adjustmentLog) {
       const arr = descMap.get(adj.date) || [];
@@ -64,11 +61,15 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
       descMap.set(adj.date, arr);
     }
 
-    return days.map(d => ({
+    const allData = days.map(d => ({
       date: d.date,
       price: d.underlyingPrice,
       adjustmentDesc: descMap.get(d.date)?.join('\n') ?? null,
     }));
+
+    const scatter = allData.filter(d => d.adjustmentDesc !== null);
+
+    return { chartData: allData, scatterData: scatter };
   }, [days, adjustmentLog]);
 
   if (days.length === 0) {
@@ -97,7 +98,13 @@ export function BacktestChart({ days, adjustmentLog }: BacktestChartProps) {
             <Line
               type="monotone" dataKey="price"
               stroke="hsl(var(--primary))" strokeWidth={2}
-              dot={<CustomDot />} activeDot={<CustomActiveDot />} name="Prezzo"
+              dot={false} activeDot={false} name="Prezzo"
+            />
+            <Scatter
+              data={scatterData}
+              dataKey="price"
+              shape={<CustomScatterDot />}
+              name="Operazioni"
             />
             <Brush dataKey="date" height={20} stroke="hsl(var(--primary))" />
           </ComposedChart>
