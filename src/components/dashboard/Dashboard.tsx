@@ -35,7 +35,7 @@ import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { Link, useNavigate } from 'react-router-dom';
 import { DepositEntry } from '@/types/deposits';
-import { supabase } from '@/integrations/supabase/client';
+
 
 export function Dashboard() {
   const { user, isAdmin, signOut } = useAuth();
