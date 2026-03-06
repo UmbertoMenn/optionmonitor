@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
-import { computeAndUpsertStagingValues } from '@/lib/stagingCalculator';
+import { upsertUploadSnapshot } from '@/lib/uploadSnapshot';
 import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 
 const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = {
@@ -20,7 +20,7 @@ const EXCLUDED_CASH_PATTERNS: Record<string, { mid: string; last: string }[]> = 
 export function FileUploader() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
-  const { portfolio, updatePositions } = usePortfolio();
+  const { portfolio, updatePositionsAsync } = usePortfolio();
   const { user } = useAuth();
   const { isAdminMode, adminViewUserId } = usePortfolioContext();
   const queryClient = useQueryClient();
