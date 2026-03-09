@@ -1,34 +1,29 @@
 
 
-## Problema: toggle Telegram admin non propaga agli utenti
+## Cambio logica Rolling Dinamico
 
-### Causa
-Le due policy UPDATE sulla tabella `profiles` sono entrambe **RESTRICTIVE** (non permissive):
-1. "Admins can update all profiles" — RESTRICTIVE
-2. "Users can update own profile" — RESTRICTIVE
+### Cosa cambia
 
-Con policy restrictive, **tutte** devono passare. Quando l'admin aggiorna il profilo di un altro utente:
-- Policy 1 (admin) → PASS
-- Policy 2 (own profile, `auth.uid() = user_id`) → FAIL
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-Risultato: il batch update propaga a 0 righe senza errore (PostgREST restituisce successo con 0 righe). Il toggle admin si aggiorna visivamente, ma i profili utenti restano invariati.
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-### Fix — Migrazione DB
-Ricreare entrambe le policy UPDATE come **PERMISSIVE** (basta che una passi):
+### Logica implementativa
 
-```sql
-DROP POLICY "Admins can update all profiles" ON public.profiles;
-DROP POLICY "Users can update own profile" ON public.profiles;
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
 
-CREATE POLICY "Admins can update all profiles"
-ON public.profiles FOR UPDATE TO authenticated
-USING (has_role(auth.uid(), 'admin'::app_role))
-WITH CHECK (has_role(auth.uid(), 'admin'::app_role));
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
 
-CREATE POLICY "Users can update own profile"
-ON public.profiles FOR UPDATE TO public
-USING (auth.uid() = user_id);
-```
+### File modificati
 
-Nessuna modifica al codice TypeScript — il componente `AdminNotificationSettings.tsx` è già corretto.
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
 
