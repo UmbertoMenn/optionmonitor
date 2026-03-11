@@ -439,6 +439,12 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
       ? String(row[colIndices.expiryDate] || '').trim().replace(/^'+/, '') || undefined
       : undefined;
     
+    // Skip non-option rows (e.g. stock trades where Call/Put = "NN")
+    if (colIndices.callPut !== -1 && optionType === null) {
+      const callPutRaw = String(row[colIndices.callPut] || '').trim().toUpperCase();
+      if (callPutRaw === 'NN' || callPutRaw === '') continue;
+    }
+    
     // Skip rows with no symbol or quantity
     if (!symbol || quantity === 0) continue;
     
