@@ -109,7 +109,6 @@ export function CallPremiumCalculatorDialog({
   const [historicalPremiums, setHistoricalPremiums] = useState<CoveredCallPremium[]>([]);
   const [showHistoricalPicker, setShowHistoricalPicker] = useState(false);
   const [selectedHistoricalId, setSelectedHistoricalId] = useState<string>('');
-  const [assignmentOrders, setAssignmentOrders] = useState<ParsedOrder[]>([]);
   
   // Pending assignment selection state
   const [pendingAssignments, setPendingAssignments] = useState<{
@@ -120,10 +119,8 @@ export function CallPremiumCalculatorDialog({
   const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
 
   // Derived: combined orders based on toggle
-  const filteredOrders = [
-    ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
-    ...assignmentOrders,
-  ];
+  // Assignments are stored inline in callOrders, so no separate append needed
+  const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
 
   // Helper to split saved orders into call/put
   const splitOrdersByType = (orders: ParsedOrder[]) => {
