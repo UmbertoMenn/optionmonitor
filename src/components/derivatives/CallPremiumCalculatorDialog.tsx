@@ -269,8 +269,13 @@ export function CallPremiumCalculatorDialog({
         // 0 open PUTs → ignore
       }
 
+      // Insert assignments inline into callOrders at chronological position
+      let updatedCallOrders = mergedCallOrders;
+      for (const a of newAssignments) {
+        updatedCallOrders = insertAssignmentInOrder(updatedCallOrders, a);
+      }
       if (newAssignments.length > 0) {
-        setAssignmentOrders(prev => [...prev, ...newAssignments]);
+        setCallOrders(updatedCallOrders);
       }
 
       if (pendingForUser.length > 0) {
