@@ -723,7 +723,6 @@ export function CallPremiumCalculatorDialog({
                                 <TableCell className={`text-xs text-right ${order.orderValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                                   {order.orderValue >= 0 ? '+' : ''}{formatCurrency(order.orderValue, 'USD')}
                                 </TableCell>
-                                </TableCell>
                                 <TableCell className="text-xs">
                                   <Button
                                     variant="ghost"
