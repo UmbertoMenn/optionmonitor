@@ -7,9 +7,12 @@ export interface ParsedOrder {
   avgPrice: number;
   quantity: number;
   optionType: 'CALL' | 'PUT' | null;
-  orderValue: number; // quantity * avgPrice * 100
+  orderValue: number; // quantity * avgPrice * 100 (options) or quantity * avgPrice (stocks)
   validityDate?: string; // Data Validità in formato DD/MM/YYYY
   expiryDate?: string; // Scadenza dal file Excel
+  isStockTrade?: boolean;    // true for NN rows (stock buy/sell)
+  isAssignment?: boolean;    // true for synthetic assignment orders
+  assignmentStrike?: number; // strike of the assigned PUT
 }
 
 export interface OrderParseResult {
@@ -439,17 +442,22 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
       ? String(row[colIndices.expiryDate] || '').trim().replace(/^'+/, '') || undefined
       : undefined;
     
-    // Skip non-option rows (e.g. stock trades where Call/Put = "NN")
+    // Detect stock trades (Call/Put = "NN")
+    let isStockTrade = false;
     if (colIndices.callPut !== -1 && optionType === null) {
       const callPutRaw = String(row[colIndices.callPut] || '').trim().toUpperCase();
-      if (callPutRaw === 'NN' || callPutRaw === '') continue;
+      if (callPutRaw === 'NN') {
+        isStockTrade = true;
+      } else if (callPutRaw === '') {
+        continue; // Skip empty rows
+      }
     }
     
     // Skip rows with no symbol or quantity
     if (!symbol || quantity === 0) continue;
     
-    // Calculate order value (quantity * avgPrice * 100 for options)
-    const orderValue = quantity * avgPrice * 100;
+    // Calculate order value: stocks = quantity * avgPrice, options = quantity * avgPrice * 100
+    const orderValue = isStockTrade ? quantity * avgPrice : quantity * avgPrice * 100;
     
     orders.push({
       operation,
@@ -461,6 +469,7 @@ function parseOrdersFromRawData(rawData: any[][], originalTextData?: string): Pa
       orderValue,
       validityDate: validityDateRaw,
       expiryDate: expiryDateRaw,
+      isStockTrade,
     });
   }
   
@@ -565,6 +574,93 @@ export function extractStrikeFromSymbol(symbol: string): number | null {
 }
 
 /**
+ * Extract expiry date from option symbol (e.g., "UBERG6P95" -> month code G=Jul, year 6=2026)
+ * Month codes: A=Jan, B=Feb, C=Mar, D=Apr, E=May, F=Jun, G=Jul, H=Aug, I=Sep, J=Oct, K=Nov, L=Dec
+ */
+function extractExpiryFromSymbol(symbol: string): string | null {
+  const monthCodes: Record<string, string> = {
+    A: '01', B: '02', C: '03', D: '04', E: '05', F: '06',
+    G: '07', H: '08', I: '09', J: '10', K: '11', L: '12',
+  };
+  const match = symbol.match(/[A-Z]{1,5}([A-L])(\d)[CP]\d/i);
+  if (match) {
+    const month = monthCodes[match[1].toUpperCase()];
+    const year = 2020 + parseInt(match[2]);
+    if (month) return `${year}-${month}-21`;
+  }
+  return null;
+}
+
+/**
+ * Open PUT candidate for assignment selection
+ */
+export interface OpenPutCandidate {
+  symbol: string;
+  strike: number;
+  netQty: number; // net sold quantity still open
+  expiry: string | null; // extracted expiry for display
+}
+
+/**
+ * Detect open (net sold, never fully bought back) PUT positions for a given ticker.
+ * Groups PUT orders by symbol and checks net = Σ(sell qty) - Σ(buy qty) > 0.
+ */
+export function detectOpenPuts(orders: ParsedOrder[], ticker: string): OpenPutCandidate[] {
+  // Filter executed PUT orders matching ticker
+  const putOrders = orders.filter(o => {
+    const isExecuted = o.status.toLowerCase() === 'eseguito';
+    const isPut = o.optionType === 'PUT';
+    const matchesTicker = symbolMatchesTicker(o.symbol, ticker);
+    return isExecuted && isPut && matchesTicker && !o.isStockTrade && !o.isAssignment;
+  });
+
+  // Group by symbol and compute net quantity
+  const symbolMap = new Map<string, { sellQty: number; buyQty: number }>();
+  for (const o of putOrders) {
+    const entry = symbolMap.get(o.symbol) || { sellQty: 0, buyQty: 0 };
+    if (o.operation === 'sell') entry.sellQty += o.quantity;
+    else entry.buyQty += o.quantity;
+    symbolMap.set(o.symbol, entry);
+  }
+
+  const results: OpenPutCandidate[] = [];
+  for (const [symbol, { sellQty, buyQty }] of symbolMap) {
+    const netQty = sellQty - buyQty;
+    if (netQty > 0) {
+      const strike = extractStrikeFromSymbol(symbol);
+      if (strike !== null) {
+        const expiry = extractExpiryFromSymbol(symbol);
+        results.push({ symbol, strike, netQty, expiry });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Build a synthetic assignment order from a stock sell + assigned PUT strike.
+ * orderValue = (avgPrice - putStrike) * quantity  (negative if strike > avgPrice)
+ */
+export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: number): ParsedOrder {
+  const assignmentValue = (stockSellOrder.avgPrice - putStrike) * stockSellOrder.quantity;
+  return {
+    operation: 'sell',
+    symbol: stockSellOrder.symbol,
+    status: stockSellOrder.status,
+    avgPrice: stockSellOrder.avgPrice,
+    quantity: stockSellOrder.quantity,
+    optionType: null,
+    orderValue: assignmentValue,
+    validityDate: stockSellOrder.validityDate,
+    expiryDate: stockSellOrder.expiryDate,
+    isStockTrade: false,
+    isAssignment: true,
+    assignmentStrike: putStrike,
+  };
+}
+
+/**
  * Filter orders for a specific ticker's CALL options and calculate premiums
  * Optionally filters out LEAP calls (buy-only with high strike)
  */
@@ -579,7 +675,7 @@ export function filterAndCalculateIronCondorPremiums(
   const filteredOrders = orders.filter(order => {
     const isExecuted = order.status.toLowerCase() === 'eseguito';
     const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    return isExecuted && matchesTicker;
+    return isExecuted && matchesTicker && !order.isStockTrade && !order.isAssignment;
   });
 
   let totalBuys = 0;
@@ -619,7 +715,7 @@ export function filterAndCalculateCallPremiums(
     const isExecuted = order.status.toLowerCase() === 'eseguito';
     const isCall = order.optionType === 'CALL';
     const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    return isExecuted && isCall && matchesTicker;
+    return isExecuted && isCall && matchesTicker && !order.isStockTrade && !order.isAssignment;
   });
   
   // Step 2: Identify symbols that have at least one sell (Covered Call or rolling)
@@ -673,25 +769,6 @@ export function filterAndCalculateCallPremiums(
 }
 
 /**
- * Extract expiry date from option symbol (e.g., "UBERG6P95" -> month code G=Jul, year 6=2026)
- * Month codes: A=Jan, B=Feb, C=Mar, D=Apr, E=May, F=Jun, G=Jul, H=Aug, I=Sep, J=Oct, K=Nov, L=Dec
- */
-function extractExpiryFromSymbol(symbol: string): string | null {
-  const monthCodes: Record<string, string> = {
-    A: '01', B: '02', C: '03', D: '04', E: '05', F: '06',
-    G: '07', H: '08', I: '09', J: '10', K: '11', L: '12',
-  };
-  // Pattern: TICKER + MONTH_LETTER + YEAR_DIGIT + C/P + STRIKE
-  const match = symbol.match(/[A-Z]{1,5}([A-L])(\d)[CP]\d/i);
-  if (match) {
-    const month = monthCodes[match[1].toUpperCase()];
-    const year = 2020 + parseInt(match[2]);
-    if (month) return `${year}-${month}-21`; // Third Friday approximation
-  }
-  return null;
-}
-
-/**
  * Filter orders for a specific ticker's PUT options and calculate premiums.
  * Excludes protection PUTs:
  * 1. Buy-only symbols (pure protection bought)
@@ -707,7 +784,7 @@ export function filterAndCalculatePutPremiums(
     const isExecuted = order.status.toLowerCase() === 'eseguito';
     const isPut = order.optionType === 'PUT';
     const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    return isExecuted && isPut && matchesTicker;
+    return isExecuted && isPut && matchesTicker && !order.isStockTrade && !order.isAssignment;
   });
   
   // Step 2: Identify symbols that have at least one sell (Naked Put or rolling)

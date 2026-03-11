@@ -22,10 +22,14 @@ import {
   findLastOperationDate,
   mergeOrders,
   isLegOpenInOrders,
+  detectOpenPuts,
+  buildAssignmentOrder,
+  symbolMatchesTicker,
   
   PremiumMetrics,
   ParsedOrder,
-  OrderParseResult
+  OrderParseResult,
+  OpenPutCandidate,
 } from '@/lib/orderFileParser';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { buildOptionStratUrlFromOrders } from '@/lib/optionStratUrl';
@@ -84,15 +88,28 @@ export function CallPremiumCalculatorDialog({
   const [historicalPremiums, setHistoricalPremiums] = useState<CoveredCallPremium[]>([]);
   const [showHistoricalPicker, setShowHistoricalPicker] = useState(false);
   const [selectedHistoricalId, setSelectedHistoricalId] = useState<string>('');
+  const [assignmentOrders, setAssignmentOrders] = useState<ParsedOrder[]>([]);
+  
+  // Pending assignment selection state
+  const [pendingAssignments, setPendingAssignments] = useState<{
+    stockSell: ParsedOrder;
+    candidates: OpenPutCandidate[];
+  }[]>([]);
+  const [currentPendingIdx, setCurrentPendingIdx] = useState(0);
+  const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
 
   // Derived: combined orders based on toggle
-  const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
+  const filteredOrders = [
+    ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
+    ...assignmentOrders,
+  ];
 
   // Helper to split saved orders into call/put
   const splitOrdersByType = (orders: ParsedOrder[]) => {
-    const calls = orders.filter(o => o.optionType !== 'PUT');
-    const puts = orders.filter(o => o.optionType === 'PUT');
-    return { calls, puts };
+    const calls = orders.filter(o => o.optionType !== 'PUT' && !o.isAssignment);
+    const puts = orders.filter(o => o.optionType === 'PUT' && !o.isAssignment);
+    const assignments = orders.filter(o => o.isAssignment === true);
+    return { calls, puts, assignments };
   };
 
   // Load saved data when dialog opens
@@ -106,9 +123,10 @@ export function CallPremiumCalculatorDialog({
 
       if (saved && saved.orders_json.length > 0) {
         setTransactionCost(saved.transaction_cost);
-        const { calls, puts } = splitOrdersByType(saved.orders_json);
+        const { calls, puts, assignments } = splitOrdersByType(saved.orders_json);
         setCallOrders(calls);
         setPutOrders(puts);
+        setAssignmentOrders(assignments);
         setIncludePutPremiums(puts.length > 0);
         setLastOperationDate(saved.last_operation_date);
         recalculateMetrics(saved.orders_json, saved.transaction_cost);
@@ -127,9 +145,10 @@ export function CallPremiumCalculatorDialog({
     if (!selected) return;
     
     setTransactionCost(selected.transaction_cost);
-    const { calls, puts } = splitOrdersByType(selected.orders_json);
+    const { calls, puts, assignments } = splitOrdersByType(selected.orders_json);
     setCallOrders(calls);
     setPutOrders(puts);
+    setAssignmentOrders(assignments);
     setIncludePutPremiums(puts.length > 0);
     setLastOperationDate(selected.last_operation_date);
     recalculateMetrics(selected.orders_json, selected.transaction_cost);
@@ -213,19 +232,55 @@ export function CallPremiumCalculatorDialog({
         newPutCount = mergedPutOrders.length - putOrders.length;
         setPutOrders(mergedPutOrders);
       }
+
+      // Detect stock sells for assignment detection
+      const allParsedOrders = orders.filter(o =>
+        o.status.toLowerCase() === 'eseguito' && o.isStockTrade && o.operation === 'sell' && symbolMatchesTicker(o.symbol, ticker)
+      );
+
+      const newAssignments: ParsedOrder[] = [];
+      const pendingForUser: { stockSell: ParsedOrder; candidates: OpenPutCandidate[] }[] = [];
+
+      // Use all parsed orders (including current file) to detect open PUTs
+      const allOptionOrders = [...mergedCallOrders, ...mergedPutOrders, ...orders.filter(o => !o.isStockTrade && !o.isAssignment)];
+
+      for (const stockSell of allParsedOrders) {
+        const openPuts = detectOpenPuts(allOptionOrders, ticker);
+        if (openPuts.length === 1) {
+          newAssignments.push(buildAssignmentOrder(stockSell, openPuts[0].strike));
+        } else if (openPuts.length > 1) {
+          pendingForUser.push({ stockSell, candidates: openPuts });
+        }
+        // 0 open PUTs → ignore
+      }
+
+      if (newAssignments.length > 0) {
+        setAssignmentOrders(prev => [...prev, ...newAssignments]);
+      }
+
+      if (pendingForUser.length > 0) {
+        setPendingAssignments(pendingForUser);
+        setCurrentPendingIdx(0);
+        setShowAssignmentDialog(true);
+      }
       
       // Recalculate with appropriate orders
-      const ordersForMetrics = includePutPremiums ? [...mergedCallOrders, ...mergedPutOrders] : mergedCallOrders;
+      const ordersForMetrics = [
+        ...(includePutPremiums ? [...mergedCallOrders, ...mergedPutOrders] : mergedCallOrders),
+        ...assignmentOrders,
+        ...newAssignments,
+      ];
       recalculateMetrics(ordersForMetrics, transactionCost);
       setHasUnsavedChanges(true);
       
-      const totalNew = newCallCount + newPutCount;
+      const totalNew = newCallCount + newPutCount + newAssignments.length;
       if (totalNew > 0) {
         const parts: string[] = [];
         if (newCallCount > 0) parts.push(`${newCallCount} CALL`);
         if (newPutCount > 0) parts.push(`${newPutCount} PUT`);
+        if (newAssignments.length > 0) parts.push(`${newAssignments.length} assegnaz.`);
         toast.success(`Aggiunte ${parts.join(' + ')} operazioni`);
-      } else {
+      } else if (pendingForUser.length === 0) {
         toast.info('Nessuna nuova operazione trovata');
       }
     } catch (err) {
@@ -234,7 +289,7 @@ export function CallPremiumCalculatorDialog({
     } finally {
       setIsProcessing(false);
     }
-  }, [ticker, transactionCost, callOrders, putOrders, underlyingPrice, recalculateMetrics, includePutPremiums, isCoveredCall, isMultiLeg]);
+  }, [ticker, transactionCost, callOrders, putOrders, assignmentOrders, underlyingPrice, recalculateMetrics, includePutPremiums, isCoveredCall, isMultiLeg]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -259,7 +314,7 @@ export function CallPremiumCalculatorDialog({
   // Handle PUT premiums toggle
   const handleTogglePutPremiums = (checked: boolean) => {
     setIncludePutPremiums(checked);
-    const orders = checked ? [...callOrders, ...putOrders] : callOrders;
+    const orders = [...(checked ? [...callOrders, ...putOrders] : callOrders), ...assignmentOrders];
     recalculateMetrics(orders, transactionCost);
     setHasUnsavedChanges(true);
   };
@@ -267,14 +322,52 @@ export function CallPremiumCalculatorDialog({
   // Handle order removal
   const handleRemoveOrder = (index: number) => {
     const newOrders = filteredOrders.filter((_, i) => i !== index);
-    // Split back into call/put
-    const calls = newOrders.filter(o => o.optionType !== 'PUT');
-    const puts = newOrders.filter(o => o.optionType === 'PUT');
+    const { calls, puts, assignments } = splitOrdersByType(newOrders);
     setCallOrders(calls);
     setPutOrders(puts);
+    setAssignmentOrders(assignments);
     if (puts.length === 0) setIncludePutPremiums(false);
     recalculateMetrics(newOrders, transactionCost);
     setHasUnsavedChanges(true);
+  };
+
+  // Handle assignment selection from pending dialog
+  const handleAssignmentSelect = (putStrike: number) => {
+    const pending = pendingAssignments[currentPendingIdx];
+    if (!pending) return;
+    
+    const newAssignment = buildAssignmentOrder(pending.stockSell, putStrike);
+    const updatedAssignments = [...assignmentOrders, newAssignment];
+    setAssignmentOrders(updatedAssignments);
+    
+    const nextIdx = currentPendingIdx + 1;
+    if (nextIdx < pendingAssignments.length) {
+      setCurrentPendingIdx(nextIdx);
+    } else {
+      setShowAssignmentDialog(false);
+      setPendingAssignments([]);
+      setCurrentPendingIdx(0);
+      // Recalculate with new assignments
+      const ordersForMetrics = [
+        ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
+        ...updatedAssignments,
+      ];
+      recalculateMetrics(ordersForMetrics, transactionCost);
+      toast.success(`Aggiunta ${updatedAssignments.length - assignmentOrders.length + 1} assegnazione`);
+    }
+    setHasUnsavedChanges(true);
+  };
+
+  // Skip assignment (ignore this stock sell)
+  const handleAssignmentSkip = () => {
+    const nextIdx = currentPendingIdx + 1;
+    if (nextIdx < pendingAssignments.length) {
+      setCurrentPendingIdx(nextIdx);
+    } else {
+      setShowAssignmentDialog(false);
+      setPendingAssignments([]);
+      setCurrentPendingIdx(0);
+    }
   };
 
   // Save to database
@@ -286,7 +379,7 @@ export function CallPremiumCalculatorDialog({
         ticker,
         option_symbol: optionSymbol,
         underlying,
-        orders_json: [...callOrders, ...putOrders],
+        orders_json: [...callOrders, ...putOrders, ...assignmentOrders],
         transaction_cost: transactionCost,
         net_per_share: isMultiLeg ? metrics.netPremium : metrics.netPerShare,
         first_operation_date: metrics.firstOperationDate,
@@ -309,6 +402,7 @@ export function CallPremiumCalculatorDialog({
         setMetrics(null);
         setCallOrders([]);
         setPutOrders([]);
+        setAssignmentOrders([]);
         setIncludePutPremiums(false);
         setParseResult(null);
         setLastOperationDate(null);
@@ -329,6 +423,7 @@ export function CallPremiumCalculatorDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
@@ -608,18 +703,26 @@ export function CallPremiumCalculatorDialog({
                                 </TableCell>
                                 <TableCell className="text-xs font-mono">
                                   {order.symbol}
-                                  {order.optionType === 'PUT' && (
+                                  {order.isAssignment && (
+                                    <Badge className="text-[10px] ml-1 px-1 py-0 bg-orange-500/20 text-orange-600 border-orange-500/30 hover:bg-orange-500/30">ASSEGNAZIONE</Badge>
+                                  )}
+                                  {!order.isAssignment && order.optionType === 'PUT' && (
                                     <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">PUT</Badge>
                                   )}
-                                  {order.optionType === 'CALL' && (
+                                  {!order.isAssignment && order.optionType === 'CALL' && (
                                     <Badge variant="outline" className="text-[10px] ml-1 px-1 py-0">CALL</Badge>
+                                  )}
+                                  {order.isAssignment && order.assignmentStrike && (
+                                    <span className="text-[10px] text-muted-foreground ml-1">
+                                      (strike {formatNumber(order.assignmentStrike, 2)})
+                                    </span>
                                   )}
                                 </TableCell>
                                 <TableCell className="text-xs text-muted-foreground">{order.expiryDate ?? '—'}</TableCell>
                                 <TableCell className="text-xs text-right">{order.quantity}</TableCell>
                                 <TableCell className="text-xs text-right">{formatNumber(order.avgPrice, 2)}</TableCell>
-                                <TableCell className={`text-xs text-right ${order.operation === 'sell' ? 'text-green-500' : 'text-red-500'}`}>
-                                  {order.operation === 'sell' ? '+' : '-'}{formatCurrency(order.orderValue, 'USD')}
+                                <TableCell className={`text-xs text-right ${order.orderValue >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {order.orderValue >= 0 ? '+' : ''}{formatCurrency(order.orderValue, 'USD')}
                                 </TableCell>
                                 <TableCell className="text-xs">
                                   <Button
@@ -688,5 +791,62 @@ export function CallPremiumCalculatorDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+      {/* Assignment PUT selection dialog */}
+      <Dialog open={showAssignmentDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowAssignmentDialog(false);
+          setPendingAssignments([]);
+          setCurrentPendingIdx(0);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base">Seleziona PUT assegnata</DialogTitle>
+            <DialogDescription>
+              {pendingAssignments[currentPendingIdx] && (
+                <>
+                  Trovata vendita di <span className="font-semibold">{pendingAssignments[currentPendingIdx].stockSell.quantity}</span> titoli{' '}
+                  <span className="font-mono">{pendingAssignments[currentPendingIdx].stockSell.symbol}</span> a{' '}
+                  <span className="font-semibold">{formatNumber(pendingAssignments[currentPendingIdx].stockSell.avgPrice, 2)}</span>.
+                  <br />Quale PUT è stata assegnata?
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {pendingAssignments[currentPendingIdx]?.candidates.map((candidate, idx) => {
+              const stockPrice = pendingAssignments[currentPendingIdx].stockSell.avgPrice;
+              const qty = pendingAssignments[currentPendingIdx].stockSell.quantity;
+              const pnl = (stockPrice - candidate.strike) * qty;
+              return (
+                <Button
+                  key={idx}
+                  variant="outline"
+                  className="w-full justify-between h-auto py-3"
+                  onClick={() => handleAssignmentSelect(candidate.strike)}
+                >
+                  <div className="text-left">
+                    <span className="font-mono text-sm">{candidate.symbol}</span>
+                    <span className="text-muted-foreground text-xs ml-2">Strike {candidate.strike}</span>
+                  </div>
+                  <span className={`text-sm font-medium ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {pnl >= 0 ? '+' : ''}{formatCurrency(pnl, 'USD')}
+                  </span>
+                </Button>
+              );
+            })}
+            <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={handleAssignmentSkip}>
+              Ignora questa vendita
+            </Button>
+          </div>
+          {pendingAssignments.length > 1 && (
+            <p className="text-xs text-muted-foreground text-center">
+              {currentPendingIdx + 1} di {pendingAssignments.length} vendite da associare
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
