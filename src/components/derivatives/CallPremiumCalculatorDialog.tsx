@@ -331,7 +331,7 @@ export function CallPremiumCalculatorDialog({
   // Handle PUT premiums toggle
   const handleTogglePutPremiums = (checked: boolean) => {
     setIncludePutPremiums(checked);
-    const orders = [...(checked ? [...callOrders, ...putOrders] : callOrders), ...assignmentOrders];
+    const orders = checked ? [...callOrders, ...putOrders] : callOrders;
     recalculateMetrics(orders, transactionCost);
     setHasUnsavedChanges(true);
   };
