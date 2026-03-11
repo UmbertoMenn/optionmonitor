@@ -790,6 +790,7 @@ export function CallPremiumCalculatorDialog({
           </div>
         </div>
       </DialogContent>
+    </Dialog>
 
       {/* Assignment PUT selection dialog */}
       <Dialog open={showAssignmentDialog} onOpenChange={(open) => {
