@@ -25,12 +25,33 @@ import {
   detectOpenPuts,
   buildAssignmentOrder,
   symbolMatchesTicker,
+  toIsoDateFromIT,
   
   PremiumMetrics,
   ParsedOrder,
   OrderParseResult,
   OpenPutCandidate,
 } from '@/lib/orderFileParser';
+
+/**
+ * Insert an assignment order into an orders array at the correct chronological position.
+ * The file order is descending (most recent first), so we find the first order
+ * whose ISO date is <= the assignment's ISO date and insert before it.
+ */
+function insertAssignmentInOrder(orders: ParsedOrder[], assignment: ParsedOrder): ParsedOrder[] {
+  const assignIso = toIsoDateFromIT(assignment.validityDate) || '';
+  const result = [...orders];
+  let insertIdx = result.length; // default: append at end
+  for (let i = 0; i < result.length; i++) {
+    const orderIso = toIsoDateFromIT(result[i].validityDate) || '';
+    if (orderIso && assignIso && orderIso <= assignIso) {
+      insertIdx = i;
+      break;
+    }
+  }
+  result.splice(insertIdx, 0, assignment);
+  return result;
+}
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { buildOptionStratUrlFromOrders } from '@/lib/optionStratUrl';
 import { useCoveredCallPremiums, CoveredCallPremium } from '@/hooks/useCoveredCallPremiums';
