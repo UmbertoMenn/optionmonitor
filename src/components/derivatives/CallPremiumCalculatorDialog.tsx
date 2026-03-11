@@ -88,6 +88,15 @@ export function CallPremiumCalculatorDialog({
   const [historicalPremiums, setHistoricalPremiums] = useState<CoveredCallPremium[]>([]);
   const [showHistoricalPicker, setShowHistoricalPicker] = useState(false);
   const [selectedHistoricalId, setSelectedHistoricalId] = useState<string>('');
+  const [assignmentOrders, setAssignmentOrders] = useState<ParsedOrder[]>([]);
+  
+  // Pending assignment selection state
+  const [pendingAssignments, setPendingAssignments] = useState<{
+    stockSell: ParsedOrder;
+    candidates: OpenPutCandidate[];
+  }[]>([]);
+  const [currentPendingIdx, setCurrentPendingIdx] = useState(0);
+  const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
 
   // Derived: combined orders based on toggle
   const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
