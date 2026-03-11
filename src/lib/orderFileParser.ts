@@ -675,7 +675,7 @@ export function filterAndCalculateIronCondorPremiums(
   const filteredOrders = orders.filter(order => {
     const isExecuted = order.status.toLowerCase() === 'eseguito';
     const matchesTicker = symbolMatchesTicker(order.symbol, ticker);
-    return isExecuted && matchesTicker;
+    return isExecuted && matchesTicker && !order.isStockTrade && !order.isAssignment;
   });
 
   let totalBuys = 0;
