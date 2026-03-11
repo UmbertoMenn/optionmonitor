@@ -1,29 +1,36 @@
 
 
-## Cambio logica Rolling Dinamico
+## Fix: Stock trades (NN) inclusi come opzioni + perdita ordini al salvataggio
 
-### Cosa cambia
+### Bug 1: Ordini non-opzione inclusi nel calcolo
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+Il parser legge la colonna `Call/Put`. Per le righe con `NN` (azioni, non opzioni), `normalizeOptionType` ritorna `null`. Ma questi ordini non vengono mai filtrati e finiscono nelle operazioni mostrate nella calcolatrice.
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+**Fix in `src/lib/orderFileParser.ts`** — nel loop di parsing (riga ~443), aggiungere un filtro: se la colonna `Call/Put` esiste e il valore è "NN" (o altro valore non-opzione), saltare la riga.
 
-### Logica implementativa
+```typescript
+// After parsing optionType (line ~434)
+// Skip non-option rows (e.g. stock trades where Call/Put = "NN")
+if (colIndices.callPut !== -1 && optionType === null) {
+  const callPutRaw = String(row[colIndices.callPut] || '').trim().toUpperCase();
+  if (callPutRaw === 'NN' || callPutRaw === '') continue;
+}
+```
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+### Bug 2: Ordini persi al salvataggio dopo rimozione
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
+Quando si rimuove un ordine e si salva, `handleSave` salva `filteredOrders` che è `callOrders` quando `includePutPremiums` è false. Ma `handleRemoveOrder` splitta con `o.optionType !== 'PUT'` (calls) e `o.optionType === 'PUT'` (puts), quindi i PUT vengono persi dal salvataggio.
 
-### File modificati
+Questo bug esiste già a prescindere dal problema NN, ma il problema NN lo rende più visibile. 
 
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+**Fix in `src/components/derivatives/CallPremiumCalculatorDialog.tsx`** — `handleSave` deve salvare **tutti** gli ordini (call + put), non solo `filteredOrders`:
+
+```typescript
+// Line ~288: save ALL orders, not just filtered
+orders_json: [...callOrders, ...putOrders],
+```
+
+### File da modificare
+- `src/lib/orderFileParser.ts` — filtrare righe con Call/Put = "NN"
+- `src/components/derivatives/CallPremiumCalculatorDialog.tsx` — salvare tutti gli ordini nel handleSave
 
