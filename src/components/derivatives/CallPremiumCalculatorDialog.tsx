@@ -339,10 +339,9 @@ export function CallPremiumCalculatorDialog({
   // Handle order removal
   const handleRemoveOrder = (index: number) => {
     const newOrders = filteredOrders.filter((_, i) => i !== index);
-    const { calls, puts, assignments } = splitOrdersByType(newOrders);
+    const { calls, puts } = splitOrdersByType(newOrders);
     setCallOrders(calls);
     setPutOrders(puts);
-    setAssignmentOrders(assignments);
     if (puts.length === 0) setIncludePutPremiums(false);
     recalculateMetrics(newOrders, transactionCost);
     setHasUnsavedChanges(true);
