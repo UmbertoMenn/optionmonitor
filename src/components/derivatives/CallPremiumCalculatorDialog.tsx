@@ -106,9 +106,10 @@ export function CallPremiumCalculatorDialog({
 
   // Helper to split saved orders into call/put
   const splitOrdersByType = (orders: ParsedOrder[]) => {
-    const calls = orders.filter(o => o.optionType !== 'PUT');
-    const puts = orders.filter(o => o.optionType === 'PUT');
-    return { calls, puts };
+    const calls = orders.filter(o => o.optionType !== 'PUT' && !o.isAssignment);
+    const puts = orders.filter(o => o.optionType === 'PUT' && !o.isAssignment);
+    const assignments = orders.filter(o => o.isAssignment === true);
+    return { calls, puts, assignments };
   };
 
   // Load saved data when dialog opens
