@@ -789,6 +789,62 @@ export function CallPremiumCalculatorDialog({
           </div>
         </div>
       </DialogContent>
-    </Dialog>
+
+      {/* Assignment PUT selection dialog */}
+      <Dialog open={showAssignmentDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowAssignmentDialog(false);
+          setPendingAssignments([]);
+          setCurrentPendingIdx(0);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base">Seleziona PUT assegnata</DialogTitle>
+            <DialogDescription>
+              {pendingAssignments[currentPendingIdx] && (
+                <>
+                  Trovata vendita di <span className="font-semibold">{pendingAssignments[currentPendingIdx].stockSell.quantity}</span> titoli{' '}
+                  <span className="font-mono">{pendingAssignments[currentPendingIdx].stockSell.symbol}</span> a{' '}
+                  <span className="font-semibold">{formatNumber(pendingAssignments[currentPendingIdx].stockSell.avgPrice, 2)}</span>.
+                  <br />Quale PUT è stata assegnata?
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {pendingAssignments[currentPendingIdx]?.candidates.map((candidate, idx) => {
+              const stockPrice = pendingAssignments[currentPendingIdx].stockSell.avgPrice;
+              const qty = pendingAssignments[currentPendingIdx].stockSell.quantity;
+              const pnl = (stockPrice - candidate.strike) * qty;
+              return (
+                <Button
+                  key={idx}
+                  variant="outline"
+                  className="w-full justify-between h-auto py-3"
+                  onClick={() => handleAssignmentSelect(candidate.strike)}
+                >
+                  <div className="text-left">
+                    <span className="font-mono text-sm">{candidate.symbol}</span>
+                    <span className="text-muted-foreground text-xs ml-2">Strike {candidate.strike}</span>
+                  </div>
+                  <span className={`text-sm font-medium ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {pnl >= 0 ? '+' : ''}{formatCurrency(pnl, 'USD')}
+                  </span>
+                </Button>
+              );
+            })}
+            <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={handleAssignmentSkip}>
+              Ignora questa vendita
+            </Button>
+          </div>
+          {pendingAssignments.length > 1 && (
+            <p className="text-xs text-muted-foreground text-center">
+              {currentPendingIdx + 1} di {pendingAssignments.length} vendite da associare
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>;
   );
 }
