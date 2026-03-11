@@ -845,6 +845,6 @@ export function CallPremiumCalculatorDialog({
           )}
         </DialogContent>
       </Dialog>
-    </>;
+    </>
   );
 }
