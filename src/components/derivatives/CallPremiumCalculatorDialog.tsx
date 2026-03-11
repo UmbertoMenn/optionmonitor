@@ -314,7 +314,7 @@ export function CallPremiumCalculatorDialog({
   // Handle PUT premiums toggle
   const handleTogglePutPremiums = (checked: boolean) => {
     setIncludePutPremiums(checked);
-    const orders = checked ? [...callOrders, ...putOrders] : callOrders;
+    const orders = [...(checked ? [...callOrders, ...putOrders] : callOrders), ...assignmentOrders];
     recalculateMetrics(orders, transactionCost);
     setHasUnsavedChanges(true);
   };
@@ -322,14 +322,52 @@ export function CallPremiumCalculatorDialog({
   // Handle order removal
   const handleRemoveOrder = (index: number) => {
     const newOrders = filteredOrders.filter((_, i) => i !== index);
-    // Split back into call/put
-    const calls = newOrders.filter(o => o.optionType !== 'PUT');
-    const puts = newOrders.filter(o => o.optionType === 'PUT');
+    const { calls, puts, assignments } = splitOrdersByType(newOrders);
     setCallOrders(calls);
     setPutOrders(puts);
+    setAssignmentOrders(assignments);
     if (puts.length === 0) setIncludePutPremiums(false);
     recalculateMetrics(newOrders, transactionCost);
     setHasUnsavedChanges(true);
+  };
+
+  // Handle assignment selection from pending dialog
+  const handleAssignmentSelect = (putStrike: number) => {
+    const pending = pendingAssignments[currentPendingIdx];
+    if (!pending) return;
+    
+    const newAssignment = buildAssignmentOrder(pending.stockSell, putStrike);
+    const updatedAssignments = [...assignmentOrders, newAssignment];
+    setAssignmentOrders(updatedAssignments);
+    
+    const nextIdx = currentPendingIdx + 1;
+    if (nextIdx < pendingAssignments.length) {
+      setCurrentPendingIdx(nextIdx);
+    } else {
+      setShowAssignmentDialog(false);
+      setPendingAssignments([]);
+      setCurrentPendingIdx(0);
+      // Recalculate with new assignments
+      const ordersForMetrics = [
+        ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
+        ...updatedAssignments,
+      ];
+      recalculateMetrics(ordersForMetrics, transactionCost);
+      toast.success(`Aggiunta ${updatedAssignments.length - assignmentOrders.length + 1} assegnazione`);
+    }
+    setHasUnsavedChanges(true);
+  };
+
+  // Skip assignment (ignore this stock sell)
+  const handleAssignmentSkip = () => {
+    const nextIdx = currentPendingIdx + 1;
+    if (nextIdx < pendingAssignments.length) {
+      setCurrentPendingIdx(nextIdx);
+    } else {
+      setShowAssignmentDialog(false);
+      setPendingAssignments([]);
+      setCurrentPendingIdx(0);
+    }
   };
 
   // Save to database
