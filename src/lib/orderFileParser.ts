@@ -270,14 +270,26 @@ export function isLegOpenInOrders(
 /**
  * Merge new orders with existing ones, avoiding duplicates
  */
-export function mergeOrders(existingOrders: ParsedOrder[], newOrders: ParsedOrder[]): ParsedOrder[] {
+/**
+ * Merge new orders with existing ones, avoiding duplicates.
+ * If afterDate is provided (ISO format), only new orders with validityDate strictly
+ * after that date will be considered for merge.
+ */
+export function mergeOrders(existingOrders: ParsedOrder[], newOrders: ParsedOrder[], afterDate?: string | null): ParsedOrder[] {
   const merged = [...existingOrders];
   const existingKeys = new Set(existingOrders.map(orderKey));
   
   for (const newOrder of newOrders) {
-    if (!existingKeys.has(orderKey(newOrder))) {
-      merged.push(newOrder);
+    // Skip duplicates
+    if (existingKeys.has(orderKey(newOrder))) continue;
+    
+    // If afterDate is set, skip orders that are not strictly after it
+    if (afterDate) {
+      const orderIso = toIsoDateFromIT(newOrder.validityDate);
+      if (!orderIso || orderIso <= afterDate) continue;
     }
+    
+    merged.push(newOrder);
   }
   
   return merged;
