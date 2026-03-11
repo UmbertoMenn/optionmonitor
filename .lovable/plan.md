@@ -1,19 +1,29 @@
 
 
-## Fix: Ordinare operazioni per data decrescente nella calcolatrice premi
+## Cambio logica Rolling Dinamico
 
-### Problema
-Le operazioni nella tabella della calcolatrice vengono mostrate nell'ordine in cui sono state inserite/parsate, senza alcun ordinamento. L'utente si aspetta di vederle ordinate per data operazione decrescente (più recenti in alto).
+### Cosa cambia
 
-### Soluzione
-In `src/components/derivatives/CallPremiumCalculatorDialog.tsx`, riga ~89, ordinare `filteredOrders` per `validityDate` decrescente:
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-```typescript
-const filteredOrders = (includePutPremiums ? [...callOrders, ...putOrders] : callOrders)
-  .slice()
-  .sort((a, b) => (b.validityDate || '').localeCompare(a.validityDate || ''));
-```
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-### File da modificare
-- `src/components/derivatives/CallPremiumCalculatorDialog.tsx` — 1 riga
+### Logica implementativa
+
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
+
+### File modificati
+
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
 
