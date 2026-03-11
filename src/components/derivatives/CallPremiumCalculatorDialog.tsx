@@ -411,9 +411,9 @@ export function CallPremiumCalculatorDialog({
     }
   };
 
-  // Reset all data
+  // Reset all data (deletes from DB too)
   const handleReset = async () => {
-    if (ticker && confirm('Cancellare tutti i dati salvati per questo ticker?')) {
+    if (ticker && confirm('Cancellare tutti i dati salvati per questo ticker? Questa azione è irreversibile.')) {
       try {
         await deletePremium({ ticker, optionSymbol });
         setMetrics(null);
@@ -429,6 +429,18 @@ export function CallPremiumCalculatorDialog({
         toast.error('Errore durante la cancellazione');
       }
     }
+  };
+
+  // Clear orders locally (does NOT delete from DB — can recover by reopening)
+  const handleClearOrders = () => {
+    setMetrics(null);
+    setCallOrders([]);
+    setPutOrders([]);
+    setIncludePutPremiums(false);
+    setParseResult(null);
+    setLastOperationDate(null);
+    setHasUnsavedChanges(false);
+    toast.info('Operazioni rimosse dalla vista');
   };
 
   // Format date for display
