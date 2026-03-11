@@ -233,8 +233,12 @@ export function CallPremiumCalculatorDialog({
         ? filterAndCalculateIronCondorPremiums(orders, ticker)
         : filterAndCalculateCallPremiums(orders, ticker, underlyingPrice);
       
-      // Merge CALL orders with existing
-      const mergedCallOrders = mergeOrders(callOrders, result.filteredOrders);
+      // Determine cutoff date: only add orders after the last existing operation
+      const existingDates = [...callOrders, ...putOrders].map(o => o.validityDate);
+      const cutoffDate = findLastOperationDate(existingDates);
+
+      // Merge CALL orders with existing (date-filtered)
+      const mergedCallOrders = mergeOrders(callOrders, result.filteredOrders, cutoffDate);
       const newCallCount = mergedCallOrders.length - callOrders.length;
       setCallOrders(mergedCallOrders);
       
@@ -243,7 +247,7 @@ export function CallPremiumCalculatorDialog({
       let newPutCount = 0;
       if (isCoveredCall) {
         const putResult = filterAndCalculatePutPremiums(orders, ticker);
-        mergedPutOrders = mergeOrders(putOrders, putResult.filteredOrders);
+        mergedPutOrders = mergeOrders(putOrders, putResult.filteredOrders, cutoffDate);
         newPutCount = mergedPutOrders.length - putOrders.length;
         setPutOrders(mergedPutOrders);
       }
@@ -407,9 +411,9 @@ export function CallPremiumCalculatorDialog({
     }
   };
 
-  // Reset all data
+  // Reset all data (deletes from DB too)
   const handleReset = async () => {
-    if (ticker && confirm('Cancellare tutti i dati salvati per questo ticker?')) {
+    if (ticker && confirm('Cancellare tutti i dati salvati per questo ticker? Questa azione è irreversibile.')) {
       try {
         await deletePremium({ ticker, optionSymbol });
         setMetrics(null);
@@ -425,6 +429,18 @@ export function CallPremiumCalculatorDialog({
         toast.error('Errore durante la cancellazione');
       }
     }
+  };
+
+  // Clear orders locally (does NOT delete from DB — can recover by reopening)
+  const handleClearOrders = () => {
+    setMetrics(null);
+    setCallOrders([]);
+    setPutOrders([]);
+    setIncludePutPremiums(false);
+    setParseResult(null);
+    setLastOperationDate(null);
+    setHasUnsavedChanges(false);
+    toast.info('Operazioni rimosse dalla vista');
   };
 
   // Format date for display
@@ -775,7 +791,17 @@ export function CallPremiumCalculatorDialog({
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={handleClearOrders}
+                    title="Pulisci operazioni dalla vista (senza cancellare dal database)"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Cancella
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleReset}
+                    title="Cancella tutto dal database (irreversibile)"
                   >
                     <RefreshCw className="w-4 h-4 mr-1" />
                     Reset
