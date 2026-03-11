@@ -22,10 +22,14 @@ import {
   findLastOperationDate,
   mergeOrders,
   isLegOpenInOrders,
+  detectOpenPuts,
+  buildAssignmentOrder,
+  symbolMatchesTicker,
   
   PremiumMetrics,
   ParsedOrder,
-  OrderParseResult
+  OrderParseResult,
+  OpenPutCandidate,
 } from '@/lib/orderFileParser';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { buildOptionStratUrlFromOrders } from '@/lib/optionStratUrl';
