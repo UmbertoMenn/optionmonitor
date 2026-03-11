@@ -99,7 +99,10 @@ export function CallPremiumCalculatorDialog({
   const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
 
   // Derived: combined orders based on toggle
-  const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
+  const filteredOrders = [
+    ...(includePutPremiums ? [...callOrders, ...putOrders] : callOrders),
+    ...assignmentOrders,
+  ];
 
   // Helper to split saved orders into call/put
   const splitOrdersByType = (orders: ParsedOrder[]) => {
