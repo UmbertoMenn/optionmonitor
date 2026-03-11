@@ -574,6 +574,24 @@ export function extractStrikeFromSymbol(symbol: string): number | null {
 }
 
 /**
+ * Extract expiry date from option symbol (e.g., "UBERG6P95" -> month code G=Jul, year 6=2026)
+ * Month codes: A=Jan, B=Feb, C=Mar, D=Apr, E=May, F=Jun, G=Jul, H=Aug, I=Sep, J=Oct, K=Nov, L=Dec
+ */
+function extractExpiryFromSymbol(symbol: string): string | null {
+  const monthCodes: Record<string, string> = {
+    A: '01', B: '02', C: '03', D: '04', E: '05', F: '06',
+    G: '07', H: '08', I: '09', J: '10', K: '11', L: '12',
+  };
+  const match = symbol.match(/[A-Z]{1,5}([A-L])(\d)[CP]\d/i);
+  if (match) {
+    const month = monthCodes[match[1].toUpperCase()];
+    const year = 2020 + parseInt(match[2]);
+    if (month) return `${year}-${month}-21`;
+  }
+  return null;
+}
+
+/**
  * Open PUT candidate for assignment selection
  */
 export interface OpenPutCandidate {
