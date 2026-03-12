@@ -1,29 +1,49 @@
 
 
-## Cambio logica Rolling Dinamico
+## Due modifiche: chiusura PUT assegnata nell'URL + ordine cronologico nel riepilogo
 
-### Cosa cambia
+### 1. URL OptionStrat: chiudere la PUT assegnata a prezzo 0
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+**Problema**: Quando c'è un'assegnazione, l'URL include solo la riga stock (`TICKERx{qty}@{strike}@{sellPrice}`) ma non chiude l'opzione PUT assegnata. Su OptionStrat la PUT risulta ancora aperta.
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+**Soluzione**: Per ogni assegnazione, aggiungere anche una leg di chiusura della PUT a prezzo 0, nel formato `-.TICKER{YYMMDD}P{strike}@{sellPremium}@0`.
 
-### Logica implementativa
+Per farlo servono due sotto-modifiche:
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+**a) `src/lib/orderFileParser.ts` — `buildAssignmentOrder` + `ParsedOrder`**
+- Aggiungere campo opzionale `assignmentPutSymbol?: string` all'interfaccia `ParsedOrder`
+- In `buildAssignmentOrder`, accettare il simbolo PUT come parametro aggiuntivo e salvarlo nel campo `assignmentPutSymbol`
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
+**b) `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**
+- Passare `openPuts[0].symbol` (o il simbolo scelto dall'utente nel dialog) a `buildAssignmentOrder`
 
-### File modificati
+**c) `src/lib/optionStratUrl.ts` — `buildOptionStratUrlFromOrders`**
+- Per ogni assignment order, oltre alla riga stock, generare anche la leg di chiusura PUT:
+  - Estrarre tipo/strike/expiry dal `assignmentPutSymbol`
+  - Cercare nell'array degli ordini la vendita originale della PUT (stesso simbolo, operation=sell) per ricavare il prezzo di apertura
+  - Generare: `-.TICKER{YYMMDD}P{strike}@{openPrice}@0`
 
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+### 2. Riepilogo operazioni: ordine cronologico misto CALL+PUT
+
+**Problema**: `filteredOrders` è costruito come `[...callOrders, ...putOrders]` — prima tutte le CALL, poi tutte le PUT. L'utente vuole ordine cronologico come nel file Excel.
+
+**Soluzione in `src/components/derivatives/CallPremiumCalculatorDialog.tsx`**:
+- Cambiare la derivazione di `filteredOrders` (riga 123):
+  ```typescript
+  const filteredOrders = useMemo(() => {
+    const combined = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
+    // Sort by validityDate (file order preserved for same date via stable sort)
+    return combined.sort((a, b) => {
+      const da = toIsoDateFromIT(a.validityDate) || '';
+      const db = toIsoDateFromIT(b.validityDate) || '';
+      return db.localeCompare(da); // descending (most recent first, like file)
+    });
+  }, [callOrders, putOrders, includePutPremiums]);
+  ```
+- Nota: l'ordine file originale è dal più recente al più vecchio (descending). Per operazioni con stessa data, `sort` stabile preserva l'ordine di inserimento (= ordine file Excel).
+
+### File da modificare
+1. `src/lib/orderFileParser.ts` — aggiungere `assignmentPutSymbol` a `ParsedOrder` e parametro a `buildAssignmentOrder`
+2. `src/components/derivatives/CallPremiumCalculatorDialog.tsx` — passare simbolo PUT, ordinare `filteredOrders` cronologicamente
+3. `src/lib/optionStratUrl.ts` — generare leg chiusura PUT a @0 per ogni assegnazione
 
