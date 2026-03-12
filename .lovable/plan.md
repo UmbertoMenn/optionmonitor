@@ -1,26 +1,29 @@
 
 
-## Aggiornamento: assegnazioni nell'URL OptionStrat con quantità dinamica
+## Cambio logica Rolling Dinamico
 
-### Problema
-Il piano precedente hardcodava `x100` per le assegnazioni. In realtà la quantità venduta viene dal file Excel (campo `quantity` dell'ordine di assegnazione sintetico), e può essere diversa da 100.
+### Cosa cambia
 
-### Soluzione
-In `buildOptionStratUrlFromOrders` (`src/lib/optionStratUrl.ts`), nel loop `while (remaining.length > 0)`, prima di `parseSymbolTypeAndStrike`:
+**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
 
-```typescript
-if (opening.isAssignment && opening.assignmentStrike) {
-  const qty = opening.quantity; // dal file Excel (es. 100, 200, 50...)
-  const buyPrice = formatStrike(opening.assignmentStrike);
-  const sellPrice = formatStrike(opening.avgPrice);
-  legs.push(`${ticker}x${qty}@${buyPrice}@${sellPrice}`);
-  continue;
-}
-```
+**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
 
-- `quantity` è già disponibile nel `ParsedOrder` sintetico (copiato da `stockSellOrder.quantity` in `buildAssignmentOrder`)
-- Formato: `TICKERx{qty}@{strike}@{sellPrice}` (es. `TSLAx100@440@410`, `TSLAx200@440@410`)
+### Logica implementativa
 
-### File da modificare
-- `src/lib/optionStratUrl.ts` — aggiungere check `isAssignment` nel loop di `buildOptionStratUrlFromOrders`, ~riga 320
+In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+
+1. Calcolo premi annualizzati correnti (invariato)
+2. Se sotto soglia → `return null` (invariato)
+3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
+   - Calcolo strike minimo con distanza %
+   - Calcolo prezzo nuova call e costo riacquisto vecchia
+   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
+   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
+4. Se nessuna scadenza soddisfa → `return null`
+
+### File modificati
+
+- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
+- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
+- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
 
