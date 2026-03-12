@@ -13,6 +13,7 @@ export interface ParsedOrder {
   isStockTrade?: boolean;    // true for NN rows (stock buy/sell)
   isAssignment?: boolean;    // true for synthetic assignment orders
   assignmentStrike?: number; // strike of the assigned PUT
+  assignmentPutSymbol?: string; // symbol of the assigned PUT (for URL generation)
 }
 
 export interface OrderParseResult {
@@ -654,7 +655,7 @@ export function detectOpenPuts(orders: ParsedOrder[], ticker: string): OpenPutCa
  * Build a synthetic assignment order from a stock sell + assigned PUT strike.
  * orderValue = (avgPrice - putStrike) * quantity  (negative if strike > avgPrice)
  */
-export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: number): ParsedOrder {
+export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: number, putSymbol?: string): ParsedOrder {
   const assignmentValue = (stockSellOrder.avgPrice - putStrike) * stockSellOrder.quantity;
   return {
     operation: 'sell',
@@ -669,6 +670,7 @@ export function buildAssignmentOrder(stockSellOrder: ParsedOrder, putStrike: num
     isStockTrade: false,
     isAssignment: true,
     assignmentStrike: putStrike,
+    assignmentPutSymbol: putSymbol,
   };
 }
 
