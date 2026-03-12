@@ -274,7 +274,7 @@ export function CallPremiumCalculatorDialog({
       for (const stockSell of allParsedOrders) {
         const openPuts = detectOpenPuts(allOptionOrders, ticker);
         if (openPuts.length === 1) {
-          newAssignments.push(buildAssignmentOrder(stockSell, openPuts[0].strike));
+          newAssignments.push(buildAssignmentOrder(stockSell, openPuts[0].strike, openPuts[0].symbol));
         } else if (openPuts.length > 1) {
           pendingForUser.push({ stockSell, candidates: openPuts });
         }
