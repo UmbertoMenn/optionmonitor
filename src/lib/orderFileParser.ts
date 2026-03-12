@@ -900,7 +900,7 @@ export function calculatePremiumMetrics(
   const ordersFound = parseResult.filteredOrders.length;
   const totalLots = parseResult.filteredOrders.reduce((sum, o) => sum + o.quantity, 0);
   const commissions = parseResult.filteredOrders.reduce((sum, o) => {
-    const isFixedFee = o.optionType === 'NN' || o.isAssignment;
+    const isFixedFee = o.isStockTrade || o.isAssignment;
     return sum + (isFixedFee ? transactionCost : o.quantity * transactionCost);
   }, 0);
   const netPremium = parseResult.netPremium - commissions;
