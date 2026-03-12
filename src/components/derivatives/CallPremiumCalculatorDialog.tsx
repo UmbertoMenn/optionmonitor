@@ -118,9 +118,17 @@ export function CallPremiumCalculatorDialog({
   const [currentPendingIdx, setCurrentPendingIdx] = useState(0);
   const [showAssignmentDialog, setShowAssignmentDialog] = useState(false);
 
-  // Derived: combined orders based on toggle
+  // Derived: combined orders sorted chronologically (descending, most recent first)
   // Assignments are stored inline in callOrders, so no separate append needed
-  const filteredOrders = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
+  const filteredOrders = (() => {
+    const combined = includePutPremiums ? [...callOrders, ...putOrders] : callOrders;
+    // Stable sort by validityDate descending; same-date entries preserve original array order
+    return combined.sort((a, b) => {
+      const da = toIsoDateFromIT(a.validityDate) || '';
+      const db = toIsoDateFromIT(b.validityDate) || '';
+      return db.localeCompare(da);
+    });
+  })();
 
   // Helper to split saved orders into call/put (assignments stay in calls)
   const splitOrdersByType = (orders: ParsedOrder[]) => {
