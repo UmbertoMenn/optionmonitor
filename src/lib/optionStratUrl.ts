@@ -322,6 +322,20 @@ export function buildOptionStratUrlFromOrders(
       const buyPrice = formatStrike(order.assignmentStrike);
       const sellPrice = formatStrike(order.avgPrice);
       legs.push(`${ticker}x${order.quantity}@${buyPrice}@${sellPrice}`);
+
+      // Close the assigned PUT at price 0
+      if (order.assignmentPutSymbol) {
+        const putParsed = parseSymbolTypeAndStrike(order.assignmentPutSymbol);
+        if (putParsed) {
+          const putExpiry = expiryDateToYYMMDD(order.expiryDate);
+          // Find the original sell price of this PUT from the orders
+          const putSellOrder = chronological.find(
+            o => o.symbol === order.assignmentPutSymbol && o.operation === 'sell' && o.optionType === 'PUT'
+          );
+          const putOpenPrice = putSellOrder ? formatStrike(putSellOrder.avgPrice) : '0';
+          legs.push(`-.${ticker}${putExpiry}${putParsed.type}${formatStrike(putParsed.strike)}@${putOpenPrice}@0`);
+        }
+      }
     }
 
     // Expand only non-assignment orders for FIFO matching
