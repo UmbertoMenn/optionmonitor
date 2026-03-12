@@ -1,29 +1,54 @@
 
 
-## Cambio logica Rolling Dinamico
+## Diagnosi: Briefing mattutino non arrivato
 
-### Cosa cambia
+### Causa
+Tutte le chiamate `net.http_post` dal cron job vanno in **timeout a 5000ms** (default di pg_net). Le edge function impiegano più di 5 secondi (cold start + elaborazione), quindi la risposta non arriva mai. Questo riguarda **tutti** i cron job, non solo il briefing.
 
-**Attuale**: se i premi annualizzati superano la soglia, rolla sulla prima scadenza disponibile con distanza minima strike, **anche in perdita** (nessun controllo sul premio netto della nuova operazione).
+Ogni riga in `net._http_response` mostra:
+```
+error_msg: "Timeout of 5000 ms reached. Total time: 5001ms"
+status_code: NULL
+```
 
-**Nuovo**: se i premi annualizzati superano la soglia, cerca la **scadenza più vicina** con distanza minima strike tale per cui, dopo acquisto della vecchia e vendita della nuova, i premi annualizzati **restano ≥ soglia**.
+### Nota importante
+Le edge function probabilmente **vengono invocate comunque** (la HTTP request parte), ma pg_net chiude la connessione dopo 5s. Se la funzione completa entro il suo wall-clock limit (150s), potrebbe funzionare lo stesso — il timeout è solo lato pg_net. Tuttavia, se la funzione dipende dalla risposta (non è il caso qui), sarebbe un problema.
 
-### Logica implementativa
+Detto questo, è meglio correggere il timeout per evitare che pg_net accumuli risposte di errore inutili e per avere conferma di successo nei log.
 
-In `executeDynamicRolling` (`src/lib/backtestEngine.ts`):
+### Soluzione
+Aggiornare tutti i cron job per usare `timeout_milliseconds := 120000` (120 secondi) nella chiamata `net.http_post`. Questo richiede:
 
-1. Calcolo premi annualizzati correnti (invariato)
-2. Se sotto soglia → `return null` (invariato)
-3. **Nuovo ciclo**: per ogni scadenza disponibile (dalla più vicina):
-   - Calcolo strike minimo con distanza %
-   - Calcolo prezzo nuova call e costo riacquisto vecchia
-   - **Simulo** l'effetto sul calcolo annualizzato: creo un log "ipotetico" aggiungendo l'operazione di roll (vendita nuova - riacquisto vecchia) e ricalcolo `calcAnnualizedPremiumPct`
-   - Se il risultato ≥ soglia → eseguo il roll su quella scadenza/strike
-4. Se nessuna scadenza soddisfa → `return null`
+1. **Cancellare i cron job esistenti** e ricrearli con il parametro timeout:
+   - `daily-portfolio-briefing`
+   - `update-underlying-prices-every-5-min`
+   - `update-benchmark-prices-daily`
+   - `update-option-prices-every-5-min`
+   - `check-derivative-alerts`
 
-### File modificati
+2. Eseguire via SQL (non migration, contiene dati utente-specifici):
+```sql
+SELECT cron.unschedule('daily-portfolio-briefing');
+SELECT cron.schedule(
+  'daily-portfolio-briefing',
+  '0 8,9,10 * * 1-5',
+  $$
+  SELECT net.http_post(
+    url := '...functions/v1/daily-briefing',
+    headers := '...'::jsonb,
+    body := concat('{"time": "', now(), '"}')::jsonb,
+    timeout_milliseconds := 120000
+  ) AS request_id;
+  $$
+);
+```
+   Ripetere per gli altri 4 job attivi.
 
-- `src/lib/backtestEngine.ts` — funzione `executeDynamicRolling`
-- `src/lib/adjustmentRules.ts` — aggiornamento commento descrittivo (nessun campo nuovo necessario, i parametri `dynamicAnnualizedPremiumPct` e `dynamicMinDistancePct` restano gli stessi)
-- `src/components/simulator/AdjustmentRuleEditor.tsx` — aggiornamento testo descrittivo del Rolling Dinamico per riflettere la nuova logica
+3. **Pulizia** delle vecchie risposte in errore (opzionale):
+```sql
+DELETE FROM net._http_response WHERE status_code IS NULL;
+```
+
+### File da modificare
+Nessun file di codice — solo comandi SQL eseguiti direttamente sul database.
 
