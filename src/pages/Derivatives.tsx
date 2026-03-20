@@ -414,20 +414,39 @@ export function Derivatives() {
             </CardContent>
           </Card>
         ) : (<>
-        {/* Info aggiornamento dati */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">Info aggiornamento dati</span>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-              </TooltipTrigger>
-              <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
-                <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>
-                <p className="mt-1"><strong>Strategie Derivati:</strong> prezzi opzioni delayed 15 min, prezzi sottostanti aggiornati ogni 5 min.</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+        {/* Strategy Config Wizard */}
+        <StrategyConfigWizard
+          open={wizardOpen}
+          onOpenChange={setWizardOpen}
+          derivatives={derivatives}
+          allPositions={positions}
+          existingConfigs={strategyConfigs}
+          onSave={upsertBatch}
+          isSaving={isConfigSaving}
+        />
+
+        {/* Info + Riconfigura button */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Info aggiornamento dati</span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
+                  <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>
+                  <p className="mt-1"><strong>Strategie Derivati:</strong> prezzi opzioni delayed 15 min, prezzi sottostanti aggiornati ogni 5 min.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          {derivatives.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              {hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}
+            </Button>
+          )}
         </div>
 
         {/* Summary Card */}
