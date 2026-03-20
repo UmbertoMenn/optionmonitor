@@ -65,6 +65,13 @@ export interface OtherStrategyPosition {
   underlying: Position | null;
 }
 
+export interface DeRiskingCoveredCallPosition {
+  coveredCall: CoveredCallPosition;
+  protectionPut: Position;
+  isSynthetic: boolean;
+  syntheticPut?: Position; // Deep ITM sold PUT acting as stock
+}
+
 export interface GroupedOtherStrategy {
   underlying: string;
   options: OtherStrategyPosition[];
@@ -75,6 +82,7 @@ export interface GroupedOtherStrategy {
 
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
+  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
   longPuts: LongPutPosition[];
   ironCondors: IronCondorPosition[];
   doubleDiagonals: DoubleDiagonalPosition[];
