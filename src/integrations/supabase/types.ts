@@ -1010,6 +1010,50 @@ export type Database = {
           },
         ]
       }
+      strategy_configurations: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_synthetic: boolean
+          linked_stock_id: string | null
+          portfolio_id: string
+          position_signatures: Json
+          strategy_type: string
+          underlying: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_synthetic?: boolean
+          linked_stock_id?: string | null
+          portfolio_id: string
+          position_signatures?: Json
+          strategy_type: string
+          underlying: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_synthetic?: boolean
+          linked_stock_id?: string | null
+          portfolio_id?: string
+          position_signatures?: Json
+          strategy_type?: string
+          underlying?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategy_configurations_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       telegram_link_codes: {
         Row: {
           code: string
