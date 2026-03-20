@@ -75,6 +75,8 @@ import {
   buildOptionStratUrlFromOrders,
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
+import { StrategyConfigWizard } from '@/components/derivatives/StrategyConfigWizard';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
