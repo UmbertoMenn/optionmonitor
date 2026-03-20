@@ -192,7 +192,7 @@ export function Derivatives() {
       leapCalls: sortByOptionUnderlying(raw.leapCalls),
       groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
     };
-  }, [derivatives, positions, overrides, isAggregatedView]);
+  }, [derivatives, positions, overrides, strategyConfigs, isAggregatedView]);
 
   // Calculate total covered call contracts per underlying (for partial coverage badge)
   const totalCoveredCallContractsByUnderlying = useMemo(() => {
