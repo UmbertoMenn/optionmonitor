@@ -1,5 +1,6 @@
 import { Position } from '@/types/portfolio';
 import { DerivativeOverride, OverrideCategory } from '@/types/derivativeOverrides';
+import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 export interface CoveredCallPosition {
   option: Position;
@@ -64,6 +65,13 @@ export interface OtherStrategyPosition {
   underlying: Position | null;
 }
 
+export interface DeRiskingCoveredCallPosition {
+  coveredCall: CoveredCallPosition;
+  protectionPut: Position;
+  isSynthetic: boolean;
+  syntheticPut?: Position; // Deep ITM sold PUT acting as stock
+}
+
 export interface GroupedOtherStrategy {
   underlying: string;
   options: OtherStrategyPosition[];
@@ -74,6 +82,7 @@ export interface GroupedOtherStrategy {
 
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
+  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
   longPuts: LongPutPosition[];
   ironCondors: IronCondorPosition[];
   doubleDiagonals: DoubleDiagonalPosition[];
@@ -136,7 +145,8 @@ function clusterHasSoldOptions(cluster: Position[]): boolean {
 export function categorizeDerivatives(
   derivatives: Position[],
   allPositions: Position[],
-  overrides: DerivativeOverride[] = []
+  overrides: DerivativeOverride[] = [],
+  strategyConfigs: StrategyConfiguration[] = []
 ): DerivativeCategories {
   // Filter out EUROFOREX instruments from derivatives (currency options, not equity-related)
   const filteredDerivatives = derivatives.filter(d => {
@@ -145,6 +155,7 @@ export function categorizeDerivatives(
   });
   
   const coveredCalls: CoveredCallPosition[] = [];
+  const deRiskingCoveredCalls: DeRiskingCoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
   const ironCondors: IronCondorPosition[] = [];
   const doubleDiagonals: DoubleDiagonalPosition[] = [];
@@ -567,7 +578,7 @@ export function categorizeDerivatives(
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
-  return { coveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
 }
 
 /**

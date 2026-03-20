@@ -51,6 +51,7 @@ import {
   OtherStrategyPosition,
   GroupedOtherStrategy,
   DerivativeCategories,
+  DeRiskingCoveredCallPosition,
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { 
@@ -74,6 +75,8 @@ import {
   buildOptionStratUrlFromOrders,
 } from '@/lib/optionStratUrl';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
+import { StrategyConfigWizard } from '@/components/derivatives/StrategyConfigWizard';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from '@/contexts/PortfolioContext';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
@@ -100,6 +103,7 @@ export function Derivatives() {
   const navigate = useNavigate();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
+  const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
@@ -108,6 +112,7 @@ export function Derivatives() {
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
 
   const derivatives = useMemo(() => 
@@ -152,7 +157,7 @@ export function Derivatives() {
 
       // Initialize empty merged result
       const merged: DerivativeCategories = {
-        coveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
+        coveredCalls: [], deRiskingCoveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
         nakedPuts: [], leapCalls: [], otherStrategies: [], groupedOtherStrategies: [],
       };
 
@@ -162,6 +167,7 @@ export function Derivatives() {
         const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides);
 
         merged.coveredCalls.push(...result.coveredCalls);
+        merged.deRiskingCoveredCalls.push(...result.deRiskingCoveredCalls);
         merged.longPuts.push(...result.longPuts);
         merged.ironCondors.push(...result.ironCondors);
         merged.doubleDiagonals.push(...result.doubleDiagonals);
@@ -173,7 +179,7 @@ export function Derivatives() {
 
       raw = merged;
     } else {
-      raw = categorizeDerivatives(derivatives, positions, overrides);
+      raw = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
     }
     
     return {
@@ -186,7 +192,7 @@ export function Derivatives() {
       leapCalls: sortByOptionUnderlying(raw.leapCalls),
       groupedOtherStrategies: sortByUnderlyingString(raw.groupedOtherStrategies),
     };
-  }, [derivatives, positions, overrides, isAggregatedView]);
+  }, [derivatives, positions, overrides, strategyConfigs, isAggregatedView]);
 
   // Calculate total covered call contracts per underlying (for partial coverage badge)
   const totalCoveredCallContractsByUnderlying = useMemo(() => {
@@ -408,20 +414,39 @@ export function Derivatives() {
             </CardContent>
           </Card>
         ) : (<>
-        {/* Info aggiornamento dati */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">Info aggiornamento dati</span>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-              </TooltipTrigger>
-              <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
-                <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>
-                <p className="mt-1"><strong>Strategie Derivati:</strong> prezzi opzioni delayed 15 min, prezzi sottostanti aggiornati ogni 5 min.</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+        {/* Strategy Config Wizard */}
+        <StrategyConfigWizard
+          open={wizardOpen}
+          onOpenChange={setWizardOpen}
+          derivatives={derivatives}
+          allPositions={positions}
+          existingConfigs={strategyConfigs}
+          onSave={upsertBatch}
+          isSaving={isConfigSaving}
+        />
+
+        {/* Info + Riconfigura button */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Info aggiornamento dati</span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
+                  <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>
+                  <p className="mt-1"><strong>Strategie Derivati:</strong> prezzi opzioni delayed 15 min, prezzi sottostanti aggiornati ogni 5 min.</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          {derivatives.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              {hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}
+            </Button>
+          )}
         </div>
 
         {/* Summary Card */}
