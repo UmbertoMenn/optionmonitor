@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Settings2, Check, Zap, Plus, X, Wand2 } from 'lucide-react';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
@@ -309,7 +309,7 @@ export function StrategyConfigWizard({
           </span>
         </div>
 
-        <ScrollArea className="flex-1 pr-2">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
           <div className="space-y-4 pb-4">
             {/* === POOL === */}
             <Card className="border-dashed">
@@ -430,7 +430,7 @@ export function StrategyConfigWizard({
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
 
         <DialogFooter className="pt-4 border-t">
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
