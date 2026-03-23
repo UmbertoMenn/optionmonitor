@@ -450,8 +450,29 @@ export function Derivatives() {
           )}
         </div>
 
+        {/* Empty state: no configurations saved yet */}
+        {!hasConfigurations && derivatives.length > 0 && (
+          <Card className="p-8 text-center border-dashed">
+            <CardContent className="space-y-4">
+              <Settings2 className="w-12 h-12 mx-auto text-muted-foreground" />
+              <h2 className="text-lg font-semibold">Configura le strategie derivati</h2>
+              <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                Per visualizzare le strategie, configura prima come classificare le posizioni derivati.
+                La configurazione verrà ricordata per i prossimi upload.
+              </p>
+              <Button onClick={() => setWizardOpen(true)}>
+                <Settings className="w-4 h-4 mr-2" />
+                Configura strategie
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Main content — only show when configurations exist */}
+        {hasConfigurations && (<>
+
         {/* Summary Card */}
-        <DerivativesSummaryCard 
+        <DerivativesSummaryCard
           categories={categories}
           stockPositions={stockPositions}
           underlyingPrices={underlyingPrices}
