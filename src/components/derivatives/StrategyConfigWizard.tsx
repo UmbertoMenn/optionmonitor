@@ -371,6 +371,13 @@ export function StrategyConfigWizard({
                   <CardHeader className="pb-2 pt-3 px-4">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {(() => {
+                          const firstDeriv = strategy.positions.find(p => p.asset_type === 'derivative');
+                          const underlyingName = firstDeriv?.underlying || firstDeriv?.description || strategy.positions[0]?.description || '';
+                          return underlyingName ? (
+                            <span className="text-xs font-bold uppercase truncate max-w-[120px]">{underlyingName}</span>
+                          ) : null;
+                        })()}
                         <Select
                           value={strategy.strategyType}
                           onValueChange={(v) => updateStrategyType(strategy.id, v)}
