@@ -770,6 +770,7 @@ export function Derivatives() {
           </Card>
         </Collapsible>
         </>)}
+        </>)}
       </main>
     </div>
   );
