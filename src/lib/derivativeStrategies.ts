@@ -290,6 +290,11 @@ export function categorizeDerivatives(
           });
           usedDerivatives.add(call.id);
         }
+        // Mark any remaining unhandled positions as used → other strategies
+        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
+          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          usedDerivatives.add(opt.id);
+        }
         break;
       }
       case 'derisking_covered_call': {
