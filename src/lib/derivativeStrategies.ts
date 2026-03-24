@@ -376,6 +376,11 @@ export function categorizeDerivatives(
           nakedPuts.push({ option: put, underlying: linkedStock || null, contracts: Math.abs(put.quantity) });
           usedDerivatives.add(put.id);
         }
+        // Mark any remaining unhandled positions as used → other strategies
+        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
+          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          usedDerivatives.add(opt.id);
+        }
         break;
       }
       case 'leap_call': {
@@ -383,6 +388,11 @@ export function categorizeDerivatives(
         for (const call of calls) {
           leapCalls.push({ option: call, underlying: linkedStock || null, contracts: call.quantity });
           usedDerivatives.add(call.id);
+        }
+        // Mark any remaining unhandled positions as used → other strategies
+        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
+          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          usedDerivatives.add(opt.id);
         }
         break;
       }
