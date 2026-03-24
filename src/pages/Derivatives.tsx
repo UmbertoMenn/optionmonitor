@@ -544,16 +544,19 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
-        {/* Section 2: Protezioni - Long PUT (Collapsible) */}
+        {/* Section 2: De-Risking Covered Call (Collapsible) */}
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
               <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Umbrella className="w-5 h-5 text-emerald-500" />
-                    <CardTitle className="text-xl">Protezioni - Long Put</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.longPuts.length}</Badge>
+                    <div className="relative">
+                      <Shield className="w-5 h-5 text-primary" />
+                      <Umbrella className="w-3 h-3 text-emerald-500 absolute -bottom-0.5 -right-0.5" />
+                    </div>
+                    <CardTitle className="text-xl">De-Risking Covered Call</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.deRiskingCoveredCalls.length}</Badge>
                   </div>
                   {deRiskingOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
@@ -561,18 +564,28 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  Covered Call con protezione PUT (incluse sintetiche)
+                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.longPuts.length === 0 ? (
+                {categories.deRiskingCoveredCalls.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna protezione Long Put presente</p>
+                    <p className="text-sm">Nessuna De-Risking Covered Call presente</p>
                   </div>
                 ) : (
                   <div className="space-y-1 overflow-x-auto">
-                    {categories.longPuts.map((lp, index) => (
-                      <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
+                    {categories.deRiskingCoveredCalls.map((dr, index) => (
+                      <DeRiskingCoveredCallRow 
+                        key={index} 
+                        deRiskingCC={dr} 
+                        stockPositions={stockPositions} 
+                        getOverrideForPosition={getOverrideForPosition}
+                        underlyingPrices={underlyingPrices}
+                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                      />
                     ))}
                   </div>
                 )}
