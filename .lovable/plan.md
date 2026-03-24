@@ -1,46 +1,66 @@
 
 
-## Fix: detect put spread / diagonal put spread come "altre strategie"
+## Fix: Visualizzazione strategie dopo configurazione + sezione De-Risking CC mancante
 
-### Problema
-Quando ci sono una put venduta e una put comprata con strike più basso, la combinazione è un **bull put spread** (stessa scadenza) o un **diagonal put spread** (scadenze diverse). Attualmente `detectStrategyType` classifica erroneamente queste combinazioni — ad esempio come `derisking_covered_call` (riga 101) quando ci sono anche call vendute, perché il check `boughtPuts.length > 0` scatta senza verificare la relazione tra gli strike delle put.
+### Problemi identificati
 
-### Fix
+1. **BUG CRITICO**: La sezione "De-Risking Covered Call" non esiste nel rendering della pagina. `categories.deRiskingCoveredCalls` viene calcolato ma **mai visualizzato**. Le posizioni Accenture configurate come CC sintetica finiscono in `deRiskingCoveredCalls` e scompaiono dalla UI.
 
-**File**: `src/components/derivatives/StrategyConfigWizard.tsx` — funzione `detectStrategyType` (righe 82-109)
+2. **Ordine sezioni poco intuitivo**: La sezione "Protezioni - Long Put" (section 2) è posizionata prima di Iron Condor / Double Diagonal, il che non ha senso gerarchico.
 
-Aggiungere un check **prima** della logica covered call (riga 100): se ci sono put vendute E put comprate con strike inferiore allo strike della put venduta, e non ci sono call, → `other`.
+3. **Posizioni residue non consumate**: In Step 0.5 di `categorizeDerivatives`, se una config `derisking_covered_call` ha posizioni extra (es. sold puts non sintetiche), queste non vengono marcate come usate e finiscono in categorie sbagliate (Steps 1-6).
 
-Inoltre, nel ramo `derisking_covered_call` (riga 101), verificare che la put comprata abbia strike **superiore o uguale** allo strike della put venduta (protezione vera). Se lo strike della put comprata è **inferiore**, non è una protezione ma uno spread → non classificare come derisking.
+### Modifiche previste
 
-Logica aggiornata:
+#### File 1: `src/pages/Derivatives.tsx`
+
+**A. Aggiungere sezione "De-Risking Covered Call"**
+
+Creare un nuovo componente `DeRiskingCoveredCallRow` che mostra per ogni riga:
+- Badge "S" arancione se sintetica
+- Tutte le gambe (CALL venduta, PUT comprata di protezione, eventuale PUT venduta sintetica)
+- PMC, PS (prezzo sottostante real-time), prezzo opzione aggiornato, gain/loss % con colori verde/rosso
+- ITM/OTM badge, contratti, OptionStrat link, calcolatrice premi
+
+Aggiungere la sezione collapsibile tra "Covered Call" e "Iron Condor", con icona `Shield + Umbrella`, badge contatore, e rendering di `categories.deRiskingCoveredCalls`.
+
+**B. Riordinare le sezioni in modo intuitivo:**
+
+1. **Covered Call** (CC standard)
+2. **De-Risking Covered Call** (CC + protezione, incluse sintetiche)
+3. **Iron Condor**
+4. **Double Diagonal**
+5. **Naked Put**
+6. **Leap Call**
+7. **Protezioni - Long Put** (spostata qui, dopo le strategie principali)
+8. **Altre Strategie**
+
+**C. Sorting per `deRiskingCoveredCalls`**: aggiungere sorting nel `useMemo` delle categories.
+
+#### File 2: `src/lib/derivativeStrategies.ts`
+
+**D. Consumare TUTTE le posizioni residue in Step 0.5**
+
+Alla fine di ogni `case` nello switch di Step 0.5, marcare come usate tutte le posizioni `remaining` che non sono state consumate. Le posizioni non classificabili nel tipo specifico vengono aggiunte a `otherStrategies` come fallback. Questo impedisce che finiscano in categorie sbagliate nei passaggi successivi.
 
 ```typescript
-// Check for put spread (bought put strike < sold put strike) → 'other'
-if (soldPuts.length > 0 && boughtPuts.length > 0) {
-  const maxSoldPutStrike = Math.max(...soldPuts.map(p => p.strike_price || 0));
-  const minBoughtPutStrike = Math.min(...boughtPuts.map(p => p.strike_price || 0));
-  
-  // If bought put is below sold put → it's a spread, not protection
-  if (minBoughtPutStrike < maxSoldPutStrike) {
-    // If no calls involved, it's a pure put spread
-    if (soldCalls.length === 0 && boughtCalls.length === 0) return 'other';
-    // If calls are present but puts form a spread, don't treat bought put as protection
-    // Fall through without triggering derisking_covered_call
-  }
-}
-
-// In the covered call section, only classify as derisking if bought put is protective (strike >= sold put)
-if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
-  const isProtectivePut = boughtPuts.length > 0 && boughtPuts.every(bp => {
-    const relevantSoldPut = soldPuts.find(sp => true); // nearest sold put
-    return !relevantSoldPut || (bp.strike_price || 0) >= (relevantSoldPut.strike_price || 0);
-  });
-  if (isProtectivePut) return 'derisking_covered_call';
-  if (hasStock) return 'covered_call';
+// After each case block, mark all remaining as used
+const unhandled = remaining.filter(d => !usedDerivatives.has(d.id));
+for (const opt of unhandled) {
+  otherStrategies.push({ option: opt, underlying: linkedStock || null });
+  usedDerivatives.add(opt.id);
 }
 ```
 
+### Dettaglio `DeRiskingCoveredCallRow`
+
+Ogni riga mostra la CALL venduta come riga principale (simile a CoveredCallRow), con in più:
+- Badge "S" arancione se `isSynthetic`
+- Nel collapsible: dettagli della PUT protettiva e dell'eventuale PUT sintetica
+- Stesse colonne di CoveredCallRow: chevron, V badge, descrizione, OptionStrat, badges, ITM/OTM, menu, calculator, UNIT, PS, contratti, PMC, prezzo+%
+
 ### File da modificare
-- `src/components/derivatives/StrategyConfigWizard.tsx` — funzione `detectStrategyType`, righe 93-108
+
+1. `src/pages/Derivatives.tsx` — aggiungere sezione De-Risking CC, riordinare sezioni, creare `DeRiskingCoveredCallRow`
+2. `src/lib/derivativeStrategies.ts` — consumare posizioni residue in Step 0.5
 
