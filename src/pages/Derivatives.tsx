@@ -111,6 +111,7 @@ export function Derivatives() {
   const [doubleDiagonalOpen, setDoubleDiagonalOpen] = useState(false);
   const [nakedPutsOpen, setNakedPutsOpen] = useState(false);
   const [leapCallsOpen, setLeapCallsOpen] = useState(false);
+  const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
