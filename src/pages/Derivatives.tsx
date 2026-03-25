@@ -52,6 +52,7 @@ import {
   GroupedOtherStrategy,
   DerivativeCategories,
   DeRiskingCoveredCallPosition,
+  SyntheticCoveredCallPosition,
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { 
@@ -106,6 +107,7 @@ export function Derivatives() {
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
+  const [syntheticCCOpen, setSyntheticCCOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
   const [doubleDiagonalOpen, setDoubleDiagonalOpen] = useState(false);
@@ -158,7 +160,7 @@ export function Derivatives() {
 
       // Initialize empty merged result
       const merged: DerivativeCategories = {
-        coveredCalls: [], deRiskingCoveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
+        coveredCalls: [], syntheticCoveredCalls: [], deRiskingCoveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
         nakedPuts: [], leapCalls: [], otherStrategies: [], groupedOtherStrategies: [],
       };
 
@@ -169,6 +171,7 @@ export function Derivatives() {
         const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides, portfolioConfigs);
 
         merged.coveredCalls.push(...result.coveredCalls);
+        merged.syntheticCoveredCalls.push(...result.syntheticCoveredCalls);
         merged.deRiskingCoveredCalls.push(...result.deRiskingCoveredCalls);
         merged.longPuts.push(...result.longPuts);
         merged.ironCondors.push(...result.ironCondors);
@@ -187,6 +190,7 @@ export function Derivatives() {
     return {
       ...raw,
       coveredCalls: sortByOptionUnderlying(raw.coveredCalls),
+      syntheticCoveredCalls: sortByOptionUnderlying(raw.syntheticCoveredCalls),
       deRiskingCoveredCalls: [...raw.deRiskingCoveredCalls].sort((a, b) => 
         (a.coveredCall.option.underlying || '').localeCompare(b.coveredCall.option.underlying || '')
       ),
@@ -246,6 +250,13 @@ export function Derivatives() {
     categories.longPuts.forEach(lp => {
       if (lp.option.underlying) {
         names.add(lp.option.underlying);
+      }
+    });
+    
+    // Synthetic Covered Calls - ALL underlyings
+    categories.syntheticCoveredCalls.forEach(sc => {
+      if (sc.option.underlying) {
+        names.add(sc.option.underlying);
       }
     });
     
@@ -534,6 +545,56 @@ export function Derivatives() {
                             cc.underlying.description || cc.option.underlying || ''
                           ] || cc.contractsCovered
                         }
+                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                      />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+
+        {/* Section 1.5: Covered Call Sintetiche (Collapsible) */}
+        <Collapsible open={syntheticCCOpen} onOpenChange={setSyntheticCCOpen}>
+          <Card className="border-border bg-card">
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Shield className="w-5 h-5 text-primary" />
+                      <span className="absolute -bottom-0.5 -right-1 text-[9px] font-bold text-orange-400">S</span>
+                    </div>
+                    <CardTitle className="text-xl">Covered Call Sintetiche</CardTitle>
+                    <Badge variant="secondary" className="text-xs">{categories.syntheticCoveredCalls.length}</Badge>
+                  </div>
+                  {syntheticCCOpen ? (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground text-left">
+                  CALL vendute con PUT venduta deep ITM al posto del sottostante
+                </p>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                {categories.syntheticCoveredCalls.length === 0 ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    <p className="text-sm">Nessuna Covered Call Sintetica presente</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1 overflow-x-auto">
+                    {categories.syntheticCoveredCalls.map((scc, index) => (
+                      <SyntheticCoveredCallRow 
+                        key={index} 
+                        syntheticCC={scc} 
+                        stockPositions={stockPositions} 
+                        getOverrideForPosition={getOverrideForPosition}
+                        underlyingPrices={underlyingPrices}
                         getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
                       />
                     ))}
@@ -1118,6 +1179,285 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
         optionSymbol={optionSymbol}
         contractsInPortfolio={contractsCovered}
         underlyingPrice={(option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0}
+        strategyLegs={ccLegs}
+      />
+    </>
+  );
+}
+
+function SyntheticCoveredCallRow({ syntheticCC, stockPositions, getOverrideForPosition, underlyingPrices, getPremiumByTickerAndSymbol }: { syntheticCC: SyntheticCoveredCallPosition; getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined } & RowPropsWithPrices) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const { option, syntheticPut, contracts } = syntheticCC;
+
+  // ITM/OTM for the sold CALL
+  const strikePrice = option.strike_price || 0;
+  const underlyingPrice = (option.underlying ? underlyingPrices[option.underlying]?.price : 0) || 0;
+  const isITM = strikePrice < underlyingPrice;
+
+  const currentPrice = option.current_price || 0;
+  const avgCost = option.avg_cost || 0;
+  const priceChangePct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : null;
+
+  // Synthetic PUT details
+  const synthPutPrice = syntheticPut.current_price || 0;
+  const synthPutAvgCost = syntheticPut.avg_cost || 0;
+  const synthPutChangePct = synthPutAvgCost > 0 ? ((synthPutPrice - synthPutAvgCost) / synthPutAvgCost) * 100 : null;
+
+  // Get ticker for calculator & OptionStrat
+  const ticker = option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined;
+  const optionSymbol = `C${option.strike_price || 0}_${option.expiry_date || 'noexp'}`;
+  const savedPremium = ticker ? getPremiumByTickerAndSymbol(ticker, optionSymbol) : undefined;
+  const netPerShare = savedPremium?.net_per_share;
+  const ccLegs: StrategyLeg[] = [{ optionType: 'CALL', strikePrice: option.strike_price || 0, quantity: option.quantity }];
+  const hasMissingLegs = savedPremium && (savedPremium.orders_json as ParsedOrder[]).length > 0
+    ? !ccLegs.every(leg => isLegOpenInOrders(savedPremium.orders_json as ParsedOrder[], leg))
+    : false;
+
+  return (
+    <>
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <div 
+          role="button"
+          tabIndex={0}
+          onClick={() => setIsOpen(!isOpen)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
+          className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_2rem_8rem_6rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+        >
+            {/* Col 1: Chevron */}
+            {isOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            )}
+            
+            {/* Col 2: V Badge */}
+            <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
+            
+            {/* Col 3: Description + Synthetic badge */}
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span 
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-bold cursor-help shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    S
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Synthetic position / short PUT delta -1</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            
+            {/* Col 4: OptionStrat */}
+            <OptionStratButton url={
+              ticker
+                ? (savedPremium?.orders_json?.length
+                    ? buildOptionStratUrlFromOrders(savedPremium.orders_json, ticker, null)
+                    : buildCoveredCallUrl(ticker, option))
+                : null
+            } />
+            
+            {/* Col 5: Badges */}
+            <div className="flex items-center gap-1 w-12 justify-end">
+              {getOverrideForPosition(option.id) && <OverrideBadge />}
+            </div>
+            
+            {/* Col 6: ITM/OTM */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge 
+                  variant="outline"
+                  className={`text-xs cursor-help ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {isITM ? 'ITM' : 'OTM'}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isITM ? 'In The Money: il sottostante è sopra lo strike' : 'Out of The Money: il sottostante è sotto lo strike'}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 7: Menu */}
+            <MoveOptionMenu 
+              option={option} 
+              availableStocks={stockPositions} 
+              currentCategory="covered_call" 
+            />
+            
+            {/* Col 8: Calculator */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-7 w-7 ${
+                    hasMissingLegs
+                      ? 'text-destructive hover:text-destructive hover:bg-destructive/20'
+                      : savedPremium && savedPremium.orders_json.length > 0
+                        ? 'text-primary hover:text-primary hover:bg-primary/20'
+                        : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted'
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowCalculator(true);
+                  }}
+                >
+                  <Calculator className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Calcola premi CALL incassati</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 9: UNIT */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span 
+                  className={`text-sm text-right cursor-help font-medium whitespace-nowrap ${
+                    netPerShare !== undefined 
+                      ? netPerShare >= 0 
+                        ? 'text-green-500' 
+                        : 'text-red-500'
+                      : 'text-muted-foreground'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {netPerShare !== undefined 
+                    ? <>
+                        UNIT: {formatCurrency(netPerShare, getOptionCurrency(option))} {underlyingPrice > 0 && (
+                          <span className="text-muted-foreground">
+                            ({(netPerShare / underlyingPrice) * 100 >= 0 ? '+' : ''}{formatNumber((netPerShare / underlyingPrice) * 100, 1)}%)
+                          </span>
+                        )}
+                      </>
+                    : '-'
+                  }
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Netto unitario premi (dalla calcolatrice)</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 10: PS */}
+            <div className="text-right flex items-center justify-end">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                    PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Prezzo Sottostante</p>
+                </TooltipContent>
+              </Tooltip>
+              {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
+                <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
+              )}
+            </div>
+            
+            {/* Col 11: Contratti */}
+            <span className="text-sm text-muted-foreground text-right">
+              {contracts} × 100
+            </span>
+            
+            {/* Col 12: PMC */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Prezzo Medio di Carico Opzione</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Col 13: Prezzo + % */}
+            <div className="flex items-center gap-1 justify-end whitespace-nowrap">
+              <span className="font-semibold text-sm">
+                {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
+              </span>
+              {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
+                <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+              )}
+              {priceChangePct !== null && (
+                <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+        </div>
+        <CollapsibleContent>
+          <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-3">
+            {/* Sold CALL details */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground text-xs">Sottostante</p>
+                <p className="font-medium">{option.underlying || option.description}</p>
+                <p className="text-xs text-orange-400">Sintetico (PUT venduta deep ITM)</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Strike CALL</p>
+                <p className="font-medium">{option.strike_price}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Scadenza CALL</p>
+                <p className="font-medium">{formatExpiryMMY(option.expiry_date)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">Prezzo CALL</p>
+                <p className="font-medium">{formatCurrency(option.current_price || 0, getOptionCurrency(option))}</p>
+              </div>
+            </div>
+            
+            {/* Synthetic PUT (deep ITM sold PUT) */}
+            <div className="pt-2 border-t border-border/30">
+              <p className="text-xs text-orange-400 font-medium mb-2">📌 PUT Sintetica (venduta deep ITM)</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground text-xs">Strike</p>
+                  <p className="font-medium">{syntheticPut.strike_price}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Scadenza</p>
+                  <p className="font-medium">{formatExpiryMMY(syntheticPut.expiry_date)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">PMC</p>
+                  <p className="font-medium">{formatCurrency(synthPutAvgCost, getOptionCurrency(syntheticPut))}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Prezzo</p>
+                  <div className="flex items-center gap-1">
+                    <span className="font-medium">{formatCurrency(synthPutPrice, getOptionCurrency(syntheticPut))}</span>
+                    {synthPutChangePct !== null && (
+                      <span className={`text-xs font-medium ${synthPutChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {synthPutChangePct >= 0 ? '+' : ''}{synthPutChangePct.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      
+      <CallPremiumCalculatorDialog
+        open={showCalculator}
+        onOpenChange={setShowCalculator}
+        underlying={option.underlying || option.description || ''}
+        ticker={ticker}
+        optionSymbol={optionSymbol}
+        contractsInPortfolio={contracts}
+        underlyingPrice={underlyingPrice}
         strategyLegs={ccLegs}
       />
     </>

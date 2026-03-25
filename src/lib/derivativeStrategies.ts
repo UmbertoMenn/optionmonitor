@@ -72,6 +72,12 @@ export interface DeRiskingCoveredCallPosition {
   syntheticPut?: Position; // Deep ITM sold PUT acting as stock
 }
 
+export interface SyntheticCoveredCallPosition {
+  option: Position;           // CALL venduta
+  syntheticPut: Position;     // PUT venduta deep ITM (sostituto stock)
+  contracts: number;
+}
+
 export interface GroupedOtherStrategy {
   underlying: string;
   options: OtherStrategyPosition[];
@@ -82,6 +88,7 @@ export interface GroupedOtherStrategy {
 
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
+  syntheticCoveredCalls: SyntheticCoveredCallPosition[];
   deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
   longPuts: LongPutPosition[];
   ironCondors: IronCondorPosition[];
@@ -155,6 +162,7 @@ export function categorizeDerivatives(
   });
   
   const coveredCalls: CoveredCallPosition[] = [];
+  const syntheticCoveredCalls: SyntheticCoveredCallPosition[] = [];
   const deRiskingCoveredCalls: DeRiskingCoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
   const ironCondors: IronCondorPosition[] = [];
@@ -299,12 +307,18 @@ export function categorizeDerivatives(
       }
       case 'derisking_covered_call': {
         const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
-        const boughtPuts = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
         const stock = linkedStock || createDummyStock(config.underlying);
-        // If we have synthetic PUT (deep ITM sold PUT), find it
+        
+        // If synthetic, isolate the sold PUT (deep ITM) FIRST as stock replacement
         const syntheticPut = config.is_synthetic 
           ? remaining.find(d => d.option_type === 'put' && d.quantity < 0) 
           : undefined;
+        
+        // Bought PUTs exclude the synthetic sold PUT
+        const boughtPuts = remaining.filter(d => 
+          d.option_type === 'put' && d.quantity > 0
+        );
+        
         for (const call of calls) {
           const contracts = Math.abs(call.quantity);
           const cc: CoveredCallPosition = {
@@ -313,13 +327,19 @@ export function categorizeDerivatives(
           };
           const protPut = boughtPuts.shift();
           if (protPut) {
+            // Has protection PUT → De-Risking CC
             deRiskingCoveredCalls.push({
               coveredCall: cc, protectionPut: protPut,
               isSynthetic: config.is_synthetic, syntheticPut,
             });
             usedDerivatives.add(protPut.id);
+          } else if (config.is_synthetic && syntheticPut) {
+            // No protection PUT but is synthetic → Synthetic CC (not standard CC)
+            syntheticCoveredCalls.push({
+              option: call, syntheticPut, contracts,
+            });
           } else {
-            // No protection PUT left, fall back to regular CC
+            // No protection PUT, not synthetic → regular CC
             coveredCalls.push(cc);
           }
           usedDerivatives.add(call.id);
@@ -720,7 +740,7 @@ export function categorizeDerivatives(
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
-  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+  return { coveredCalls, syntheticCoveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
 }
 
 /**
