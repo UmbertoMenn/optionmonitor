@@ -184,7 +184,33 @@ export function StrategyConfigWizard({
     if (filterUnderlyings) {
       derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
     }
-    return [...derivs, ...stocks];
+    
+    // Split stocks into 100-share virtual slots
+    const virtualStocks: Position[] = [];
+    for (const stock of stocks) {
+      if (stock.quantity >= 200) {
+        const slots = Math.floor(stock.quantity / 100);
+        for (let i = 0; i < slots; i++) {
+          virtualStocks.push({
+            ...stock,
+            id: `${stock.id}__slot_${i}`,
+            quantity: 100,
+          });
+        }
+        const remainder = stock.quantity % 100;
+        if (remainder > 0) {
+          virtualStocks.push({
+            ...stock,
+            id: `${stock.id}__slot_${slots}`,
+            quantity: remainder,
+          });
+        }
+      } else {
+        virtualStocks.push(stock);
+      }
+    }
+    
+    return [...derivs, ...virtualStocks];
   }, [derivatives, allPositions, filterUnderlyings]);
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
