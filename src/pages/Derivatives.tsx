@@ -1464,7 +1464,7 @@ function SyntheticCoveredCallRow({ syntheticCC, stockPositions, getOverrideForPo
   );
 }
 
-
+function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPosition, underlyingPrices, getPremiumByTickerAndSymbol }: { deRiskingCC: DeRiskingCoveredCallPosition; getPremiumByTickerAndSymbol: (ticker: string, optionSymbol: string) => CoveredCallPremium | undefined } & RowPropsWithPrices) {
   const [isOpen, setIsOpen] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const { coveredCall, protectionPut, isSynthetic, syntheticPut } = deRiskingCC;
