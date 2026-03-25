@@ -63,6 +63,14 @@ function buildSignatures(positions: Position[]): PositionSignature[] {
 
 function positionLabel(p: Position): string {
   if (p.asset_type === 'stock' || p.asset_type === 'etf') {
+    // Check if this is a virtual slot (id contains __slot_)
+    const slotMatch = p.id.match(/__slot_(\d+)$/);
+    if (slotMatch) {
+      const originalId = p.id.replace(/__slot_\d+$/, '');
+      // We don't have access to total slots here, so just show slot number
+      const slotNum = parseInt(slotMatch[1]) + 1;
+      return `${p.description} (${p.quantity} azioni) [slot ${slotNum}]`;
+    }
     return `${p.description} (${p.quantity} azioni)`;
   }
   const prefix = p.ticker || p.underlying || p.description || '';
@@ -176,7 +184,33 @@ export function StrategyConfigWizard({
     if (filterUnderlyings) {
       derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
     }
-    return [...derivs, ...stocks];
+    
+    // Split stocks into 100-share virtual slots
+    const virtualStocks: Position[] = [];
+    for (const stock of stocks) {
+      if (stock.quantity >= 200) {
+        const slots = Math.floor(stock.quantity / 100);
+        for (let i = 0; i < slots; i++) {
+          virtualStocks.push({
+            ...stock,
+            id: `${stock.id}__slot_${i}`,
+            quantity: 100,
+          });
+        }
+        const remainder = stock.quantity % 100;
+        if (remainder > 0) {
+          virtualStocks.push({
+            ...stock,
+            id: `${stock.id}__slot_${slots}`,
+            quantity: remainder,
+          });
+        }
+      } else {
+        virtualStocks.push(stock);
+      }
+    }
+    
+    return [...derivs, ...virtualStocks];
   }, [derivatives, allPositions, filterUnderlyings]);
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
@@ -266,13 +300,15 @@ export function StrategyConfigWizard({
       const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
         || strategy.positions[0]?.description || 'Unknown';
       const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+      // Strip virtual slot suffix (__slot_N) to get the real stock ID
+      const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || null;
 
       configs.push({
         underlying,
         strategy_type: strategy.strategyType,
         position_signatures: buildSignatures(strategy.positions),
         is_synthetic: strategy.isSynthetic,
-        linked_stock_id: stockPos?.id || null,
+        linked_stock_id: realStockId,
       });
     }
 
