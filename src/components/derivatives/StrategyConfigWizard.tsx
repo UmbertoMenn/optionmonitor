@@ -63,6 +63,14 @@ function buildSignatures(positions: Position[]): PositionSignature[] {
 
 function positionLabel(p: Position): string {
   if (p.asset_type === 'stock' || p.asset_type === 'etf') {
+    // Check if this is a virtual slot (id contains __slot_)
+    const slotMatch = p.id.match(/__slot_(\d+)$/);
+    if (slotMatch) {
+      const originalId = p.id.replace(/__slot_\d+$/, '');
+      // We don't have access to total slots here, so just show slot number
+      const slotNum = parseInt(slotMatch[1]) + 1;
+      return `${p.description} (${p.quantity} azioni) [slot ${slotNum}]`;
+    }
     return `${p.description} (${p.quantity} azioni)`;
   }
   const prefix = p.ticker || p.underlying || p.description || '';
