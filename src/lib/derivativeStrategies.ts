@@ -297,15 +297,33 @@ export function categorizeDerivatives(
             .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
           const synPut = soldPuts[0];
           
+          // Check for protective bought PUTs → auto-promote to De-Risking
+          const boughtPutsForPromotion = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
+          
           for (const call of calls) {
             const contracts = Math.abs(call.quantity);
-            syntheticCoveredCalls.push({
-              option: call, syntheticPut: synPut || createDummyStock(config.underlying) as any,
-              contracts,
-            });
+            const protPut = boughtPutsForPromotion.shift();
+            if (protPut) {
+              // Auto-promote to deRiskingCoveredCalls with all 3 legs visible
+              const cc: CoveredCallPosition = {
+                option: call, underlying: stock, contractsCovered: contracts,
+                sharesCovered: contracts * 100, isFullyCovered: true,
+              };
+              deRiskingCoveredCalls.push({
+                coveredCall: cc, protectionPut: protPut,
+                isSynthetic: true, syntheticPut: synPut,
+              });
+              usedDerivatives.add(protPut.id);
+            } else {
+              syntheticCoveredCalls.push({
+                option: call, syntheticPut: synPut || createDummyStock(config.underlying) as any,
+                contracts,
+              });
+            }
             usedDerivatives.add(call.id);
           }
           if (synPut) usedDerivatives.add(synPut.id);
+          for (const p of boughtPutsForPromotion) usedDerivatives.add(p.id);
         } else {
           for (const call of calls) {
             const contracts = Math.abs(call.quantity);
