@@ -300,13 +300,15 @@ export function StrategyConfigWizard({
       const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
         || strategy.positions[0]?.description || 'Unknown';
       const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+      // Strip virtual slot suffix (__slot_N) to get the real stock ID
+      const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || null;
 
       configs.push({
         underlying,
         strategy_type: strategy.strategyType,
         position_signatures: buildSignatures(strategy.positions),
         is_synthetic: strategy.isSynthetic,
-        linked_stock_id: stockPos?.id || null,
+        linked_stock_id: realStockId,
       });
     }
 
