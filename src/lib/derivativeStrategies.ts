@@ -352,7 +352,6 @@ export function categorizeDerivatives(
           otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
         }
-        }
         break;
       }
       case 'iron_condor': {
