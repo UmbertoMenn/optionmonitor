@@ -160,7 +160,7 @@ export function Derivatives() {
 
       // Initialize empty merged result
       const merged: DerivativeCategories = {
-        coveredCalls: [], deRiskingCoveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
+        coveredCalls: [], syntheticCoveredCalls: [], deRiskingCoveredCalls: [], longPuts: [], ironCondors: [], doubleDiagonals: [],
         nakedPuts: [], leapCalls: [], otherStrategies: [], groupedOtherStrategies: [],
       };
 
