@@ -290,17 +290,34 @@ export function categorizeDerivatives(
       case 'covered_call': {
         const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
         const stock = linkedStock || createDummyStock(config.underlying);
-        for (const call of calls) {
-          const contracts = Math.abs(call.quantity);
-          coveredCalls.push({
-            option: call, underlying: stock, contractsCovered: contracts,
-            sharesCovered: contracts * 100, isFullyCovered: true,
-          });
-          usedDerivatives.add(call.id);
+        
+        if (config.is_synthetic) {
+          // Synthetic CC: pick the sold PUT with lowest strike (deep ITM) as stock replacement
+          const soldPuts = remaining.filter(d => d.option_type === 'put' && d.quantity < 0)
+            .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
+          const synPut = soldPuts[0];
+          
+          for (const call of calls) {
+            const contracts = Math.abs(call.quantity);
+            syntheticCoveredCalls.push({
+              option: call, syntheticPut: synPut || createDummyStock(config.underlying) as any,
+              contracts,
+            });
+            usedDerivatives.add(call.id);
+          }
+          if (synPut) usedDerivatives.add(synPut.id);
+        } else {
+          for (const call of calls) {
+            const contracts = Math.abs(call.quantity);
+            coveredCalls.push({
+              option: call, underlying: stock, contractsCovered: contracts,
+              sharesCovered: contracts * 100, isFullyCovered: true,
+            });
+            usedDerivatives.add(call.id);
+          }
         }
-        // Mark any remaining unhandled positions as used → other strategies
+        // ALL remaining positions for this underlying stay consumed (not leaked to other categories)
         for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
         }
         break;
@@ -309,12 +326,15 @@ export function categorizeDerivatives(
         const calls = remaining.filter(d => d.option_type === 'call' && d.quantity < 0);
         const stock = linkedStock || createDummyStock(config.underlying);
         
-        // If synthetic, isolate the sold PUT (deep ITM) FIRST as stock replacement
-        const syntheticPut = config.is_synthetic 
-          ? remaining.find(d => d.option_type === 'put' && d.quantity < 0) 
-          : undefined;
+        // If synthetic, pick the sold PUT with LOWEST strike (deep ITM) as stock replacement
+        let syntheticPut: Position | undefined;
+        if (config.is_synthetic) {
+          const soldPuts = remaining.filter(d => d.option_type === 'put' && d.quantity < 0)
+            .sort((a, b) => (a.strike_price || 0) - (b.strike_price || 0));
+          syntheticPut = soldPuts[0];
+        }
         
-        // Bought PUTs exclude the synthetic sold PUT
+        // Bought PUTs (protective) — exclude the synthetic sold PUT
         const boughtPuts = remaining.filter(d => 
           d.option_type === 'put' && d.quantity > 0
         );
@@ -327,29 +347,25 @@ export function categorizeDerivatives(
           };
           const protPut = boughtPuts.shift();
           if (protPut) {
-            // Has protection PUT → De-Risking CC
             deRiskingCoveredCalls.push({
               coveredCall: cc, protectionPut: protPut,
               isSynthetic: config.is_synthetic, syntheticPut,
             });
             usedDerivatives.add(protPut.id);
           } else if (config.is_synthetic && syntheticPut) {
-            // No protection PUT but is synthetic → Synthetic CC (not standard CC)
+            // No protection → falls back to Synthetic CC
             syntheticCoveredCalls.push({
               option: call, syntheticPut, contracts,
             });
           } else {
-            // No protection PUT, not synthetic → regular CC
             coveredCalls.push(cc);
           }
           usedDerivatives.add(call.id);
         }
         if (syntheticPut) usedDerivatives.add(syntheticPut.id);
-        // Mark any remaining bought PUTs as used
         for (const p of boughtPuts) usedDerivatives.add(p.id);
-        // Mark any remaining unhandled positions as used → other strategies
+        // ALL remaining positions for this underlying stay consumed
         for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
         }
         break;
