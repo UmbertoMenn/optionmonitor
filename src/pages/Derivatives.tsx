@@ -107,6 +107,7 @@ export function Derivatives() {
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
   const [coveredCallOpen, setCoveredCallOpen] = useState(false);
+  const [syntheticCCOpen, setSyntheticCCOpen] = useState(false);
   const [deRiskingOpen, setDeRiskingOpen] = useState(false);
   const [ironCondorOpen, setIronCondorOpen] = useState(false);
   const [doubleDiagonalOpen, setDoubleDiagonalOpen] = useState(false);
