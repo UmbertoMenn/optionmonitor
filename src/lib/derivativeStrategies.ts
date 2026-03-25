@@ -410,9 +410,8 @@ export function categorizeDerivatives(
           nakedPuts.push({ option: put, underlying: linkedStock || null, contracts: Math.abs(put.quantity) });
           usedDerivatives.add(put.id);
         }
-        // Mark any remaining unhandled positions as used → other strategies
+        // ALL remaining positions for this underlying stay consumed
         for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          otherStrategies.push({ option: opt, underlying: linkedStock || null });
           usedDerivatives.add(opt.id);
         }
         break;
