@@ -74,11 +74,7 @@ export interface DeRiskingCoveredCallPosition {
   syntheticPut?: Position; // Deep ITM sold PUT acting as stock
 }
 
-export interface SyntheticCoveredCallPosition {
-  option: Position;           // CALL venduta
-  syntheticPut: Position;     // PUT venduta deep ITM (sostituto stock)
-  contracts: number;
-}
+// SyntheticCoveredCallPosition removed - synthetic CCs are now in coveredCalls with isSynthetic flag
 
 export interface GroupedOtherStrategy {
   underlying: string;
