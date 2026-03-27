@@ -128,7 +128,16 @@ function detectStrategyType(positions: Position[]): string {
   return 'other';
 }
 
-/** Group positions by underlying and auto-classify */
+/** Check if a group forms a valid 4-leg structure */
+function isFourLeg(options: Position[]): boolean {
+  const soldCalls = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'call' && o.quantity < 0);
+  const boughtCalls = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'call' && o.quantity > 0);
+  const soldPuts = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'put' && o.quantity < 0);
+  const boughtPuts = options.filter(o => o.asset_type === 'derivative' && o.option_type === 'put' && o.quantity > 0);
+  return soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length >= 1 && boughtPuts.length >= 1;
+}
+
+/** Group positions by underlying and auto-classify, splitting incompatible legs */
 function autoClassify(derivatives: Position[], allPositions: Position[]): WizardStrategy[] {
   const stockPositions = allPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
   const groups = new Map<string, Position[]>();
@@ -142,24 +151,62 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
 
+  const makeStrategy = (positions: Position[]): WizardStrategy => {
+    const suggested = detectStrategyType(positions);
+    return {
+      id: `auto-${idCounter++}`,
+      positions,
+      strategyType: suggested,
+      isSynthetic: false,
+      suggestedType: suggested,
+    };
+  };
+
   for (const [key, options] of groups) {
-    // Find matching stocks
     const matchingStocks = stockPositions.filter(s => {
       const stockKey = normalizeForMatching(s.description || s.ticker || '');
       return stockKey === key || stockKey.includes(key) || key.includes(stockKey);
     });
 
-    const positionsInGroup = [...options];
-    if (matchingStocks.length > 0) positionsInGroup.push(...matchingStocks);
+    const allInGroup = [...options];
+    if (matchingStocks.length > 0) allInGroup.push(...matchingStocks);
 
-    const suggested = detectStrategyType(positionsInGroup);
-    strategies.push({
-      id: `auto-${idCounter++}`,
-      positions: positionsInGroup,
-      strategyType: suggested,
-      isSynthetic: false,
-      suggestedType: suggested,
-    });
+    // If it's a true 4-leg structure, keep it together
+    if (isFourLeg(options)) {
+      strategies.push(makeStrategy(allInGroup));
+      continue;
+    }
+
+    // Otherwise, split: separate bought calls (leaps) from the rest
+    const boughtCalls = options.filter(o => o.option_type === 'call' && o.quantity > 0);
+    const soldCalls = options.filter(o => o.option_type === 'call' && o.quantity < 0);
+    const soldPuts = options.filter(o => o.option_type === 'put' && o.quantity < 0);
+    const boughtPuts = options.filter(o => o.option_type === 'put' && o.quantity > 0);
+
+    // Main group: sold calls + sold puts + bought puts (for derisking) + stocks
+    const mainLegs: Position[] = [...soldCalls, ...soldPuts];
+    // Include bought puts only if there are sold calls (derisking pattern)
+    if (soldCalls.length > 0 && boughtPuts.length > 0) {
+      mainLegs.push(...boughtPuts);
+    }
+    if (mainLegs.length > 0) {
+      const mainGroup = [...mainLegs, ...matchingStocks];
+      strategies.push(makeStrategy(mainGroup));
+    } else if (matchingStocks.length > 0 && boughtCalls.length === 0 && boughtPuts.length === 0) {
+      // Stocks with no derivatives - skip
+    }
+
+    // Bought calls → separate leap_call strategies
+    for (const bc of boughtCalls) {
+      strategies.push(makeStrategy([bc]));
+    }
+
+    // Bought puts without sold calls → separate protection/other strategies
+    if (soldCalls.length === 0 && boughtPuts.length > 0) {
+      for (const bp of boughtPuts) {
+        strategies.push(makeStrategy([bp]));
+      }
+    }
   }
 
   return strategies;
