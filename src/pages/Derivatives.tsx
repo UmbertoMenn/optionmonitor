@@ -250,12 +250,7 @@ export function Derivatives() {
       }
     });
     
-    // Synthetic Covered Calls - ALL underlyings
-    categories.syntheticCoveredCalls.forEach(sc => {
-      if (sc.option.underlying) {
-        names.add(sc.option.underlying);
-      }
-    });
+    
     
     // De-Risking Covered Calls - ALL underlyings
     categories.deRiskingCoveredCalls.forEach(dr => {
