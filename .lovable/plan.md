@@ -1,62 +1,49 @@
 
 
-## Fix: Accenture e verifica completa posizioni derivati Mauro G
+## Merge Covered Call Sintetiche nella sezione Covered Call
 
-### Analisi DB completata
+### Cosa cambia
 
-**Accenture** — Config salvata: `strategy_type: 'covered_call'`, `is_synthetic: true`
-- Posizioni: CALL -1 @210 (APR/26), PUT +1 @160 (SEP/26), PUT -1 @380 (JUN/26)
-- La PUT +1 @160 è una **protezione** (bought put), ma il codice per `covered_call` + `is_synthetic` (righe 294-308) la ignora completamente. La bought put viene consumata silenziosamente alla riga 320-322 senza apparire in nessuna sezione.
+Rimuovere la sezione dedicata "Covered Call Sintetiche" e mostrare le CC sintetiche direttamente nella sezione "Covered Call" con badge S arancione + tooltip, come già fatto per le de-risking sintetiche.
 
-**Tutte le altre posizioni** hanno configurazioni corrispondenti. L'unica posizione con `underlying: null` è "AZ.REGULUS THERAPEUTICS INC CONTRA" che usa il fallback `d.description` per il matching e ha una config.
+### File 1: `src/lib/derivativeStrategies.ts`
 
-### Causa del bug
+**A. Estendere `CoveredCallPosition`** con campi opzionali:
+```typescript
+export interface CoveredCallPosition {
+  option: Position;
+  underlying: Position;
+  contractsCovered: number;
+  sharesCovered: number;
+  isFullyCovered: boolean;
+  isSynthetic?: boolean;        // nuovo
+  syntheticPut?: Position;      // nuovo - PUT venduta deep ITM
+}
+```
 
-Nel case `covered_call` con `is_synthetic=true` (riga 294), il codice:
-1. Trova la synthetic PUT venduta (deep ITM) ✓
-2. Crea `syntheticCoveredCalls` con solo call + synthetic put ✓
-3. **Ignora le bought PUTs** — le consuma silenziosamente senza mostrarle ✗
+**B. Eliminare `SyntheticCoveredCallPosition`** e rimuovere `syntheticCoveredCalls` da `DerivativeCategories`.
 
-### Fix — 1 file
+**C. Aggiornare la logica di categorizzazione**: dove attualmente si fa `syntheticCoveredCalls.push(...)`, creare invece un `CoveredCallPosition` con `isSynthetic: true` e `syntheticPut` e pusharlo in `coveredCalls`.
 
-#### `src/lib/derivativeStrategies.ts` — Case `covered_call` con `is_synthetic`
+**D. Rimuovere il return di `syntheticCoveredCalls`** dal risultato finale.
 
-Modificare il blocco `if (config.is_synthetic)` (righe 294-308) per:
+### File 2: `src/pages/Derivatives.tsx`
 
-1. Dopo aver trovato `synPut`, cercare bought PUTs protettive: `remaining.filter(d => d.option_type === 'put' && d.quantity > 0)`
-2. Se ci sono bought PUTs → auto-promuovere a `deRiskingCoveredCalls` (come fa il case `derisking_covered_call` con `is_synthetic`):
-   ```typescript
-   const boughtPuts = remaining.filter(d => d.option_type === 'put' && d.quantity > 0);
-   
-   for (const call of calls) {
-     const contracts = Math.abs(call.quantity);
-     const cc: CoveredCallPosition = {
-       option: call, underlying: stock, contractsCovered: contracts,
-       sharesCovered: contracts * 100, isFullyCovered: true,
-     };
-     const protPut = boughtPuts.shift();
-     if (protPut) {
-       deRiskingCoveredCalls.push({
-         coveredCall: cc, protectionPut: protPut,
-         isSynthetic: true, syntheticPut: synPut,
-       });
-       usedDerivatives.add(protPut.id);
-     } else {
-       syntheticCoveredCalls.push({
-         option: call, syntheticPut: synPut || createDummyStock(config.underlying) as any,
-         contracts,
-       });
-     }
-     usedDerivatives.add(call.id);
-   }
-   if (synPut) usedDerivatives.add(synPut.id);
-   for (const p of boughtPuts) usedDerivatives.add(p.id);
-   ```
-3. Se NON ci sono bought PUTs → comportamento attuale (syntheticCoveredCalls)
+**E. Rimuovere** la sezione "Covered Call Sintetiche" (righe ~558-606), lo stato `syntheticCCOpen`, e il componente `SyntheticCoveredCallRow`.
 
-Questo fa sì che Accenture (CALL -1 @210 + PUT -1 @380 sintetica + PUT +1 @160 protezione) venga correttamente classificata come **De-Risking Covered Call Sintetica**, con tutte e 3 le gambe visibili.
+**F. Aggiornare `CoveredCallRow`**: 
+- Dopo la descrizione (Col 3), se `coveredCall.isSynthetic`, mostrare il badge S arancione con tooltip "Synthetic position / short PUT delta -1" (stesso stile usato nelle de-risking sintetiche).
+- Nel collapsible content (dettagli espansi), se `coveredCall.syntheticPut` è presente, mostrare i dettagli della PUT venduta deep ITM (strike, scadenza, PMC, prezzo, P/L%).
 
-### File da modificare
+**G. Rimuovere** riferimenti a `syntheticCoveredCalls` dal merge, sort, e underlying price extraction.
 
-1. `src/lib/derivativeStrategies.ts` — righe 294-308, auto-promozione a deRiskingCC quando ci sono bought PUTs
+### Ordine sezioni risultante
+1. Covered Call (standard + sintetiche con badge S)
+2. De-Risking Covered Call
+3. Iron Condor
+4. Double Diagonal
+5. Naked Put
+6. Leap Call
+7. Protezioni
+8. Altre Strategie
 
