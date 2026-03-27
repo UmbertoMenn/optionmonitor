@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Position } from '@/types/portfolio';
 import { normalizeForMatching, findUnderlyingStock, categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,55 @@ import { Label } from '@/components/ui/label';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronUp, ChevronRight, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+
+function ScrollArrowsContainer({ children }: { children: React.ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showUp, setShowUp] = useState(false);
+  const [showDown, setShowDown] = useState(false);
+
+  const update = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowUp(el.scrollTop > 20);
+    setShowDown(el.scrollTop + el.clientHeight < el.scrollHeight - 20);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [update]);
+
+  const scroll = (dir: 'up' | 'down') =>
+    scrollRef.current?.scrollBy({ top: dir === 'up' ? -200 : 200, behavior: 'smooth' });
+
+  const btnCls =
+    "absolute right-3 z-10 flex items-center justify-center w-7 h-7 rounded-md border border-border bg-card text-muted-foreground hover:text-primary hover:border-primary transition-colors shadow-md";
+
+  return (
+    <div className="flex-1 min-h-0 relative">
+      {showUp && (
+        <button className={`${btnCls} top-1`} onClick={() => scroll('up')} aria-label="Scroll up">
+          <ChevronUp size={16} />
+        </button>
+      )}
+      <div ref={scrollRef} onScroll={update} className="h-full overflow-y-auto pr-2">
+        {children}
+      </div>
+      {showDown && (
+        <button className={`${btnCls} bottom-1`} onClick={() => scroll('down')} aria-label="Scroll down">
+          <ChevronDown size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 // Format expiry as MMM/YY
 function formatExpiryMMY(date: string | null | undefined): string {
@@ -469,7 +515,7 @@ export function StrategyConfigWizard({
           </span>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
+        <ScrollArrowsContainer>
           <div className="space-y-4 pb-4">
             {/* === POOL === */}
             <Card className="border-dashed">
@@ -655,7 +701,7 @@ export function StrategyConfigWizard({
               );
             })}
           </div>
-        </div>
+        </ScrollArrowsContainer>
 
         <DialogFooter className="pt-4 border-t">
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
