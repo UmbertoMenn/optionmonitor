@@ -481,6 +481,8 @@ export function StrategyConfigWizard({
   const totalStrategies = strategies.length;
   const totalUnassigned = allAvailable.filter(p => !assignedIds.has(p.id)).length;
 
+  if (allAvailable.length === 0) return null;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
