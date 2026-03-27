@@ -312,9 +312,10 @@ export function categorizeDerivatives(
               });
               usedDerivatives.add(protPut.id);
             } else {
-              syntheticCoveredCalls.push({
-                option: call, syntheticPut: synPut || createDummyStock(config.underlying) as any,
-                contracts,
+              coveredCalls.push({
+                option: call, underlying: stock, contractsCovered: contracts,
+                sharesCovered: contracts * 100, isFullyCovered: true,
+                isSynthetic: true, syntheticPut: synPut || undefined,
               });
             }
             usedDerivatives.add(call.id);
