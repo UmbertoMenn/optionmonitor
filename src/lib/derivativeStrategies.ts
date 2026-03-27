@@ -369,9 +369,11 @@ export function categorizeDerivatives(
             });
             usedDerivatives.add(protPut.id);
           } else if (config.is_synthetic && syntheticPut) {
-            // No protection → falls back to Synthetic CC
-            syntheticCoveredCalls.push({
-              option: call, syntheticPut, contracts,
+            // No protection → falls back to CC with synthetic flag
+            coveredCalls.push({
+              option: call, underlying: stock, contractsCovered: contracts,
+              sharesCovered: contracts * 100, isFullyCovered: true,
+              isSynthetic: true, syntheticPut,
             });
           } else {
             coveredCalls.push(cc);
