@@ -8,6 +8,8 @@ export interface CoveredCallPosition {
   contractsCovered: number;
   sharesCovered: number;
   isFullyCovered: boolean;
+  isSynthetic?: boolean;
+  syntheticPut?: Position;
 }
 
 export interface LongPutPosition {
