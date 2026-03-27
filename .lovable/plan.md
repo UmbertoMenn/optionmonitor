@@ -1,15 +1,22 @@
 
 
-## Aggiungere frecce di scorrimento al wizard strategie derivati
+## Fix bug visualizzazione frecce scroll nel wizard
 
-### Cosa cambia
+### Problema
+La freccia "scroll down" si sovrappone al pulsante "Salva Configurazione" in basso a destra perché è posizionata con `absolute bottom-1` dentro il container relativo, ma visivamente cade sopra il footer del dialog.
 
-Aggiungere due piccoli pulsanti freccia (ChevronUp / ChevronDown) posizionati lungo il bordo destro dell'area scrollabile del wizard (il `div` a riga 472 con `overflow-y-auto`). Le frecce appaiono/scompaiono in base alla posizione di scroll interna, analogamente al componente `ScrollArrows` esistente ma applicato al contenitore interno del dialog anziché alla finestra.
+### Soluzione in `src/components/derivatives/StrategyConfigWizard.tsx`
 
-### Implementazione in `src/components/derivatives/StrategyConfigWizard.tsx`
+1. **Spostare le frecce DENTRO l'area scrollabile** anziché fuori — posizionarle come `sticky` top/bottom dentro il `div` con `overflow-y-auto`, così restano confinate nell'area di scroll e non invadono il footer.
 
-1. Aggiungere un `useRef` per il contenitore scrollabile e stati `showUp` / `showDown`
-2. Aggiungere un `onScroll` handler + `useEffect` con ResizeObserver per aggiornare la visibilità delle frecce
-3. Wrappare il `div.overflow-y-auto` in un `div.relative` e posizionare le frecce come `absolute` sul lato destro (top/bottom), semitrasparenti, con click che scrolla di 200px
-4. Stile coerente con `ScrollArrows` (bordo, bg-card, hover primary)
+2. In alternativa (più semplice e pulito): cambiare il posizionamento delle frecce per usare `pointer-events-none` sul wrapper e dare un margine/padding adeguato, oppure semplicemente aumentare il `bottom` a ~`bottom-3` e aggiungere un piccolo gradiente sfumato per separare visivamente la freccia dal contenuto sottostante.
+
+**Approccio scelto**: Rendere le frecce `sticky` dentro il container scrollabile. Questo le tiene sempre visibili nell'area di scroll senza sovrapporsi al footer.
+
+```
+ScrollArrowsContainer:
+- Rimuovere il wrapper `relative`
+- Mettere le frecce come figli `sticky top-0` e `sticky bottom-0` dentro il div scrollabile
+- Usare z-index e bg semi-trasparente per le frecce
+```
 
