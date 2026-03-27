@@ -14,6 +14,52 @@ import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronUp, ChevronR
 import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
+function ScrollArrowsContainer({ children }: { children: React.ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showUp, setShowUp] = useState(false);
+  const [showDown, setShowDown] = useState(false);
+
+  const update = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowUp(el.scrollTop > 20);
+    setShowDown(el.scrollTop + el.clientHeight < el.scrollHeight - 20);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [update]);
+
+  const scroll = (dir: 'up' | 'down') =>
+    scrollRef.current?.scrollBy({ top: dir === 'up' ? -200 : 200, behavior: 'smooth' });
+
+  const btnCls =
+    "absolute right-3 z-10 flex items-center justify-center w-7 h-7 rounded-md border border-border bg-card text-muted-foreground hover:text-primary hover:border-primary transition-colors shadow-md";
+
+  return (
+    <div className="flex-1 min-h-0 relative">
+      {showUp && (
+        <button className={`${btnCls} top-1`} onClick={() => scroll('up')} aria-label="Scroll up">
+          <ChevronUp size={16} />
+        </button>
+      )}
+      <div ref={scrollRef} onScroll={update} className="h-full overflow-y-auto pr-2">
+        {children}
+      </div>
+      {showDown && (
+        <button className={`${btnCls} bottom-1`} onClick={() => scroll('down')} aria-label="Scroll down">
+          <ChevronDown size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Format expiry as MMM/YY
 function formatExpiryMMY(date: string | null | undefined): string {
   if (!date) return '-';
