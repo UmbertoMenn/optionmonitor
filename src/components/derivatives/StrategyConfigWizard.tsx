@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Position } from '@/types/portfolio';
 import { normalizeForMatching, findUnderlyingStock, categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { Button } from '@/components/ui/button';
