@@ -86,7 +86,6 @@ export interface GroupedOtherStrategy {
 
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
-  syntheticCoveredCalls: SyntheticCoveredCallPosition[];
   deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
   longPuts: LongPutPosition[];
   ironCondors: IronCondorPosition[];
