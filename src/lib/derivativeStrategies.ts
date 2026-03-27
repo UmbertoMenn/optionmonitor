@@ -159,7 +159,7 @@ export function categorizeDerivatives(
   });
   
   const coveredCalls: CoveredCallPosition[] = [];
-  const syntheticCoveredCalls: SyntheticCoveredCallPosition[] = [];
+  
   const deRiskingCoveredCalls: DeRiskingCoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
   const ironCondors: IronCondorPosition[] = [];
