@@ -1,22 +1,29 @@
 
+Obiettivo: far sì che l’auto-classificazione del Wizard rispecchi davvero il comportamento pre-configurazione, senza “riusare” le stesse 100 azioni in più strategie.
 
-## Fix bug visualizzazione frecce scroll nel wizard
+1) Correzione mapper in `src/components/derivatives/StrategyConfigWizard.tsx` (funzione `autoClassify`)
+- Mantengo `categorizeDerivatives(derivatives, allPositions, [], [])` come unica fonte di classificazione.
+- Cambio la conversione `DerivativeCategories -> WizardStrategy[]` così:
+  - `coveredCalls`: include CALL venduta + azione (ed eventuale `syntheticPut` se sintetica).
+  - `deRiskingCoveredCalls`: include CALL venduta + PUT protezione + azione (ed eventuale `syntheticPut`).
+  - `ironCondors`: solo 4 gambe opzioni (niente azione).
+  - `doubleDiagonals`: solo 4 gambe opzioni (niente azione).
+  - `nakedPuts`: solo opzione.
+  - `leapCalls`: solo opzione.
+  - `longPuts`: solo opzione (niente azione).
+  - `groupedOtherStrategies`: solo gambe opzioni (niente azione).
+- Questo elimina il caso Broadcom in cui la stessa azione appare sia in Covered Call sia in Altre Strategie.
 
-### Problema
-La freccia "scroll down" si sovrappone al pulsante "Salva Configurazione" in basso a destra perché è posizionata con `absolute bottom-1` dentro il container relativo, ma visivamente cade sopra il footer del dialog.
+2) Guardrail anti-duplicati nel Wizard
+- Durante la costruzione delle strategie auto, introduco un set `consumedPositionIds` per evitare che la stessa posizione (stesso `id`) venga inserita in più strategie.
+- Priorità di consumo: Covered Call / De-Risking prima, poi le altre categorie.
+- Se una posizione è già usata, non viene riaggiunta in strategie successive.
 
-### Soluzione in `src/components/derivatives/StrategyConfigWizard.tsx`
+3) Allineamento con la logica “prima del Wizard”
+- Rimuovo dal mapper qualunque “arricchimento” non presente nella classificazione originale (es. stock aggiunto artificialmente a IC/DD/Other/LongPut).
+- L’auto-classificazione del Wizard diventa una proiezione fedele del risultato di `categorizeDerivatives`, non una reinterpretazione.
 
-1. **Spostare le frecce DENTRO l'area scrollabile** anziché fuori — posizionarle come `sticky` top/bottom dentro il `div` con `overflow-y-auto`, così restano confinate nell'area di scroll e non invadono il footer.
-
-2. In alternativa (più semplice e pulito): cambiare il posizionamento delle frecce per usare `pointer-events-none` sul wrapper e dare un margine/padding adeguato, oppure semplicemente aumentare il `bottom` a ~`bottom-3` e aggiungere un piccolo gradiente sfumato per separare visivamente la freccia dal contenuto sottostante.
-
-**Approccio scelto**: Rendere le frecce `sticky` dentro il container scrollabile. Questo le tiene sempre visibili nell'area di scroll senza sovrapporsi al footer.
-
-```
-ScrollArrowsContainer:
-- Rimuovere il wrapper `relative`
-- Mettere le frecce come figli `sticky top-0` e `sticky bottom-0` dentro il div scrollabile
-- Usare z-index e bg semi-trasparente per le frecce
-```
-
+4) Verifiche funzionali da fare dopo implementazione
+- Caso Broadcom: `CALL venduta + 100 azioni` in Covered Call, e la `PUT comprata` senza duplicare le stesse 100 azioni in Altre Strategie.
+- Caso Micron: resta aggregata come prima (niente splitting artificiale in più strategie).
+- Regressione rapida su IC/DD: nessuna azione mostrata come gamba.
