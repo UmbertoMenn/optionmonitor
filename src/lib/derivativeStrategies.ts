@@ -8,6 +8,8 @@ export interface CoveredCallPosition {
   contractsCovered: number;
   sharesCovered: number;
   isFullyCovered: boolean;
+  isSynthetic?: boolean;
+  syntheticPut?: Position;
 }
 
 export interface LongPutPosition {
@@ -72,11 +74,7 @@ export interface DeRiskingCoveredCallPosition {
   syntheticPut?: Position; // Deep ITM sold PUT acting as stock
 }
 
-export interface SyntheticCoveredCallPosition {
-  option: Position;           // CALL venduta
-  syntheticPut: Position;     // PUT venduta deep ITM (sostituto stock)
-  contracts: number;
-}
+// SyntheticCoveredCallPosition removed - synthetic CCs are now in coveredCalls with isSynthetic flag
 
 export interface GroupedOtherStrategy {
   underlying: string;
@@ -88,7 +86,6 @@ export interface GroupedOtherStrategy {
 
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
-  syntheticCoveredCalls: SyntheticCoveredCallPosition[];
   deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
   longPuts: LongPutPosition[];
   ironCondors: IronCondorPosition[];
@@ -162,7 +159,7 @@ export function categorizeDerivatives(
   });
   
   const coveredCalls: CoveredCallPosition[] = [];
-  const syntheticCoveredCalls: SyntheticCoveredCallPosition[] = [];
+  
   const deRiskingCoveredCalls: DeRiskingCoveredCallPosition[] = [];
   const longPuts: LongPutPosition[] = [];
   const ironCondors: IronCondorPosition[] = [];
@@ -315,9 +312,10 @@ export function categorizeDerivatives(
               });
               usedDerivatives.add(protPut.id);
             } else {
-              syntheticCoveredCalls.push({
-                option: call, syntheticPut: synPut || createDummyStock(config.underlying) as any,
-                contracts,
+              coveredCalls.push({
+                option: call, underlying: stock, contractsCovered: contracts,
+                sharesCovered: contracts * 100, isFullyCovered: true,
+                isSynthetic: true, syntheticPut: synPut || undefined,
               });
             }
             usedDerivatives.add(call.id);
@@ -371,9 +369,11 @@ export function categorizeDerivatives(
             });
             usedDerivatives.add(protPut.id);
           } else if (config.is_synthetic && syntheticPut) {
-            // No protection → falls back to Synthetic CC
-            syntheticCoveredCalls.push({
-              option: call, syntheticPut, contracts,
+            // No protection → falls back to CC with synthetic flag
+            coveredCalls.push({
+              option: call, underlying: stock, contractsCovered: contracts,
+              sharesCovered: contracts * 100, isFullyCovered: true,
+              isSynthetic: true, syntheticPut,
             });
           } else {
             coveredCalls.push(cc);
@@ -770,7 +770,7 @@ export function categorizeDerivatives(
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
-  return { coveredCalls, syntheticCoveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
 }
 
 /**
