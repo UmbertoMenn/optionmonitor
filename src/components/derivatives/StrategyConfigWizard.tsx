@@ -39,23 +39,23 @@ function ScrollArrowsContainer({ children }: { children: React.ReactNode }) {
     scrollRef.current?.scrollBy({ top: dir === 'up' ? -200 : 200, behavior: 'smooth' });
 
   const btnCls =
-    "absolute right-3 z-10 flex items-center justify-center w-7 h-7 rounded-md border border-border bg-card text-muted-foreground hover:text-primary hover:border-primary transition-colors shadow-md";
+    "sticky z-10 flex items-center justify-center w-7 h-7 rounded-md border border-border bg-card text-muted-foreground hover:text-primary hover:border-primary transition-colors shadow-md ml-auto mr-1 pointer-events-auto";
 
   return (
-    <div className="flex-1 min-h-0 relative">
-      {showUp && (
-        <button className={`${btnCls} top-1`} onClick={() => scroll('up')} aria-label="Scroll up">
-          <ChevronUp size={16} />
-        </button>
-      )}
-      <div ref={scrollRef} onScroll={update} className="h-full overflow-y-auto pr-2">
+    <div className="flex-1 min-h-0">
+      <div ref={scrollRef} onScroll={update} className="h-full overflow-y-auto pr-2 relative">
+        {showUp && (
+          <button className={`${btnCls} top-2 float-right clear-right`} onClick={() => scroll('up')} aria-label="Scroll up">
+            <ChevronUp size={16} />
+          </button>
+        )}
         {children}
+        {showDown && (
+          <button className={`${btnCls} bottom-2 float-right clear-right`} onClick={() => scroll('down')} aria-label="Scroll down">
+            <ChevronDown size={16} />
+          </button>
+        )}
       </div>
-      {showDown && (
-        <button className={`${btnCls} bottom-1`} onClick={() => scroll('down')} aria-label="Scroll down">
-          <ChevronDown size={16} />
-        </button>
-      )}
     </div>
   );
 }
