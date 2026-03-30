@@ -110,6 +110,56 @@ function normalizeUnderlying(text: string): string {
   return getCanonicalKey(text) || normalizeForMatching(text);
 }
 
+const MATCHING_STOPWORDS = new Set([
+  'INC', 'LTD', 'CORP', 'GROUP', 'HOLDING', 'HOLDINGS', 'PLC', 'CO', 'NV',
+  'SA', 'AG', 'SE', 'AB', 'CLASS', 'CL', 'ADR', 'SHARES', 'COMPANY', 'THE',
+  'CORPORATION', 'INTERNATIONAL', 'ENTERPRISES', 'TECHNOLOGIES', 'TECHNOLOGY',
+]);
+
+function getSignificantTokens(text: string): string[] {
+  return text.toUpperCase()
+    .replace(/^AZ\.\s*/i, '')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2 && !MATCHING_STOPWORDS.has(t));
+}
+
+function hasTokenOverlap(a: string, b: string): boolean {
+  const tokensA = getSignificantTokens(a);
+  const tokensB = getSignificantTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  return tokensA.some(t => tokensB.includes(t));
+}
+
+function getUnderlyingKeyForStock(pos: Position, allDerivatives: Position[]): string {
+  const stockText = `${pos.description ?? ''} ${pos.ticker ?? ''}`;
+  const canonical = getCanonicalKey(stockText);
+  if (canonical) return canonical;
+
+  const descOnly = pos.description ?? '';
+  const descCanonical = getCanonicalKey(descOnly);
+  if (descCanonical) return descCanonical;
+
+  const stockNorm = normalizeForMatching(stockText);
+  const descNorm = normalizeForMatching(descOnly);
+
+  for (const d of allDerivatives) {
+    const dUnderlying = d.underlying || d.description || '';
+    const dNorm = normalizeForMatching(dUnderlying);
+    const dCanonical = getCanonicalKey(dUnderlying);
+
+    if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm) ||
+        descNorm.includes(dNorm) || dNorm.includes(descNorm)) {
+      return dCanonical || dNorm;
+    }
+
+    if (hasTokenOverlap(descOnly, dUnderlying)) {
+      return dCanonical || dNorm;
+    }
+  }
+  return stockNorm;
+}
+
 interface WizardStrategy {
   id: string;
   positions: Position[];
@@ -177,10 +227,10 @@ export function StrategyReconciliationDialog({
     }
 
     // Also get stock positions by underlying key for the pool
+    const allDerivatives = currentPositions.filter(p => p.asset_type === 'derivative');
     const stocksByKey = new Map<string, Position[]>();
     for (const pos of currentPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf')) {
-      const raw = pos.description || '';
-      const key = normalizeUnderlying(raw);
+      const key = getUnderlyingKeyForStock(pos, allDerivatives);
       if (!stocksByKey.has(key)) stocksByKey.set(key, []);
       // Split stocks into 100-share slots
       if (pos.quantity >= 200) {
