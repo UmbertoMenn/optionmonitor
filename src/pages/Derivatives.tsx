@@ -488,6 +488,7 @@ export function Derivatives() {
           open={reconciliationOpen}
           onOpenChange={setReconciliationOpen}
           items={reconciliationItems}
+          allConfigs={strategyConfigs}
           onSave={upsertBatch}
           isSaving={isConfigSaving}
         />
