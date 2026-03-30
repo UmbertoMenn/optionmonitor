@@ -550,6 +550,7 @@ export function Derivatives() {
         />
         
         {/* Section 1: Covered Call (Collapsible) */}
+        {categories.coveredCalls.length > 0 && (
         <Collapsible open={coveredCallOpen} onOpenChange={setCoveredCallOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -573,35 +574,31 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.coveredCalls.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna Covered Call presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.coveredCalls.map((cc, index) => (
-                      <CoveredCallRow 
-                        key={index} 
-                        coveredCall={cc} 
-                        stockPositions={stockPositions} 
-                        getOverrideForPosition={getOverrideForPosition}
-                        underlyingPrices={underlyingPrices}
-                        totalContractsForUnderlying={
-                          totalCoveredCallContractsByUnderlying[
-                            cc.underlying.description || cc.option.underlying || ''
-                          ] || cc.contractsCovered
-                        }
-                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
-                      />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.coveredCalls.map((cc, index) => (
+                    <CoveredCallRow 
+                      key={index} 
+                      coveredCall={cc} 
+                      stockPositions={stockPositions} 
+                      getOverrideForPosition={getOverrideForPosition}
+                      underlyingPrices={underlyingPrices}
+                      totalContractsForUnderlying={
+                        totalCoveredCallContractsByUnderlying[
+                          cc.underlying.description || cc.option.underlying || ''
+                        ] || cc.contractsCovered
+                      }
+                      getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                    />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
 
+        {categories.deRiskingCoveredCalls.length > 0 && (
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -628,30 +625,26 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.deRiskingCoveredCalls.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna De-Risking Covered Call presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.deRiskingCoveredCalls.map((dr, index) => (
-                      <DeRiskingCoveredCallRow 
-                        key={index} 
-                        deRiskingCC={dr} 
-                        stockPositions={stockPositions} 
-                        getOverrideForPosition={getOverrideForPosition}
-                        underlyingPrices={underlyingPrices}
-                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
-                      />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.deRiskingCoveredCalls.map((dr, index) => (
+                    <DeRiskingCoveredCallRow 
+                      key={index} 
+                      deRiskingCC={dr} 
+                      stockPositions={stockPositions} 
+                      getOverrideForPosition={getOverrideForPosition}
+                      underlyingPrices={underlyingPrices}
+                      getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                    />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 3: Iron Condor */}
+        {categories.ironCondors.length > 0 && (
         <Collapsible open={ironCondorOpen} onOpenChange={setIronCondorOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -675,23 +668,19 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.ironCondors.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessun Iron Condor presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.ironCondors.map((ic, index) => (
-                      <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.ironCondors.map((ic, index) => (
+                    <IronCondorRow key={index} ironCondor={ic} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 3.5: Double Diagonal */}
+        {categories.doubleDiagonals.length > 0 && (
         <Collapsible open={doubleDiagonalOpen} onOpenChange={setDoubleDiagonalOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -715,23 +704,19 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.doubleDiagonals.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessun Double Diagonal presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.doubleDiagonals.map((dd, index) => (
-                      <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.doubleDiagonals.map((dd, index) => (
+                    <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 4: Naked Put (Collapsible) */}
+        {categories.nakedPuts.length > 0 && (
         <Collapsible open={nakedPutsOpen} onOpenChange={setNakedPutsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -755,21 +740,16 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.nakedPuts.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna Naked Put presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.nakedPuts.map((np, index) => (
-                      <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.nakedPuts.map((np, index) => (
+                    <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 5a: Put Spread (Collapsible) */}
         {putSpreads.length > 0 && (
@@ -844,6 +824,7 @@ export function Derivatives() {
         )}
 
         {/* Section 6: Leap Call (Collapsible) */}
+        {categories.leapCalls.length > 0 && (
         <Collapsible open={leapCallsOpen} onOpenChange={setLeapCallsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -867,23 +848,19 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.leapCalls.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna Leap Call presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.leapCalls.map((lc, index) => (
-                      <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.leapCalls.map((lc, index) => (
+                    <LeapCallRow key={index} leapCall={lc} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 6: Protezioni - Long PUT (Collapsible) */}
+        {categories.longPuts.length > 0 && (
         <Collapsible open={protectionsOpen} onOpenChange={setProtectionsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -904,23 +881,19 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.longPuts.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna protezione Long Put presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.longPuts.map((lp, index) => (
-                      <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.longPuts.map((lp, index) => (
+                    <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 7: Altre Strategie (Collapsible) */}
+        {remainingOtherStrategies.length > 0 && (
         <Collapsible open={otherStrategiesOpen} onOpenChange={setOtherStrategiesOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -944,21 +917,16 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {remainingOtherStrategies.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna altra strategia presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {remainingOtherStrategies.map((group, index) => (
-                      <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {remainingOtherStrategies.map((group, index) => (
+                    <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
         </>)}
         </>)}
       </main>
