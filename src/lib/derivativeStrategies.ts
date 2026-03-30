@@ -437,10 +437,8 @@ export function categorizeDerivatives(
           [dd.diagonal.soldCall, dd.diagonal.boughtCall, dd.diagonal.soldPut, dd.diagonal.boughtPut]
             .forEach(leg => usedDerivatives.add(leg.id));
         }
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_dd = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_dd) usedDerivatives.add(opt.id);
         break;
       }
       case 'naked_put': {
