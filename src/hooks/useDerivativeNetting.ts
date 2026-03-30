@@ -479,10 +479,12 @@ export function useDerivativeNetting(
         mergedBreakdown.push(...result.breakdown);
         mergedStrategyBreakdown.push(...result.strategyBreakdown);
 
-        // Merge option type breakdown
+        // Merge option type breakdowns
         for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
           mergedOTB[key].total += result.optionTypeBreakdown[key].total;
           mergedOTB[key].details.push(...result.optionTypeBreakdown[key].details);
+          mergedOTBIntrinsic[key].total += result.optionTypeBreakdownIntrinsic[key].total;
+          mergedOTBIntrinsic[key].details.push(...result.optionTypeBreakdownIntrinsic[key].details);
         }
       }
 
