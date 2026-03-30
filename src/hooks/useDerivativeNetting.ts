@@ -264,7 +264,9 @@ export function computeSinglePortfolioNetting(
         } else if (uprice > 0 && strikePrice >= uprice) {
           const contracts = Math.abs(quantity);
           const intrinsicValue = (contracts * multiplier * (strikePrice - uprice)) / exchangeRate;
-          nettingExCCAndNP -= intrinsicValue;
+          // Cap: intrinsic loss cannot exceed market value (cost to close)
+          const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
+          nettingExCCAndNP += cappedIntrinsic;
         } else {
           nettingExCCAndNP += nettingValue;
         }
@@ -478,6 +480,10 @@ export function getBreakdownForViewMode(
           }
         }
 
+        // Cap: intrinsic cannot exceed market value in absolute terms
+        if (tickerIntrinsic < det.value) {
+          tickerIntrinsic = det.value;
+        }
         if (Math.abs(tickerIntrinsic) > 0.01) {
           intrinsicDetails.push({ ...det, value: tickerIntrinsic });
           intrinsicTotal += tickerIntrinsic;
@@ -518,6 +524,10 @@ export function getBreakdownForViewMode(
             const contracts = Math.abs(npEntry.option.quantity);
             tickerIntrinsic += -(contracts * 100 * (strike - underlyingPrice)) / exchangeRate;
           }
+        }
+        // Cap: intrinsic cannot exceed market value in absolute terms
+        if (tickerIntrinsic < det.value) {
+          tickerIntrinsic = det.value;
         }
         if (Math.abs(tickerIntrinsic) > 0.01) {
           intrinsicDetails.push({ ...det, value: tickerIntrinsic });
