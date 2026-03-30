@@ -720,6 +720,7 @@ export function Derivatives() {
         )}
 
         {/* Section 4: Naked Put (Collapsible) */}
+        {categories.nakedPuts.length > 0 && (
         <Collapsible open={nakedPutsOpen} onOpenChange={setNakedPutsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -743,21 +744,16 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.nakedPuts.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna Naked Put presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.nakedPuts.map((np, index) => (
-                      <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.nakedPuts.map((np, index) => (
+                    <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 5a: Put Spread (Collapsible) */}
         {putSpreads.length > 0 && (
