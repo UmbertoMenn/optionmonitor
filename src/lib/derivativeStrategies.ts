@@ -407,10 +407,8 @@ export function categorizeDerivatives(
         }
         if (syntheticPut) usedDerivatives.add(syntheticPut.id);
         for (const p of boughtPuts) usedDerivatives.add(p.id);
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_dcc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_dcc) usedDerivatives.add(opt.id);
         break;
       }
       case 'iron_condor': {
