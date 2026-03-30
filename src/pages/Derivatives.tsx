@@ -483,6 +483,15 @@ export function Derivatives() {
           isSaving={isConfigSaving}
         />
 
+        {/* Reconciliation Dialog */}
+        <StrategyReconciliationDialog
+          open={reconciliationOpen}
+          onOpenChange={setReconciliationOpen}
+          items={reconciliationItems}
+          onSave={upsertBatch}
+          isSaving={isConfigSaving}
+        />
+
         {/* Info + Riconfigura button */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
