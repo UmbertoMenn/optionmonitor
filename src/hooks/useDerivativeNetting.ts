@@ -436,6 +436,7 @@ export function useDerivativeNetting(
       nettingExCCAndNP: summary?.totalValue ?? 0,
       breakdown: [],
       optionTypeBreakdown: emptyBreakdown,
+      optionTypeBreakdownIntrinsic: emptyBreakdown,
       strategyBreakdown: [],
     };
 
