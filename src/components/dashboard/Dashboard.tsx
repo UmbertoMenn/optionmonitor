@@ -46,6 +46,7 @@ export function Dashboard() {
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   const { portfolio, positions, summary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
+  const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
   
   // Fetch underlying prices for derivatives without stock in portfolio
   const derivativeUnderlyings = useMemo(() => 
