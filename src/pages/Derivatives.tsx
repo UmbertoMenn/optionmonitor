@@ -39,6 +39,8 @@ import { DerivativesSummaryCard } from '@/components/derivatives/DerivativesSumm
 import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState, useEffect, useRef } from 'react';
+import { reconcileConfigs } from '@/lib/strategyReconciliation';
+import { StrategyReconciliationDialog } from '@/components/derivatives/StrategyReconciliationDialog';
 import { 
   categorizeDerivatives, 
   formatOptionDescription,
