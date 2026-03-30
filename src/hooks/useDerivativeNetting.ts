@@ -45,6 +45,7 @@ export interface NettingResult {
   nettingExCCAndNP: number;
   breakdown: NettingBreakdownItem[];
   optionTypeBreakdown: OptionTypeBreakdown;
+  optionTypeBreakdownIntrinsic: OptionTypeBreakdown;
   strategyBreakdown: NettingBreakdownItem[];
 }
 
