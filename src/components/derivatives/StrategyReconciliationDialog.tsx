@@ -227,10 +227,10 @@ export function StrategyReconciliationDialog({
     }
 
     // Also get stock positions by underlying key for the pool
+    const allDerivatives = currentPositions.filter(p => p.asset_type === 'derivative');
     const stocksByKey = new Map<string, Position[]>();
     for (const pos of currentPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf')) {
-      const raw = pos.description || '';
-      const key = normalizeUnderlying(raw);
+      const key = getUnderlyingKeyForStock(pos, allDerivatives);
       if (!stocksByKey.has(key)) stocksByKey.set(key, []);
       // Split stocks into 100-share slots
       if (pos.quantity >= 200) {
