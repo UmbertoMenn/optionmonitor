@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertTriangle, Check, X, Plus, Loader2 } from 'lucide-react';
 import { ReconciliationItem, LegStatus } from '@/lib/strategyReconciliation';
-import { UpsertConfigParams, PositionSignature, STRATEGY_TYPE_LABELS } from '@/hooks/useStrategyConfigurations';
+import { UpsertConfigParams, PositionSignature, STRATEGY_TYPE_LABELS, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 const STRATEGY_OPTIONS = [
