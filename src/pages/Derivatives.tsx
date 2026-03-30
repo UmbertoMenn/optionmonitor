@@ -332,6 +332,21 @@ export function Derivatives() {
     });
   }, [portfolio?.id, categories, underlyingPrices]);
 
+  // Reconciliation: compare saved configs vs current positions
+  const reconciliationItems = useMemo(() => {
+    if (!hasConfigurations || strategyConfigs.length === 0 || positions.length === 0) return [];
+    return reconcileConfigs(strategyConfigs, positions);
+  }, [hasConfigurations, strategyConfigs, positions]);
+
+  // Auto-open reconciliation dialog once per mount when discrepancies found
+  useEffect(() => {
+    if (reconciliationCheckedRef.current) return;
+    if (reconciliationItems.length > 0 && !isLoading) {
+      reconciliationCheckedRef.current = true;
+      setReconciliationOpen(true);
+    }
+  }, [reconciliationItems, isLoading]);
+
   if (isLoading) {
     return <DerivativesSkeleton />;
   }
