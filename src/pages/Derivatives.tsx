@@ -684,6 +684,7 @@ export function Derivatives() {
         )}
 
         {/* Section 3.5: Double Diagonal */}
+        {categories.doubleDiagonals.length > 0 && (
         <Collapsible open={doubleDiagonalOpen} onOpenChange={setDoubleDiagonalOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -707,21 +708,16 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.doubleDiagonals.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessun Double Diagonal presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.doubleDiagonals.map((dd, index) => (
-                      <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.doubleDiagonals.map((dd, index) => (
+                    <DoubleDiagonalRow key={index} doubleDiagonal={dd} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 4: Naked Put (Collapsible) */}
         <Collapsible open={nakedPutsOpen} onOpenChange={setNakedPutsOpen}>
