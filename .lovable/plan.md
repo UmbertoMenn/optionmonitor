@@ -1,53 +1,87 @@
 
 
-## Fix: errore salvataggio + sottostanti duplicati + auto-classificazione
+## Reconciliazione Strategie Post-Upload con Dialog Automatico
 
-### Problema 1: Errore nel salvare la configurazione
+### Concetto
 
-**Causa**: La tabella `strategy_configurations` ha un vincolo UNIQUE su `(portfolio_id, underlying, strategy_type)`. Se il wizard produce due strategie con lo stesso `underlying` e `strategy_type` (es. due "other" per lo stesso sottostante, o due strategie diverse che risolvono allo stesso underlying), l'insert fallisce dopo il delete.
+Quando l'utente atterra sulla pagina Strategie Derivati e ci sono configurazioni salvate, il sistema confronta automaticamente le `position_signatures` salvate con le posizioni attuali. Se ci sono discrepanze (opzioni rimosse, opzioni nuove, quantità cambiate), si apre automaticamente un dialog di riconciliazione che mostra per ogni sottostante:
+- La configurazione salvata (vecchie gambe)
+- Le posizioni attuali (nuove gambe)
+- La possibilità di riconfigurarle direttamente nella stessa scheda
 
-**Fix in `handleSave`** (`StrategyConfigWizard.tsx`):
-- Prima dell'insert, aggregare/deduplicare i configs: se due strategie hanno lo stesso `(underlying, strategy_type)`, unire le loro `position_signatures` in un unico record
-- In alternativa (più robusto): aggiungere un suffisso numerico all'underlying quando ci sono duplicati (es. `"DIGITAL CORP"`, `"DIGITAL CORP #2"`)
+### Logica di rilevamento discrepanze
 
-**Fix alternativo nel batch** (`useStrategyConfigurations.ts`):
-- Usare `upsert` con `onConflict` invece di `delete + insert`, oppure deduplicare i rows prima dell'insert
+Per ogni `strategy_configuration` salvata:
+1. Trovare le posizioni attuali che matchano per `underlying` normalizzato
+2. Confrontare le `position_signatures` salvate (strike, expiry, option_type, quantity_sign) con le firme delle posizioni trovate
+3. Produrre per sottostante:
+   - **Gambe mancanti**: signatures salvate senza posizione corrispondente (opzione chiusa/esercitata)
+   - **Gambe nuove**: posizioni attuali non coperte da nessuna signature salvata
+   - **Sottostanti invariati**: nessuna discrepanza → non mostrati
 
-### Problema 2: Sottostanti duplicati (BAIDU, Super Micro)
+### Nuovo componente: `StrategyReconciliationDialog`
 
-**Causa**: `getUnderlyingKey` concatena `description + ticker` per gli stock. Token extra (ticker, "AZ.") inquinano il matching `includes` bidirezionale contro il derivato.
+Un dialog che si apre automaticamente al mount della pagina Derivati quando vengono rilevate discrepanze. Per ogni sottostante con cambiamenti:
 
-**Fix in `getUnderlyingKey`**:
-- Provare il matching anche solo sulla `description` (senza ticker)
-- Aggiungere fallback con **token overlap**: estrarre token significativi (>2 chars, escluse stopword come INC, LTD, CORP, AZ) e se condividono almeno un token significativo → stesso sottostante
+```text
+┌─────────────────────────────────────────────────┐
+│  ⚠ Configurazioni da aggiornare                │
+│                                                  │
+│  ┌─ APPLE INC ─────────────────────────────────┐│
+│  │ Strategia: Covered Call                      ││
+│  │                                              ││
+│  │ ❌ Rimossa: V CALL 230 MAR/25               ││
+│  │ ✅ Presente: V CALL 240 GIU/25              ││
+│  │ 🆕 Nuova: V CALL 250 SET/25                ││
+│  │                                              ││
+│  │ [Seleziona gambe] [Tipo strategia ▼]        ││
+│  └──────────────────────────────────────────────┘│
+│                                                  │
+│  ┌─ BAIDU INC ──────────────────────────────────┐│
+│  │ ... (simile)                                  ││
+│  └──────────────────────────────────────────────┘│
+│                                                  │
+│          [Ignora] [Salva aggiornamenti]          │
+└─────────────────────────────────────────────────┘
+```
 
-### Problema 3: Posizioni fantasma dopo auto-classifica
+Ogni card sottostante ha:
+- Le gambe salvate (con badge ❌ se mancanti, ✅ se ancora presenti)
+- Le gambe nuove (con badge 🆕)
+- Checkbox per selezionare quali gambe includere nella nuova configurazione
+- Select per cambiare il tipo di strategia
+- Auto-detect del tipo basato sulle gambe selezionate
 
-**Causa**: `autoClassify` usa ID originali degli stock (`"abc123"`), ma il wizard usa slot virtuali (`"abc123__slot_0"`). L'`assignedIds` non trova match.
+### Modifiche ai file
 
-**Fix in `handleAutoClassify`**:
-- Dopo che `autoClassify` produce le strategie, rimappare ogni posizione stock all'ID slottato corrispondente in `allAvailable`
+**1. Nuovo file `src/lib/strategyReconciliation.ts`**
+- `reconcileConfigs(configs, currentPositions)`: per ogni config, confronta le signatures con le posizioni attuali per underlying
+- Restituisce una lista di `ReconciliationItem` con `{ config, missingLegs, presentLegs, newLegs, hasChanges }`
+- Il matching usa `normalizeForMatching` per confrontare underlying e le signatures per (option_type, strike, expiry, quantity_sign)
 
-### Problema 4: Auto-classificazione non rileva De-Risking CC e Put Spread
+**2. Nuovo componente `src/components/derivatives/StrategyReconciliationDialog.tsx`**
+- Riceve le discrepanze e le posizioni attuali
+- Per ogni sottostante con cambiamenti, mostra una card con:
+  - Gambe salvate mancanti (rosse, con ❌)
+  - Gambe salvate presenti (verdi, con ✅, pre-selezionate)
+  - Gambe nuove non configurate (blu, con 🆕, selezionabili)
+  - Select tipo strategia (pre-impostato al tipo salvato, aggiornato con auto-detect)
+  - Toggle sintetica
+- Pulsanti: "Ignora" (chiude senza salvare), "Salva aggiornamenti" (salva le nuove configs)
+- Un flag "Non mostrare più per questa sessione" per evitare di riaprirsi
 
-**Fix in `autoClassify`**:
-- Post-merge: se esiste una covered call + long put sullo stesso sottostante → `derisking_covered_call`
-- Per grouped other strategies: usare `detectStrategyType` per assegnare `put_spread` / `diagonal_put_spread` invece di `'other'`
+**3. Modifica `src/pages/Derivatives.tsx`**
+- Al mount, se `hasConfigurations` è true, eseguire `reconcileConfigs(strategyConfigs, positions)`
+- Se ci sono discrepanze → aprire automaticamente `StrategyReconciliationDialog`
+- Usare un `useRef` per aprirlo solo una volta per sessione/mount
+- Passare `upsertBatch` come callback di salvataggio
 
-### File da modificare
-
-1. **`src/components/derivatives/StrategyConfigWizard.tsx`**:
-   - `getUnderlyingKey`: token overlap fallback
-   - `handleAutoClassify`: rimappatura ID slottati
-   - `autoClassify`: merge CC+put → derisking, detect put spread
-   - `handleSave`: deduplicazione configs prima del salvataggio
-
-2. **`src/hooks/useStrategyConfigurations.ts`**:
-   - `upsertBatchMutation`: aggiungere deduplicazione rows prima dell'insert come safety net
-
-### Ordine di esecuzione
-1. Fix salvataggio (deduplicazione) — risolve l'errore immediato
-2. Fix matching sottostanti — risolve BAIDU/Super Micro
-3. Fix slot ID remapping — risolve posizioni fantasma
-4. Fix auto-classificazione avanzata — rileva derisking CC e put spread
+### Flusso utente
+1. Upload nuovo Excel → posizioni aggiornate nel DB
+2. Visita pagina Strategie Derivati
+3. Il sistema confronta configs salvate vs posizioni attuali
+4. Se ci sono differenze → dialog si apre automaticamente
+5. L'utente vede per ogni sottostante cosa è cambiato
+6. Può riselezionare le gambe, cambiare tipo strategia, e salvare
+7. Il dialog salva le configs aggiornate e si chiude
 
