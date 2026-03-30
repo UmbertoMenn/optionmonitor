@@ -899,7 +899,7 @@ export function Derivatives() {
                   <div className="flex items-center gap-2">
                     <Puzzle className="w-5 h-5 text-cyan-500" />
                     <CardTitle className="text-xl">Altre Strategie</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{categories.groupedOtherStrategies.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{remainingOtherStrategies.length}</Badge>
                   </div>
                   {otherStrategiesOpen ? (
                     <ChevronDown className="w-5 h-5 text-muted-foreground" />
