@@ -467,15 +467,19 @@ export function StrategyConfigWizard({
     return restored;
   }, [existingConfigs, allAvailable]);
 
-  const handleOpenChange = useCallback((isOpen: boolean) => {
-    if (isOpen) {
+  // Restore saved configs when wizard opens via prop
+  useEffect(() => {
+    if (open) {
       const restored = restoreFromConfigs();
       setStrategies(restored);
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
     }
+  }, [open, restoreFromConfigs]);
+
+  const handleOpenChange = useCallback((isOpen: boolean) => {
     onOpenChange(isOpen);
-  }, [onOpenChange, restoreFromConfigs]);
+  }, [onOpenChange]);
 
   const toggleSelected = (groupKey: string, posId: string) => {
     setSelectedIdsByGroup(prev => {
