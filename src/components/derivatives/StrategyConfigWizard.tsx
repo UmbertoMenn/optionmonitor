@@ -279,17 +279,37 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
     if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'leap_call')); }
   }
 
-  // Long Puts → other
+  // Long Puts → try to merge into existing CC as derisking, otherwise 'other'
   for (const lp of result.longPuts) {
     const legs = addUnique([lp.option]);
-    if (legs.length > 0) { consume(legs); strategies.push(make(legs, 'other')); }
+    if (legs.length === 0) continue;
+    
+    const putKey = normalizeForMatching(lp.option.underlying || lp.option.description || '');
+    const matchingCC = strategies.find(s => 
+      s.strategyType === 'covered_call' &&
+      normalizeForMatching(s.positions[0]?.underlying || s.positions[0]?.description || '') === putKey
+    );
+    
+    if (matchingCC) {
+      consume(legs);
+      matchingCC.positions.push(...legs);
+      matchingCC.strategyType = 'derisking_covered_call';
+      matchingCC.suggestedType = 'derisking_covered_call';
+    } else {
+      consume(legs);
+      strategies.push(make(legs, 'other'));
+    }
   }
 
-  // Other Strategies
+  // Other Strategies → detect put_spread / diagonal_put_spread
   for (const group of result.groupedOtherStrategies) {
     const options = group.options.map(o => o.option);
     const unique = addUnique(options);
-    if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'other')); }
+    if (unique.length > 0) {
+      consume(unique);
+      const detected = detectStrategyType(unique);
+      strategies.push(make(unique, detected));
+    }
   }
 
   return strategies;
