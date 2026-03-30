@@ -264,7 +264,9 @@ export function computeSinglePortfolioNetting(
         } else if (uprice > 0 && strikePrice >= uprice) {
           const contracts = Math.abs(quantity);
           const intrinsicValue = (contracts * multiplier * (strikePrice - uprice)) / exchangeRate;
-          nettingExCCAndNP -= intrinsicValue;
+          // Cap: intrinsic loss cannot exceed market value (cost to close)
+          const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
+          nettingExCCAndNP += cappedIntrinsic;
         } else {
           nettingExCCAndNP += nettingValue;
         }
