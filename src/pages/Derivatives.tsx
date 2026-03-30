@@ -914,7 +914,7 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.groupedOtherStrategies.length === 0 ? (
+                {remainingOtherStrategies.length === 0 ? (
                   <div className="text-center py-6 text-muted-foreground">
                     <p className="text-sm">Nessuna altra strategia presente</p>
                   </div>
