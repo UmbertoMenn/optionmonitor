@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { Position, PortfolioSummary } from '@/types/portfolio';
-import { categorizeDerivatives } from '@/lib/derivativeStrategies';
+import { categorizeDerivatives, findUnderlyingStock, normalizeForMatching } from '@/lib/derivativeStrategies';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 export interface NettingBreakdownDetail {
   positionId: string;
@@ -21,11 +22,30 @@ export interface NettingBreakdownItem {
   details: NettingBreakdownDetail[];
 }
 
+export interface OptionTypeDetail {
+  ticker: string;
+  value: number;
+}
+
+export interface OptionTypeBucket {
+  total: number;
+  details: OptionTypeDetail[];
+}
+
+export interface OptionTypeBreakdown {
+  sold_put_itm: OptionTypeBucket;
+  sold_call_itm: OptionTypeBucket;
+  sold_put_otm: OptionTypeBucket;
+  sold_call_otm: OptionTypeBucket;
+}
+
 export interface NettingResult {
   nettingExCoveredCall: number;
   nettingTotal: number;
   nettingExCCAndNP: number;
   breakdown: NettingBreakdownItem[];
+  optionTypeBreakdown: OptionTypeBreakdown;
+  strategyBreakdown: NettingBreakdownItem[];
 }
 
 function getEffectiveExchangeRate(position: Position): number {
