@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertTriangle, Check, X, Plus, Loader2 } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { AlertTriangle, Check, X, Plus, Zap, Trash2, ChevronDown, Loader2 } from 'lucide-react';
 import { ReconciliationItem, LegStatus } from '@/lib/strategyReconciliation';
-import { UpsertConfigParams, PositionSignature, STRATEGY_TYPE_LABELS, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+import { Position } from '@/types/portfolio';
+import { normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
 
 const STRATEGY_OPTIONS = [
   { value: 'covered_call', label: 'Covered Call' },
@@ -22,18 +25,119 @@ const STRATEGY_OPTIONS = [
   { value: 'other', label: 'Altre Strategie' },
 ];
 
+function formatExpiryMMY(date: string | null | undefined): string {
+  if (!date) return '-';
+  const months = ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV', 'DIC'];
+  const d = new Date(date);
+  return `${months[d.getMonth()]}/${d.getFullYear().toString().slice(-2)}`;
+}
+
+function positionLabel(p: Position): string {
+  if (p.asset_type === 'stock' || p.asset_type === 'etf') {
+    const slotMatch = p.id.match(/__slot_(\d+)$/);
+    if (slotMatch) {
+      const slotNum = parseInt(slotMatch[1]) + 1;
+      return `${p.description} (${p.quantity} azioni) [slot ${slotNum}]`;
+    }
+    return `${p.description} (${p.quantity} azioni)`;
+  }
+  const prefix = p.ticker || p.underlying || p.description || '';
+  const side = p.quantity < 0 ? 'V' : 'A';
+  const type = p.option_type?.toUpperCase() || '?';
+  const strike = p.strike_price || '?';
+  const expiry = formatExpiryMMY(p.expiry_date);
+  const qty = Math.abs(p.quantity) > 1 ? ` ×${Math.abs(p.quantity)}` : '';
+  return `${prefix} ${side} ${type} ${strike} ${expiry}${qty}`;
+}
+
+function positionBadgeClass(p: Position): string {
+  if (p.asset_type === 'stock' || p.asset_type === 'etf') return 'border-blue-500/50 text-blue-500';
+  return p.quantity < 0 ? 'border-green-500/50 text-green-500' : 'border-red-500/50 text-red-500';
+}
+
+function sigLabel(sig: PositionSignature): string {
+  const side = sig.quantity_sign < 0 ? 'V' : 'A';
+  const type = (sig.option_type || '?').toUpperCase();
+  const strike = sig.strike || '?';
+  const expiry = formatExpiryMMY(sig.expiry);
+  return `${side} ${type} ${strike} ${expiry}`;
+}
+
+function detectStrategyType(positions: Position[]): string {
+  const options = positions.filter(p => p.asset_type === 'derivative');
+  const stocks = positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+  const soldCalls = options.filter(o => o.option_type === 'call' && o.quantity < 0);
+  const boughtCalls = options.filter(o => o.option_type === 'call' && o.quantity > 0);
+  const soldPuts = options.filter(o => o.option_type === 'put' && o.quantity < 0);
+  const boughtPuts = options.filter(o => o.option_type === 'put' && o.quantity > 0);
+  const hasStock = stocks.some(s => s.quantity > 0);
+
+  if (soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length >= 1 && boughtPuts.length >= 1) {
+    const expiries = new Set(options.map(o => o.expiry_date));
+    if (expiries.size === 1) return 'iron_condor';
+    if (expiries.size >= 2) return 'double_diagonal';
+  }
+  const hasPutSpread = soldPuts.length > 0 && boughtPuts.length > 0 && (() => {
+    const maxSoldPutStrike = Math.max(...soldPuts.map(p => p.strike_price || 0));
+    const minBoughtPutStrike = Math.min(...boughtPuts.map(p => p.strike_price || 0));
+    return minBoughtPutStrike < maxSoldPutStrike;
+  })();
+  if (hasPutSpread && soldCalls.length === 0 && boughtCalls.length === 0) {
+    const allPutExpiries = new Set([...soldPuts, ...boughtPuts].map(p => p.expiry_date || ''));
+    return allPutExpiries.size <= 1 ? 'put_spread' : 'diagonal_put_spread';
+  }
+  if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
+    if (boughtPuts.length > 0 && !hasPutSpread) return 'derisking_covered_call';
+    if (hasStock) return 'covered_call';
+  }
+  if (soldPuts.length > 0 && !hasStock && soldCalls.length === 0 && boughtCalls.length === 0) return 'naked_put';
+  if (boughtCalls.length > 0 && soldCalls.length === 0 && soldPuts.length === 0) return 'leap_call';
+  return 'other';
+}
+
+function buildSignatures(positions: Position[]): PositionSignature[] {
+  return positions
+    .filter(p => p.asset_type === 'derivative')
+    .map(o => ({
+      option_type: o.option_type || 'unknown',
+      strike: o.strike_price || 0,
+      expiry: o.expiry_date || '',
+      quantity_sign: o.quantity >= 0 ? 1 : -1,
+    }));
+}
+
+function normalizeUnderlying(text: string): string {
+  return getCanonicalKey(text) || normalizeForMatching(text);
+}
+
+interface WizardStrategy {
+  id: string;
+  positions: Position[];
+  strategyType: string;
+  isSynthetic: boolean;
+  suggestedType: string;
+  linkedStockId: string | null;
+}
+
+interface UnderlyingReconciliation {
+  underlying: string;
+  underlyingKey: string;
+  missingLegs: LegStatus[];
+  availablePositions: Position[]; // new + present-unassigned positions
+  strategies: WizardStrategy[];
+}
+
+let nextId = 0;
+function genId() { return `recon-${Date.now()}-${nextId++}`; }
+
 interface StrategyReconciliationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   items: ReconciliationItem[];
   allConfigs: StrategyConfiguration[];
+  currentPositions: Position[];
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
-}
-
-interface ItemState {
-  selectedLegs: Set<number>; // indices of legs to include
-  strategyType: string;
 }
 
 export function StrategyReconciliationDialog({
@@ -41,52 +145,275 @@ export function StrategyReconciliationDialog({
   onOpenChange,
   items,
   allConfigs,
+  currentPositions,
   onSave,
   isSaving,
 }: StrategyReconciliationDialogProps) {
-  const [itemStates, setItemStates] = useState<Map<string, ItemState>>(new Map());
+  const [underlyingStates, setUnderlyingStates] = useState<Map<string, UnderlyingReconciliation>>(new Map());
+  const [selectedByGroup, setSelectedByGroup] = useState<Map<string, Set<string>>>(new Map());
+  const [initialized, setInitialized] = useState(false);
 
-  // Initialize states lazily
-  const getItemState = (item: ReconciliationItem): ItemState => {
-    const key = item.config.id;
-    if (itemStates.has(key)) return itemStates.get(key)!;
-    // Default: select present + new legs, exclude missing
-    const selected = new Set<number>();
-    item.legs.forEach((leg, i) => {
-      if (leg.status === 'present' || leg.status === 'new') {
-        selected.add(i);
+  // Build initial state from reconciliation items
+  const initStates = useCallback(() => {
+    const states = new Map<string, UnderlyingReconciliation>();
+    const affectedKeys = new Set<string>();
+
+    // Group items by underlying key
+    const itemsByKey = new Map<string, ReconciliationItem[]>();
+    for (const item of items) {
+      const key = normalizeUnderlying(item.underlying);
+      affectedKeys.add(key);
+      if (!itemsByKey.has(key)) itemsByKey.set(key, []);
+      itemsByKey.get(key)!.push(item);
+    }
+
+    // Get all derivative positions grouped by underlying
+    const derivsByKey = new Map<string, Position[]>();
+    for (const pos of currentPositions.filter(p => p.asset_type === 'derivative')) {
+      const raw = pos.underlying || pos.description || '';
+      const key = normalizeUnderlying(raw);
+      if (!derivsByKey.has(key)) derivsByKey.set(key, []);
+      derivsByKey.get(key)!.push(pos);
+    }
+
+    // Also get stock positions by underlying key for the pool
+    const stocksByKey = new Map<string, Position[]>();
+    for (const pos of currentPositions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf')) {
+      const raw = pos.description || '';
+      const key = normalizeUnderlying(raw);
+      if (!stocksByKey.has(key)) stocksByKey.set(key, []);
+      // Split stocks into 100-share slots
+      if (pos.quantity >= 200) {
+        const slots = Math.floor(pos.quantity / 100);
+        for (let i = 0; i < slots; i++) {
+          stocksByKey.get(key)!.push({ ...pos, id: `${pos.id}__slot_${i}`, quantity: 100 });
+        }
+        const remainder = pos.quantity % 100;
+        if (remainder > 0) {
+          stocksByKey.get(key)!.push({ ...pos, id: `${pos.id}__slot_${slots}`, quantity: remainder });
+        }
+      } else {
+        stocksByKey.get(key)!.push(pos);
       }
-    });
-    return { selectedLegs: selected, strategyType: item.strategyType };
-  };
+    }
 
-  const updateItemState = (configId: string, update: Partial<ItemState>) => {
-    setItemStates(prev => {
+    for (const [key, reconItems] of itemsByKey) {
+      const missingLegs: LegStatus[] = [];
+      const assignedPositionIds = new Set<string>();
+
+      // Build strategies from existing configs (using present legs)
+      const strategies: WizardStrategy[] = [];
+      for (const item of reconItems) {
+        const presentPositions: Position[] = [];
+        for (const leg of item.legs) {
+          if (leg.status === 'present' && leg.position) {
+            presentPositions.push(leg.position);
+            assignedPositionIds.add(leg.position.id);
+          } else if (leg.status === 'missing') {
+            missingLegs.push(leg);
+          }
+        }
+
+        if (presentPositions.length > 0) {
+          // Also check if config had a linked stock
+          const linkedStockId = item.config.linked_stock_id;
+          if (linkedStockId) {
+            const stockPool = stocksByKey.get(key) || [];
+            const matchingSlot = stockPool.find(s => s.id.startsWith(linkedStockId) && !assignedPositionIds.has(s.id));
+            if (matchingSlot) {
+              presentPositions.push(matchingSlot);
+              assignedPositionIds.add(matchingSlot.id);
+            }
+          }
+
+          const detected = detectStrategyType(presentPositions);
+          strategies.push({
+            id: genId(),
+            positions: presentPositions,
+            strategyType: item.strategyType,
+            isSynthetic: item.config.is_synthetic,
+            suggestedType: detected,
+            linkedStockId: linkedStockId,
+          });
+        }
+      }
+
+      // Available positions: all derivatives + stocks for this underlying NOT assigned
+      const allDerivs = derivsByKey.get(key) || [];
+      const allStocks = stocksByKey.get(key) || [];
+      const allPoolPositions = [...allDerivs, ...allStocks];
+      const availablePositions = allPoolPositions.filter(p => !assignedPositionIds.has(p.id));
+
+      states.set(key, {
+        underlying: reconItems[0].underlying,
+        underlyingKey: key,
+        missingLegs,
+        availablePositions,
+        strategies,
+      });
+    }
+
+    setUnderlyingStates(states);
+    setSelectedByGroup(new Map());
+    setInitialized(true);
+  }, [items, currentPositions]);
+
+  // Re-initialize when dialog opens
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    if (isOpen && !initialized) {
+      initStates();
+    }
+    if (!isOpen) {
+      setInitialized(false);
+    }
+    onOpenChange(isOpen);
+  }, [onOpenChange, initStates, initialized]);
+
+  // Initialize on first render if open
+  if (open && !initialized) {
+    initStates();
+  }
+
+  // Compute assigned IDs across all strategies
+  const assignedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [, state] of underlyingStates) {
+      state.strategies.forEach(s => s.positions.forEach(p => ids.add(p.id)));
+    }
+    return ids;
+  }, [underlyingStates]);
+
+  const toggleSelected = (groupKey: string, posId: string) => {
+    setSelectedByGroup(prev => {
       const next = new Map(prev);
-      const current = next.get(configId) || { selectedLegs: new Set(), strategyType: '' };
-      next.set(configId, { ...current, ...update });
+      const s = new Set(next.get(groupKey) || []);
+      if (s.has(posId)) s.delete(posId); else s.add(posId);
+      next.set(groupKey, s);
       return next;
     });
   };
 
-  const toggleLeg = (configId: string, legIndex: number, item: ReconciliationItem) => {
-    const state = getItemState(item);
-    const newSelected = new Set(state.selectedLegs);
-    if (newSelected.has(legIndex)) {
-      newSelected.delete(legIndex);
-    } else {
-      newSelected.add(legIndex);
-    }
-    updateItemState(configId, { selectedLegs: newSelected });
+  const createStrategyFromSelected = (groupKey: string) => {
+    const state = underlyingStates.get(groupKey);
+    if (!state) return;
+    const selectedSet = selectedByGroup.get(groupKey);
+    if (!selectedSet || selectedSet.size === 0) return;
+
+    const selected = state.availablePositions.filter(p => selectedSet.has(p.id) && !assignedIds.has(p.id));
+    if (selected.length === 0) return;
+
+    const suggested = detectStrategyType(selected);
+    const newStrategy: WizardStrategy = {
+      id: genId(),
+      positions: selected,
+      strategyType: suggested,
+      isSynthetic: false,
+      suggestedType: suggested,
+      linkedStockId: null,
+    };
+
+    setUnderlyingStates(prev => {
+      const next = new Map(prev);
+      const s = { ...next.get(groupKey)! };
+      s.strategies = [...s.strategies, newStrategy];
+      s.availablePositions = s.availablePositions.filter(p => !selectedSet.has(p.id));
+      next.set(groupKey, s);
+      return next;
+    });
+    setSelectedByGroup(prev => {
+      const next = new Map(prev);
+      next.delete(groupKey);
+      return next;
+    });
+  };
+
+  const removeFromStrategy = (groupKey: string, strategyId: string, positionId: string) => {
+    setUnderlyingStates(prev => {
+      const next = new Map(prev);
+      const state = { ...next.get(groupKey)! };
+      let removedPos: Position | undefined;
+
+      state.strategies = state.strategies.map(s => {
+        if (s.id !== strategyId) return s;
+        removedPos = s.positions.find(p => p.id === positionId);
+        const newPositions = s.positions.filter(p => p.id !== positionId);
+        if (newPositions.length === 0) return null as any;
+        return { ...s, positions: newPositions, suggestedType: detectStrategyType(newPositions) };
+      }).filter(Boolean);
+
+      if (removedPos) {
+        state.availablePositions = [...state.availablePositions, removedPos];
+      }
+      next.set(groupKey, state);
+      return next;
+    });
+  };
+
+  const deleteStrategy = (groupKey: string, strategyId: string) => {
+    setUnderlyingStates(prev => {
+      const next = new Map(prev);
+      const state = { ...next.get(groupKey)! };
+      const deleted = state.strategies.find(s => s.id === strategyId);
+      state.strategies = state.strategies.filter(s => s.id !== strategyId);
+      if (deleted) {
+        state.availablePositions = [...state.availablePositions, ...deleted.positions];
+      }
+      next.set(groupKey, state);
+      return next;
+    });
+  };
+
+  const updateStrategyType = (groupKey: string, strategyId: string, type: string) => {
+    setUnderlyingStates(prev => {
+      const next = new Map(prev);
+      const state = { ...next.get(groupKey)! };
+      state.strategies = state.strategies.map(s =>
+        s.id === strategyId ? { ...s, strategyType: type } : s
+      );
+      next.set(groupKey, state);
+      return next;
+    });
+  };
+
+  const toggleSynthetic = (groupKey: string, strategyId: string) => {
+    setUnderlyingStates(prev => {
+      const next = new Map(prev);
+      const state = { ...next.get(groupKey)! };
+      state.strategies = state.strategies.map(s =>
+        s.id === strategyId ? { ...s, isSynthetic: !s.isSynthetic } : s
+      );
+      next.set(groupKey, state);
+      return next;
+    });
   };
 
   const handleSave = async () => {
-    const changedConfigIds = new Set(items.map(item => item.config.id));
     const configs: UpsertConfigParams[] = [];
+    const affectedUnderlyings = new Set<string>();
 
-    // Add unchanged configs as-is
+    // Collect configs from reconciliation states
+    for (const [, state] of underlyingStates) {
+      affectedUnderlyings.add(state.underlying);
+      for (const strategy of state.strategies) {
+        if (strategy.positions.length === 0) continue;
+        const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
+          || state.underlying;
+        const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+        const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || strategy.linkedStockId || null;
+
+        configs.push({
+          underlying,
+          strategy_type: strategy.strategyType,
+          position_signatures: buildSignatures(strategy.positions),
+          is_synthetic: strategy.isSynthetic,
+          linked_stock_id: realStockId,
+        });
+      }
+    }
+
+    // Preserve unchanged configs
     for (const config of allConfigs) {
-      if (changedConfigIds.has(config.id)) continue;
+      if (affectedUnderlyings.has(config.underlying)) continue;
       configs.push({
         underlying: config.underlying,
         strategy_type: config.strategy_type,
@@ -96,59 +423,17 @@ export function StrategyReconciliationDialog({
       });
     }
 
-    // Add updated configs from reconciliation
-    for (const item of items) {
-      const state = getItemState(item);
-      const selectedSignatures: PositionSignature[] = [];
-
-      item.legs.forEach((leg, i) => {
-        if (state.selectedLegs.has(i)) {
-          selectedSignatures.push(leg.signature);
-        }
-      });
-
-      if (selectedSignatures.length > 0) {
-        configs.push({
-          underlying: item.underlying,
-          strategy_type: state.strategyType,
-          position_signatures: selectedSignatures,
-          is_synthetic: item.config.is_synthetic,
-          linked_stock_id: item.config.linked_stock_id,
-        });
-      }
-    }
-
     await onSave(configs);
     onOpenChange(false);
   };
 
-  const statusIcon = (status: LegStatus['status']) => {
-    switch (status) {
-      case 'present':
-        return <Check className="w-3.5 h-3.5 text-green-500" />;
-      case 'missing':
-        return <X className="w-3.5 h-3.5 text-destructive" />;
-      case 'new':
-        return <Plus className="w-3.5 h-3.5 text-blue-500" />;
-    }
-  };
-
-  const statusBadge = (status: LegStatus['status']) => {
-    switch (status) {
-      case 'present':
-        return <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-500/50 text-green-500">Presente</Badge>;
-      case 'missing':
-        return <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-destructive/50 text-destructive">Rimossa</Badge>;
-      case 'new':
-        return <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-500/50 text-blue-500">Nuova</Badge>;
-    }
-  };
-
   if (items.length === 0) return null;
 
+  const entries = Array.from(underlyingStates.entries());
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-yellow-500" />
@@ -156,83 +441,198 @@ export function StrategyReconciliationDialog({
           </DialogTitle>
           <DialogDescription>
             Sono state rilevate differenze tra le configurazioni salvate e le posizioni attuali.
-            Verifica e aggiorna le strategie per {items.length} sottostant{items.length === 1 ? 'e' : 'i'}.
+            Riconfigura le strategie per {entries.length} sottostant{entries.length === 1 ? 'e' : 'i'}.
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6">
-          <div className="space-y-4 py-2">
-            {items.map((item) => {
-              const state = getItemState(item);
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
+          <div className="space-y-3 pb-4 pt-2">
+            {entries.map(([key, state]) => {
+              const selectedSet = selectedByGroup.get(key) || new Set<string>();
+              const available = state.availablePositions.filter(p => !assignedIds.has(p.id));
+              const selectedCount = available.filter(p => selectedSet.has(p.id)).length;
+              const missingCount = state.missingLegs.length;
+              const newCount = available.filter(p => p.asset_type === 'derivative').length;
 
               return (
-                <Card key={item.config.id} className="border-yellow-500/30">
-                  <CardContent className="pt-4 pb-3 space-y-3">
-                    {/* Header */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-semibold text-sm">{item.underlying}</div>
-                      <Select
-                        value={state.strategyType}
-                        onValueChange={(v) => updateItemState(item.config.id, { strategyType: v })}
-                      >
-                        <SelectTrigger className="w-[200px] h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {STRATEGY_OPTIONS.map(opt => (
-                            <SelectItem key={opt.value} value={opt.value} className="text-xs">
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Legs */}
-                    <div className="space-y-1.5">
-                      {item.legs.map((leg, i) => {
-                        const isChecked = state.selectedLegs.has(i);
-                        const isMissing = leg.status === 'missing';
-
-                        return (
-                          <div
-                            key={`${item.config.id}-${i}`}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${
-                              isMissing
-                                ? 'bg-destructive/5 line-through text-muted-foreground'
-                                : isChecked
-                                  ? 'bg-accent/50'
-                                  : 'bg-muted/30'
-                            }`}
-                          >
-                            {!isMissing && (
-                              <Checkbox
-                                checked={isChecked}
-                                onCheckedChange={() => toggleLeg(item.config.id, i, item)}
-                                className="h-3.5 w-3.5"
-                              />
-                            )}
-                            {isMissing && <span className="w-3.5" />}
-                            {statusIcon(leg.status)}
-                            <span className="font-mono flex-1">{leg.label}</span>
-                            {statusBadge(leg.status)}
+                <Collapsible key={key} defaultOpen>
+                  <Card className="border-yellow-500/30">
+                    <CollapsibleTrigger className="w-full">
+                      <CardHeader className="pb-2 pt-3 px-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90" />
+                            <span className="text-sm font-bold uppercase">{state.underlying}</span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
+                          <div className="flex items-center gap-1.5">
+                            {missingCount > 0 && (
+                              <Badge variant="outline" className="text-[10px] border-destructive/50 text-destructive">
+                                {missingCount} rimoss{missingCount === 1 ? 'a' : 'e'}
+                              </Badge>
+                            )}
+                            {newCount > 0 && (
+                              <Badge variant="outline" className="text-[10px] border-blue-500/50 text-blue-500">
+                                {newCount} nuov{newCount === 1 ? 'a' : 'e'}
+                              </Badge>
+                            )}
+                            {state.strategies.length > 0 && (
+                              <Badge variant="secondary" className="text-[10px]">
+                                {state.strategies.length} {state.strategies.length === 1 ? 'strategia' : 'strategie'}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </CardHeader>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <CardContent className="px-4 pb-3 space-y-3">
+                        {/* Missing legs banner */}
+                        {missingCount > 0 && (
+                          <div className="rounded-md bg-destructive/5 border border-destructive/20 p-2">
+                            <span className="text-[11px] text-destructive font-medium uppercase tracking-wide block mb-1">
+                              Gambe rimosse
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {state.missingLegs.map((leg, i) => (
+                                <Badge key={i} variant="outline" className="text-xs border-destructive/40 text-destructive line-through">
+                                  {sigLabel(leg.signature)}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Available positions pool */}
+                        {available.length > 0 && (
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+                                Posizioni disponibili ({available.length})
+                              </span>
+                              {selectedCount > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  className="h-6 text-[11px] px-2"
+                                  onClick={() => createStrategyFromSelected(key)}
+                                >
+                                  <Plus className="w-3 h-3 mr-1" />
+                                  Crea strategia ({selectedCount})
+                                </Button>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {available.map(p => (
+                                <label
+                                  key={p.id}
+                                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
+                                    selectedSet.has(p.id)
+                                      ? 'bg-primary/10 border-primary'
+                                      : 'hover:bg-muted/50'
+                                  } ${positionBadgeClass(p)}`}
+                                >
+                                  <Checkbox
+                                    checked={selectedSet.has(p.id)}
+                                    onCheckedChange={() => toggleSelected(key, p.id)}
+                                    className="w-3.5 h-3.5"
+                                  />
+                                  {positionLabel(p)}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Configured strategies */}
+                        {state.strategies.map(strategy => {
+                          const showSynthetic = strategy.strategyType === 'covered_call' || strategy.strategyType === 'derisking_covered_call';
+                          return (
+                            <div key={strategy.id} className="rounded-md border border-dashed border-border p-2.5 space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Select
+                                    value={strategy.strategyType}
+                                    onValueChange={(v) => updateStrategyType(key, strategy.id, v)}
+                                  >
+                                    <SelectTrigger className="w-48 h-7 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {STRATEGY_OPTIONS.map(opt => (
+                                        <SelectItem key={opt.value} value={opt.value}>
+                                          {opt.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+
+                                  {strategy.suggestedType && strategy.suggestedType !== strategy.strategyType && (
+                                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                      Suggerito: {STRATEGY_OPTIONS.find(o => o.value === strategy.suggestedType)?.label || strategy.suggestedType}
+                                    </Badge>
+                                  )}
+
+                                  {strategy.suggestedType === strategy.strategyType && (
+                                    <Badge variant="secondary" className="text-[10px]">
+                                      ✓ Auto
+                                    </Badge>
+                                  )}
+
+                                  {showSynthetic && (
+                                    <div className="flex items-center gap-1.5">
+                                      <Checkbox
+                                        id={`syn-${strategy.id}`}
+                                        checked={strategy.isSynthetic}
+                                        onCheckedChange={() => toggleSynthetic(key, strategy.id)}
+                                        className="w-3.5 h-3.5"
+                                      />
+                                      <Label htmlFor={`syn-${strategy.id}`} className="text-[10px] text-muted-foreground cursor-pointer flex items-center gap-1">
+                                        <Zap className="w-3 h-3" /> Sintetica
+                                      </Label>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => deleteStrategy(key, strategy.id)}>
+                                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                                </Button>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {strategy.positions.map(p => (
+                                  <Badge
+                                    key={p.id}
+                                    variant="outline"
+                                    className={`text-xs pr-1 ${positionBadgeClass(p)}`}
+                                  >
+                                    {positionLabel(p)}
+                                    <button
+                                      className="ml-1 hover:text-destructive"
+                                      onClick={() => removeFromStrategy(key, strategy.id, p.id)}
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="gap-2 sm:gap-0 pt-4 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             Ignora
           </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+            <Check className="w-4 h-4 mr-2" />
             Salva aggiornamenti
           </Button>
         </DialogFooter>
