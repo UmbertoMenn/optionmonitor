@@ -864,6 +864,7 @@ export function Derivatives() {
         )}
 
         {/* Section 6: Protezioni - Long PUT (Collapsible) */}
+        {categories.longPuts.length > 0 && (
         <Collapsible open={protectionsOpen} onOpenChange={setProtectionsOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -884,21 +885,16 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.longPuts.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna protezione Long Put presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.longPuts.map((lp, index) => (
-                      <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.longPuts.map((lp, index) => (
+                    <LongPutRow key={index} longPut={lp} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 7: Altre Strategie (Collapsible) */}
         <Collapsible open={otherStrategiesOpen} onOpenChange={setOtherStrategiesOpen}>
