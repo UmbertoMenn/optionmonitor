@@ -82,7 +82,8 @@ function resolveUnderlyingPriceForDerivative(
 /** Compute option type breakdown (4 buckets: sold PUT/CALL × ITM/OTM) */
 function computeOptionTypeBreakdown(
   positions: Position[],
-  underlyingPrices?: Record<string, UnderlyingPrice>
+  underlyingPrices?: Record<string, UnderlyingPrice>,
+  mode: 'netting_total' | 'netting_ex_cc_np' = 'netting_ex_cc_np'
 ): OptionTypeBreakdown {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   const result: OptionTypeBreakdown = {
@@ -103,10 +104,18 @@ function computeOptionTypeBreakdown(
 
     if (d.option_type === 'put') {
       if (underlyingPrice > 0 && strike >= underlyingPrice) {
-        // ITM PUT: intrinsic value (negative = cost)
-        const intrinsic = -(contracts * 100 * (strike - underlyingPrice)) / exchangeRate;
-        result.sold_put_itm.total += intrinsic;
-        result.sold_put_itm.details.push({ ticker, value: intrinsic });
+        // ITM PUT
+        if (mode === 'netting_total') {
+          // Buyback cost (market price from Excel)
+          const mv = -(contracts * 100 * marketPrice) / exchangeRate;
+          result.sold_put_itm.total += mv;
+          result.sold_put_itm.details.push({ ticker, value: mv });
+        } else {
+          // Intrinsic value (netting_ex_cc_np)
+          const intrinsic = -(contracts * 100 * (strike - underlyingPrice)) / exchangeRate;
+          result.sold_put_itm.total += intrinsic;
+          result.sold_put_itm.details.push({ ticker, value: intrinsic });
+        }
       } else {
         // OTM PUT: market value (negative = cost to close)
         const mv = (marketPrice * d.quantity * 100) / exchangeRate;
@@ -115,10 +124,18 @@ function computeOptionTypeBreakdown(
       }
     } else if (d.option_type === 'call') {
       if (underlyingPrice > 0 && strike < underlyingPrice) {
-        // ITM CALL: intrinsic value (negative = cost)
-        const intrinsic = -(contracts * 100 * (underlyingPrice - strike)) / exchangeRate;
-        result.sold_call_itm.total += intrinsic;
-        result.sold_call_itm.details.push({ ticker, value: intrinsic });
+        // ITM CALL
+        if (mode === 'netting_total') {
+          // Buyback cost (market price from Excel)
+          const mv = -(contracts * 100 * marketPrice) / exchangeRate;
+          result.sold_call_itm.total += mv;
+          result.sold_call_itm.details.push({ ticker, value: mv });
+        } else {
+          // Intrinsic value (netting_ex_cc_np)
+          const intrinsic = -(contracts * 100 * (underlyingPrice - strike)) / exchangeRate;
+          result.sold_call_itm.total += intrinsic;
+          result.sold_call_itm.details.push({ ticker, value: intrinsic });
+        }
       } else {
         // OTM CALL: market value (negative = cost to close)
         const mv = (marketPrice * d.quantity * 100) / exchangeRate;
