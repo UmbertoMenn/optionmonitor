@@ -457,10 +457,8 @@ export function categorizeDerivatives(
           leapCalls.push({ option: call, underlying: linkedStock || null, contracts: call.quantity });
           usedDerivatives.add(call.id);
         }
-        // ALL remaining positions for this underlying stay consumed
-        for (const opt of remaining.filter(d => !usedDerivatives.has(d.id))) {
-          usedDerivatives.add(opt.id);
-        }
+        const sigMatched_lc = filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), (config.position_signatures as unknown as PositionSignature[]) || []);
+        for (const opt of sigMatched_lc) usedDerivatives.add(opt.id);
         break;
       }
       default: {
