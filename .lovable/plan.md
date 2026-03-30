@@ -1,27 +1,64 @@
 
 
-## Nascondere sezioni vuote nella pagina Derivati
+## Rework del Breakdown Netting nella Dashboard
 
-### Problema
-Alcune sezioni (Put Spread, Diagonal Put Spread) hanno già il guard `{x.length > 0 && (...)}`, ma le altre sezioni vengono sempre renderizzate anche quando vuote, mostrando "Nessuna X presente".
+### Stato attuale
+Il carousel netting ha 2 slide: (1) confronto barre orizzontali Assets vs Nettato, (2) istogramma verticale con categorie strategia (CC ITM, CC OTM, NP ITM, NP OTM, Long Put, Leap Call, Altre). Le categorie sono basate sulla classificazione `categorizeDerivatives`.
 
-### Soluzione
-Wrappare ogni sezione con un controllo `length > 0`, come già fatto per Put Spread e Diagonal Put Spread.
+### Cosa cambia
+Il carousel netting passerà a **3 slide**:
 
-### Modifiche a `src/pages/Derivatives.tsx`
+1. **Slide 1** (invariata): Confronto "Valore Assets" vs "Valore Nettato"
+2. **Slide 2** (NUOVA — sostituisce l'attuale breakdown): **Breakdown per tipo opzione**, con 4 barre:
+   - PUT Vendute ITM → valore intrinseco (strike - sottostante) × contratti × 100 / cambio
+   - CALL Vendute ITM → valore intrinseco (sottostante - strike) × contratti × 100 / cambio
+   - PUT Vendute OTM → prezzo mercato × contratti × 100 / cambio
+   - CALL Vendute OTM → prezzo mercato × contratti × 100 / cambio
+   - Tooltip: lista ticker + valore EUR per ciascuna barra
+   - Valore totale blu sotto il grafico = somma delle 4 barre
 
-Aggiungere il guard condizionale a queste 8 sezioni:
+3. **Slide 3** (NUOVA): **Breakdown per sezione strategia** (come nella pagina Derivati):
+   - Una barra per ogni sezione strategia che contiene posizioni (Covered Call, Naked Put, Iron Condor, ecc.)
+   - Barre nascoste se la sezione è vuota
+   - Se non esistono strategy_configurations salvate → messaggio di avviso con link alla configurazione
+   - Tooltip: ticker raggruppato per sottostante + valore
+   - Per strategie multi-gamba o multiple sullo stesso sottostante: somma valori e raggruppa per underlying
 
-1. **Covered Call** (riga 553): `{categories.coveredCalls.length > 0 && (<Collapsible ...>...</Collapsible>)}`
-2. **De-Risking Covered Call** (riga 605): `{categories.deRiskingCoveredCalls.length > 0 && (...)}`
-3. **Iron Condor** (riga 655): `{categories.ironCondors.length > 0 && (...)}`
-4. **Double Diagonal** (riga 695): `{categories.doubleDiagonals.length > 0 && (...)}`
-5. **Naked Put** (riga 735): `{categories.nakedPuts.length > 0 && (...)}`
-6. **Leap Call** (riga 847): `{categories.leapCalls.length > 0 && (...)}`
-7. **Protezioni** (riga 887): `{categories.longPuts.length > 0 && (...)}`
-8. **Altre Strategie** (riga 924): `{remainingOtherStrategies.length > 0 && (...)}`
+### Dettaglio tecnico
 
-Rimuovere anche i blocchi interni "Nessuna X presente" che diventano irraggiungibili.
+#### 1. `src/hooks/useDerivativeNetting.ts`
+- Aggiungere al risultato di `computeSinglePortfolioNetting` un nuovo campo `optionTypeBreakdown` con 4 bucket:
+  - `sold_put_itm`: per ogni PUT venduta (quantity < 0) dove strike >= underlyingPrice → calcolo intrinseco
+  - `sold_call_itm`: per ogni CALL venduta (quantity < 0) dove strike < underlyingPrice → calcolo intrinseco
+  - `sold_put_otm`: per ogni PUT venduta dove strike < underlyingPrice → valore mercato
+  - `sold_call_otm`: per ogni CALL venduta dove strike >= underlyingPrice → valore mercato
+- Determinazione ITM/OTM: usare snapshot_price del sottostante in portafoglio, con fallback su `underlyingPrices`
+- Cambio EUR/USD: usare `exchange_rate` dalla posizione (già presente dal parser Excel)
+- Ogni detail nel bucket: `{ ticker, value (EUR), valueUsd (opzionale) }`
+- Aggiungere `optionTypeBreakdown` a `NettingResult`
 
-### Nessuna modifica ad altri file
+#### 2. `src/hooks/useDerivativeNetting.ts` — nuovo campo `strategyBreakdown`
+- Aggiungere campo `strategyBreakdown: NettingBreakdownItem[]` al risultato
+- Raggruppare posizioni per sezione strategia (dalla classificazione `categorizeDerivatives`)
+- Per ogni sezione con posizioni: sommare i netting values di tutte le gambe, raggruppare dettagli per underlying
+- Sezioni: Covered Call, De-Risking CC, Naked Put, Iron Condor, Double Diagonal, Leap Call, Protezioni, Altre Strategie (+ eventuali grouped come Put Spread, Diagonal Put Spread)
+
+#### 3. `src/components/dashboard/DynamicPortfolioChart.tsx`
+- Aggiungere slide 3 al carousel netting
+- **Slide 2**: nuovo componente `OptionTypeBreakdownChart` che mostra le 4 barre con tooltip per ticker
+- **Slide 3**: nuovo componente `StrategyBreakdownChart` che:
+  - Se `existingConfigs` (da `useStrategyConfigurations`) è vuoto → mostra avviso "Configura le strategie" con link a `/derivatives`
+  - Altrimenti mostra una barra per ogni sezione strategia non vuota
+  - Tooltip con dettagli per underlying
+- Aggiornare `nettingSlides` a 3 elementi e i dot indicators
+
+#### 4. Passaggio dati
+- `Dashboard.tsx` già passa `netting` e `positions` a `DynamicPortfolioChart`
+- Aggiungere prop `strategyConfigs` (o fetch diretto nel componente) per verificare se esistono configurazioni salvate
+- I nuovi breakdown sono calcolati nel hook esistente, nessun fetch aggiuntivo necessario
+
+### File da modificare
+1. **`src/hooks/useDerivativeNetting.ts`** — aggiungere `optionTypeBreakdown` e `strategyBreakdown` ai risultati
+2. **`src/components/dashboard/DynamicPortfolioChart.tsx`** — nuovi componenti chart + terza slide carousel
+3. **`src/components/dashboard/Dashboard.tsx`** — passare eventuali props aggiuntive (strategy configs)
 
