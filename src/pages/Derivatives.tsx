@@ -920,7 +920,7 @@ export function Derivatives() {
                   </div>
                 ) : (
                   <div className="space-y-1 overflow-x-auto">
-                    {categories.groupedOtherStrategies.map((group, index) => (
+                    {remainingOtherStrategies.map((group, index) => (
                       <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                     ))}
                   </div>
