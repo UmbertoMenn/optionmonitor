@@ -26,6 +26,8 @@ const STRATEGY_OPTIONS = [
   { value: 'iron_condor', label: 'Iron Condor' },
   { value: 'double_diagonal', label: 'Double Diagonal' },
   { value: 'naked_put', label: 'Naked Put' },
+  { value: 'put_spread', label: 'Put Spread' },
+  { value: 'diagonal_put_spread', label: 'Diagonal Put Spread' },
   { value: 'leap_call', label: 'LEAP Call' },
   { value: 'other', label: 'Altre Strategie' },
 ];
