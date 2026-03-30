@@ -129,30 +129,60 @@ function detectStrategyType(positions: Position[]): string {
  * For stocks: normalize description.
  * Uses canonical aliases (GOOGLE → ALPHABET) for consistency.
  */
+const MATCHING_STOPWORDS = new Set([
+  'INC', 'LTD', 'CORP', 'GROUP', 'HOLDING', 'HOLDINGS', 'PLC', 'CO', 'NV',
+  'SA', 'AG', 'SE', 'AB', 'CLASS', 'CL', 'ADR', 'SHARES', 'COMPANY', 'THE',
+  'CORPORATION', 'INTERNATIONAL', 'ENTERPRISES', 'TECHNOLOGIES', 'TECHNOLOGY',
+]);
+
+function getSignificantTokens(text: string): string[] {
+  return text.toUpperCase()
+    .replace(/^AZ\.\s*/i, '')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2 && !MATCHING_STOPWORDS.has(t));
+}
+
+function hasTokenOverlap(a: string, b: string): boolean {
+  const tokensA = getSignificantTokens(a);
+  const tokensB = getSignificantTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  return tokensA.some(t => tokensB.includes(t));
+}
+
 function getUnderlyingKey(p: Position, allDerivatives: Position[]): string {
   if (p.asset_type === 'derivative') {
     const raw = p.underlying || p.description || '';
     return getCanonicalKey(raw) || normalizeForMatching(raw);
   }
-  // Stock or ETF: try to find matching derivative underlying via findUnderlyingStock logic
+  // Stock or ETF: try canonical first
   const stockText = `${p.description ?? ''} ${p.ticker ?? ''}`;
   const canonical = getCanonicalKey(stockText);
   if (canonical) return canonical;
 
+  // Also try description-only canonical (without ticker noise)
+  const descOnly = p.description ?? '';
+  const descCanonical = getCanonicalKey(descOnly);
+  if (descCanonical) return descCanonical;
+
   // Try to match against derivative underlyings
   const stockNorm = normalizeForMatching(stockText);
+  const descNorm = normalizeForMatching(descOnly);
+  
   for (const d of allDerivatives) {
     const dUnderlying = d.underlying || d.description || '';
     const dNorm = normalizeForMatching(dUnderlying);
     const dCanonical = getCanonicalKey(dUnderlying);
-    if (dCanonical) {
-      // Check if stock matches this canonical
-      if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm)) {
-        return dCanonical;
-      }
+    
+    // Check includes with both full text and description-only
+    if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm) ||
+        descNorm.includes(dNorm) || dNorm.includes(descNorm)) {
+      return dCanonical || dNorm;
     }
-    if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm)) {
-      return dNorm;
+    
+    // Token overlap fallback: if significant tokens match, same underlying
+    if (hasTokenOverlap(descOnly, dUnderlying)) {
+      return dCanonical || dNorm;
     }
   }
   return stockNorm;
@@ -249,17 +279,37 @@ function autoClassify(derivatives: Position[], allPositions: Position[]): Wizard
     if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'leap_call')); }
   }
 
-  // Long Puts → other
+  // Long Puts → try to merge into existing CC as derisking, otherwise 'other'
   for (const lp of result.longPuts) {
     const legs = addUnique([lp.option]);
-    if (legs.length > 0) { consume(legs); strategies.push(make(legs, 'other')); }
+    if (legs.length === 0) continue;
+    
+    const putKey = normalizeForMatching(lp.option.underlying || lp.option.description || '');
+    const matchingCC = strategies.find(s => 
+      s.strategyType === 'covered_call' &&
+      normalizeForMatching(s.positions[0]?.underlying || s.positions[0]?.description || '') === putKey
+    );
+    
+    if (matchingCC) {
+      consume(legs);
+      matchingCC.positions.push(...legs);
+      matchingCC.strategyType = 'derisking_covered_call';
+      matchingCC.suggestedType = 'derisking_covered_call';
+    } else {
+      consume(legs);
+      strategies.push(make(legs, 'other'));
+    }
   }
 
-  // Other Strategies
+  // Other Strategies → detect put_spread / diagonal_put_spread
   for (const group of result.groupedOtherStrategies) {
     const options = group.options.map(o => o.option);
     const unique = addUnique(options);
-    if (unique.length > 0) { consume(unique); strategies.push(make(unique, 'other')); }
+    if (unique.length > 0) {
+      consume(unique);
+      const detected = detectStrategyType(unique);
+      strategies.push(make(unique, detected));
+    }
   }
 
   return strategies;
@@ -421,12 +471,31 @@ export function StrategyConfigWizard({
 
   const handleAutoClassify = () => {
     const auto = autoClassify(derivatives, allPositions);
-    setStrategies(auto);
+    
+    // Remap original stock IDs to virtual slot IDs
+    const usedSlotIds = new Set<string>();
+    const remappedStrategies = auto.map(strat => ({
+      ...strat,
+      positions: strat.positions.map(p => {
+        if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return p;
+        // Find matching virtual slot in allAvailable
+        const slot = allAvailable.find(a =>
+          (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
+        );
+        if (slot && slot.id !== p.id) {
+          usedSlotIds.add(slot.id);
+          return { ...p, id: slot.id, quantity: slot.quantity };
+        }
+        return p;
+      }),
+    }));
+    
+    setStrategies(remappedStrategies);
     setSelectedIdsByGroup(new Map());
   };
 
   const handleSave = async () => {
-    const configs: UpsertConfigParams[] = [];
+    const rawConfigs: UpsertConfigParams[] = [];
 
     for (const strategy of strategies) {
       const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
@@ -434,7 +503,7 @@ export function StrategyConfigWizard({
       const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
       const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || null;
 
-      configs.push({
+      rawConfigs.push({
         underlying,
         strategy_type: strategy.strategyType,
         position_signatures: buildSignatures(strategy.positions),
@@ -445,8 +514,8 @@ export function StrategyConfigWizard({
 
     if (filterUnderlyings) {
       for (const existing of existingConfigs) {
-        if (!configs.some(c => c.underlying === existing.underlying)) {
-          configs.push({
+        if (!rawConfigs.some(c => c.underlying === existing.underlying)) {
+          rawConfigs.push({
             underlying: existing.underlying,
             strategy_type: existing.strategy_type,
             position_signatures: existing.position_signatures,
@@ -457,7 +526,24 @@ export function StrategyConfigWizard({
       }
     }
 
-    await onSave(configs);
+    // Deduplicate: merge configs with same (underlying, strategy_type)
+    const deduped = new Map<string, UpsertConfigParams>();
+    for (const cfg of rawConfigs) {
+      const key = `${cfg.underlying}::${cfg.strategy_type}`;
+      if (deduped.has(key)) {
+        const existing = deduped.get(key)!;
+        existing.position_signatures = [
+          ...existing.position_signatures,
+          ...cfg.position_signatures,
+        ];
+        if (cfg.is_synthetic) existing.is_synthetic = true;
+        if (cfg.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = cfg.linked_stock_id;
+      } else {
+        deduped.set(key, { ...cfg });
+      }
+    }
+
+    await onSave(Array.from(deduped.values()));
     onOpenChange(false);
   };
 
