@@ -129,30 +129,60 @@ function detectStrategyType(positions: Position[]): string {
  * For stocks: normalize description.
  * Uses canonical aliases (GOOGLE → ALPHABET) for consistency.
  */
+const MATCHING_STOPWORDS = new Set([
+  'INC', 'LTD', 'CORP', 'GROUP', 'HOLDING', 'HOLDINGS', 'PLC', 'CO', 'NV',
+  'SA', 'AG', 'SE', 'AB', 'CLASS', 'CL', 'ADR', 'SHARES', 'COMPANY', 'THE',
+  'CORPORATION', 'INTERNATIONAL', 'ENTERPRISES', 'TECHNOLOGIES', 'TECHNOLOGY',
+]);
+
+function getSignificantTokens(text: string): string[] {
+  return text.toUpperCase()
+    .replace(/^AZ\.\s*/i, '')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2 && !MATCHING_STOPWORDS.has(t));
+}
+
+function hasTokenOverlap(a: string, b: string): boolean {
+  const tokensA = getSignificantTokens(a);
+  const tokensB = getSignificantTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  return tokensA.some(t => tokensB.includes(t));
+}
+
 function getUnderlyingKey(p: Position, allDerivatives: Position[]): string {
   if (p.asset_type === 'derivative') {
     const raw = p.underlying || p.description || '';
     return getCanonicalKey(raw) || normalizeForMatching(raw);
   }
-  // Stock or ETF: try to find matching derivative underlying via findUnderlyingStock logic
+  // Stock or ETF: try canonical first
   const stockText = `${p.description ?? ''} ${p.ticker ?? ''}`;
   const canonical = getCanonicalKey(stockText);
   if (canonical) return canonical;
 
+  // Also try description-only canonical (without ticker noise)
+  const descOnly = p.description ?? '';
+  const descCanonical = getCanonicalKey(descOnly);
+  if (descCanonical) return descCanonical;
+
   // Try to match against derivative underlyings
   const stockNorm = normalizeForMatching(stockText);
+  const descNorm = normalizeForMatching(descOnly);
+  
   for (const d of allDerivatives) {
     const dUnderlying = d.underlying || d.description || '';
     const dNorm = normalizeForMatching(dUnderlying);
     const dCanonical = getCanonicalKey(dUnderlying);
-    if (dCanonical) {
-      // Check if stock matches this canonical
-      if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm)) {
-        return dCanonical;
-      }
+    
+    // Check includes with both full text and description-only
+    if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm) ||
+        descNorm.includes(dNorm) || dNorm.includes(descNorm)) {
+      return dCanonical || dNorm;
     }
-    if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm)) {
-      return dNorm;
+    
+    // Token overlap fallback: if significant tokens match, same underlying
+    if (hasTokenOverlap(descOnly, dUnderlying)) {
+      return dCanonical || dNorm;
     }
   }
   return stockNorm;
