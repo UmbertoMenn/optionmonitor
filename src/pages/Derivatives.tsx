@@ -602,6 +602,7 @@ export function Derivatives() {
         </Collapsible>
 
 
+        {categories.deRiskingCoveredCalls.length > 0 && (
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
@@ -628,28 +629,23 @@ export function Derivatives() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-0">
-                {categories.deRiskingCoveredCalls.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">Nessuna De-Risking Covered Call presente</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1 overflow-x-auto">
-                    {categories.deRiskingCoveredCalls.map((dr, index) => (
-                      <DeRiskingCoveredCallRow 
-                        key={index} 
-                        deRiskingCC={dr} 
-                        stockPositions={stockPositions} 
-                        getOverrideForPosition={getOverrideForPosition}
-                        underlyingPrices={underlyingPrices}
-                        getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
-                      />
-                    ))}
-                  </div>
-                )}
+                <div className="space-y-1 overflow-x-auto">
+                  {categories.deRiskingCoveredCalls.map((dr, index) => (
+                    <DeRiskingCoveredCallRow 
+                      key={index} 
+                      deRiskingCC={dr} 
+                      stockPositions={stockPositions} 
+                      getOverrideForPosition={getOverrideForPosition}
+                      underlyingPrices={underlyingPrices}
+                      getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol}
+                    />
+                  ))}
+                </div>
               </CardContent>
             </CollapsibleContent>
           </Card>
         </Collapsible>
+        )}
 
         {/* Section 3: Iron Condor */}
         <Collapsible open={ironCondorOpen} onOpenChange={setIronCondorOpen}>
