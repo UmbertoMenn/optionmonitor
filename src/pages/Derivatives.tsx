@@ -571,79 +571,7 @@ export function Derivatives() {
           </Card>
         </Collapsible>
 
-        {/* Section 5a: Put Spread (Collapsible) */}
-        {putSpreads.length > 0 && (
-        <Collapsible open={putSpreadOpen} onOpenChange={setPutSpreadOpen}>
-          <Card className="border-border bg-card">
-            <CollapsibleTrigger asChild>
-              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ArrowDownUp className="w-5 h-5 text-teal-500" />
-                    <CardTitle className="text-xl">Put Spread</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{putSpreads.length}</Badge>
-                  </div>
-                  {putSpreadOpen ? (
-                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  PUT venduta + PUT comprata a strike inferiore, stessa scadenza
-                </p>
-              </CardHeader>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <CardContent className="pt-0">
-                <div className="space-y-1 overflow-x-auto">
-                  {putSpreads.map((group, index) => (
-                    <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                  ))}
-                </div>
-              </CardContent>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
-        )}
 
-        {/* Section 5b: Diagonal Put Spread (Collapsible) */}
-        {diagonalPutSpreads.length > 0 && (
-        <Collapsible open={diagonalPutSpreadOpen} onOpenChange={setDiagonalPutSpreadOpen}>
-          <Card className="border-border bg-card">
-            <CollapsibleTrigger asChild>
-              <CardHeader className="pb-3 cursor-pointer hover:bg-muted/50 transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ArrowDownUp className="w-5 h-5 text-indigo-500" />
-                    <CardTitle className="text-xl">Diagonal Put Spread</CardTitle>
-                    <Badge variant="secondary" className="text-xs">{diagonalPutSpreads.length}</Badge>
-                  </div>
-                  {diagonalPutSpreadOpen ? (
-                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  PUT venduta + PUT comprata a strike inferiore, scadenze diverse
-                </p>
-              </CardHeader>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <CardContent className="pt-0">
-                <div className="space-y-1 overflow-x-auto">
-                  {diagonalPutSpreads.map((group, index) => (
-                    <GroupedOtherStrategyRow key={index} group={group} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
-                  ))}
-                </div>
-              </CardContent>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
-        )}
-
-        {/* Section 2: De-Risking Covered Call (Collapsible) */}
         <Collapsible open={deRiskingOpen} onOpenChange={setDeRiskingOpen}>
           <Card className="border-border bg-card">
             <CollapsibleTrigger asChild>
