@@ -1,66 +1,48 @@
 
 
-## Redesign Wizard: raggruppamento per sottostante
+## Aggiungere sezioni "Put Spread" e "Diagonal Put Spread" nella pagina Strategie Derivati
 
-### Concetto
+### Approccio
 
-Il wizard viene ripensato: invece di un pool piatto con sezioni "Azioni / Derivati / ETF", tutte le posizioni vengono raggruppate per sottostante. Ogni sottostante diventa una card dove l'utente può creare strategie liberamente, spostare posizioni, splittare azioni.
-
-### Struttura UI nuova
-
-```text
-┌─ Dialog "Configurazione Strategie Derivati" ──────────────────┐
-│  [Auto-classifica]  [Cerca sottostante...]                     │
-│                                                                │
-│  ┌─ BROADCOM ──────────────────────────────────────────────┐  │
-│  │  Posizioni disponibili:                                  │  │
-│  │   ☐ AZ. BROADCOM (100 azioni)                           │  │
-│  │   ☐ AVGO V CALL 230 GIU/25                              │  │
-│  │   ☐ AVGO A PUT 200 GIU/25                               │  │
-│  │                                                          │  │
-│  │  [+ Crea strategia da selezionate (2)]                   │  │
-│  │                                                          │  │
-│  │  Strategie configurate:                                  │  │
-│  │  ┌ Covered Call ─────────────────────────────────┐       │  │
-│  │  │  AVGO V CALL 230 GIU/25  ✕                    │       │  │
-│  │  │  AZ. BROADCOM (100 azioni) ✕                   │       │  │
-│  │  └────────────────────────────────────────────────┘       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                │
-│  ┌─ MICRON ────────────────────────────────────────────────┐  │
-│  │  ...                                                     │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                │
-│                              [Annulla]  [Salva Configurazione] │
-└────────────────────────────────────────────────────────────────┘
-```
-
-### Modifiche in `src/components/derivatives/StrategyConfigWizard.tsx`
-
-**1. Raggruppamento per sottostante**
-- Creare un `Map<string, Position[]>` che raggruppa tutte le posizioni (azioni + derivati + ETF) per sottostante normalizzato
-- Per le azioni: usare `normalizeForMatching(description)` per matchare col sottostante dei derivati
-- Per i derivati: usare `underlying`
-- Stock splitting in slot da 100 rimane come ora
-
-**2. UI per-sottostante**
-- Ogni sottostante è una `Card` collapsibile con:
-  - Lista posizioni disponibili (non ancora assegnate a strategie) con checkbox
-  - Bottone "Crea strategia" che prende le selezionate e crea una `WizardStrategy` locale a quel sottostante
-  - Lista strategie già create per quel sottostante, con possibilità di rimuovere posizioni, cambiare tipo, eliminare strategia
-- Rimuovere le sezioni collapsibili "AZIONI", "DERIVATI", "ETF"
-
-**3. Ricerca**
-- Il campo ricerca filtra le card dei sottostanti (non le singole posizioni)
-
-**4. Auto-classifica**
-- Resta uguale (usa `categorizeDerivatives`), ma i risultati vengono distribuiti nelle card dei rispettivi sottostanti
-
-**5. Punto 4 dell'utente: "nella pagina Derivati finisce SOLO quello che ho configurato"**
-- Nella pagina `Derivatives.tsx`, quando `hasConfigurations === true`, la `categorizeDerivatives` viene già chiamata con `strategyConfigs` — le sezioni mostrano solo ciò che è configurato
-- Verificare che questo funzioni correttamente: se una posizione NON è in nessuna configurazione, non deve apparire in nessuna sezione strategia
+Le posizioni classificate come `put_spread` o `diagonal_put_spread` nel wizard attualmente finiscono tutte in `groupedOtherStrategies` con il campo `strategyName`. Invece di creare nuove categorie nel motore `categorizeDerivatives`, filtriamo `groupedOtherStrategies` in base a `strategyName` e `strategy_type` della configurazione per mostrarle in sezioni dedicate.
 
 ### File da modificare
-1. **`src/components/derivatives/StrategyConfigWizard.tsx`** — redesign completo del pool e della UI
-2. **`src/pages/Derivatives.tsx`** — verificare che con configurazioni attive, le sezioni mostrino SOLO posizioni configurate (potrebbe richiedere fix in `categorizeDerivatives`)
+
+**1. `src/hooks/useStrategyConfigurations.ts`**
+- Aggiungere a `STRATEGY_TYPE_LABELS`:
+  - `put_spread: 'Put Spread'`
+  - `diagonal_put_spread: 'Diagonal Put Spread'`
+
+**2. `src/components/derivatives/StrategyConfigWizard.tsx`**
+- Aggiungere a `STRATEGY_OPTIONS`:
+  - `{ value: 'put_spread', label: 'Put Spread' }`
+  - `{ value: 'diagonal_put_spread', label: 'Diagonal Put Spread' }`
+- In `detectStrategyType` (riga ~108): quando `hasPutSpread && !soldCalls && !boughtCalls`, distinguere per scadenza:
+  - Stessa scadenza tra tutte le put → `'put_spread'`
+  - Scadenze diverse → `'diagonal_put_spread'`
+
+**3. `src/pages/Derivatives.tsx`**
+- Aggiungere state: `putSpreadOpen`, `diagonalPutSpreadOpen`
+- Dal `categories.groupedOtherStrategies`, filtrare in due array separati:
+  - `putSpreads`: dove `strategyName` contiene "Put Spread" (non diagonal) OPPURE la configurazione wizard ha `strategy_type === 'put_spread'`
+  - `diagonalPutSpreads`: dove `strategyName` contiene "Diagonal Put Spread" OPPURE configurazione con `strategy_type === 'diagonal_put_spread'`
+  - `remainingOther`: tutto il resto
+- Inserire due nuove sezioni collapsibili tra Leap Call e Protezioni (o tra Naked Put e Leap Call, seguendo l'ordine logico):
+  - **Put Spread** — icona `ArrowDownUp` (o simile), colore teal/indigo
+  - **Diagonal Put Spread** — stessa icona con variante colore
+- Entrambe usano lo stesso componente `GroupedOtherStrategyRow` già esistente
+- Aggiornare il conteggio badge di "Altre Strategie" per usare `remainingOther.length`
+- Aggiungere i nomi dei sottostanti di put spread / diagonal put spread alla raccolta `underlyingNames` per il fetch prezzi
+
+### Ordine sezioni finale
+1. Covered Call
+2. De-Risking Covered Call
+3. Iron Condor
+4. Double Diagonal
+5. Naked Put
+6. Put Spread ← NUOVO
+7. Diagonal Put Spread ← NUOVO
+8. Leap Call
+9. Protezioni
+10. Altre Strategie (solo quelle residue)
 
