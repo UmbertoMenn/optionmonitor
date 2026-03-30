@@ -1,29 +1,35 @@
 
 
-## Problema
+## Fix: Token-overlap troppo permissivo causa falsi match
 
-Il dialog di riconciliazione usa `normalizeUnderlying(pos.description)` per raggruppare le azioni per sottostante (riga 182 del dialog). Questo usa solo `getCanonicalKey` + `normalizeForMatching`, che produce chiavi diverse per azioni e derivati quando i nomi non coincidono esattamente.
+### Problema
+`hasTokenOverlap` matcha se **un solo token** è in comune. "REGULUS THERAPEUTICS" e "AQUESTIVE THERAPEUTICS" condividono "THERAPEUTICS" → vengono raggruppati erroneamente. Lo stesso bug esiste anche nel wizard.
 
-Per esempio:
-- Derivato underlying: `"SUPER MICRO COMP"` → normalizza a `"supermicrocomp"`
-- Azione description: `"AZ. SUPER MICRO COMPUTER INC"` → normalizza a `"supermicrocomputerinc"`
+### Soluzione
+Rafforzare la logica di token-overlap in **entrambi i file** (dialog e wizard) richiedendo che **la maggior parte** dei token significativi del termine più corto sia presente nell'altro, non solo uno.
 
-Le due chiavi sono diverse, quindi le azioni di Super Micro non finiscono nel pool delle posizioni disponibili.
+Nuova logica `hasTokenOverlap`:
+```typescript
+function hasTokenOverlap(a: string, b: string): boolean {
+  const tokensA = getSignificantTokens(a);
+  const tokensB = getSignificantTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  // Use the shorter token list as reference
+  const [shorter, longer] = tokensA.length <= tokensB.length 
+    ? [tokensA, tokensB] : [tokensB, tokensA];
+  const matchCount = shorter.filter(t => longer.includes(t)).length;
+  // Require majority match (>50% of shorter), with minimum 2 matches if both have 2+ tokens
+  if (shorter.length >= 2) return matchCount >= 2;
+  // Single-token case: exact match only
+  return matchCount === 1 && shorter[0].length >= 4;
+}
+```
 
-Il **wizard** invece usa `getUnderlyingKey(pos, allDerivatives)` che include un fallback con **token-overlap** (controlla se i token significativi come "SUPER", "MICRO" si sovrappongono) e anche un **includes** bidirezionale tra le stringhe normalizzate. Questo permette di associare correttamente `"SUPER MICRO COMPUTER"` con `"SUPER MICRO COMP"`.
+Regole:
+- Se il set più corto ha ≥2 token → richiede almeno 2 match (es. "SUPER" + "MICRO" matchano, ma "THERAPEUTICS" da solo no)
+- Se ha 1 solo token → match solo se il token è lungo ≥4 caratteri (per evitare falsi positivi su token generici, ma permettere match come "BAIDU")
 
-## Soluzione
-
-Replicare nel dialog di riconciliazione la stessa logica `getUnderlyingKey` del wizard, passando la lista dei derivati come riferimento per il matching delle azioni.
-
-### Modifiche a `src/components/derivatives/StrategyReconciliationDialog.tsx`
-
-1. Copiare le funzioni `getSignificantTokens`, `hasTokenOverlap` e `getUnderlyingKey` dal wizard (o importarle se estratte in un modulo condiviso)
-2. Nella funzione `initStates`, sostituire il blocco che raggruppa le azioni (righe 180-198):
-   - Invece di `normalizeUnderlying(raw)` sulle azioni, usare `getUnderlyingKey(pos, allDerivatives)` dove `allDerivatives` è la lista di tutte le posizioni derivative correnti
-   - Questo garantisce che le azioni vengano associate allo stesso gruppo dei derivati tramite token-overlap e includes bidirezionale
-
-### Nessuna modifica ad altri file
-
-La logica di `reconcileConfigs` in `strategyReconciliation.ts` non è impattata perché opera solo sui derivati. Il problema è esclusivamente nel raggruppamento delle azioni nel pool del dialog.
+### File da modificare
+1. **`src/components/derivatives/StrategyReconciliationDialog.tsx`** — aggiornare `hasTokenOverlap` (riga 127-132)
+2. **`src/components/derivatives/StrategyConfigWizard.tsx`** — aggiornare `hasTokenOverlap` (riga 146-151) con la stessa logica
 
