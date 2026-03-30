@@ -518,14 +518,16 @@ export function useDerivativeNetting(
       }
 
       // Re-aggregate option type details by ticker
-      for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
-        const byTicker = new Map<string, OptionTypeDetail>();
-        for (const d of mergedOTB[key].details) {
-          const existing = byTicker.get(d.ticker);
-          if (existing) existing.value += d.value;
-          else byTicker.set(d.ticker, { ...d });
+      for (const otb of [mergedOTB, mergedOTBIntrinsic]) {
+        for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
+          const byTicker = new Map<string, OptionTypeDetail>();
+          for (const d of otb[key].details) {
+            const existing = byTicker.get(d.ticker);
+            if (existing) existing.value += d.value;
+            else byTicker.set(d.ticker, { ...d });
+          }
+          otb[key].details = [...byTicker.values()].sort((a, b) => a.value - b.value);
         }
-        mergedOTB[key].details = [...byTicker.values()].sort((a, b) => a.value - b.value);
       }
 
       return {
@@ -534,6 +536,7 @@ export function useDerivativeNetting(
         nettingExCCAndNP: summary.totalValue + mergedNettingExCCAndNP,
         breakdown: [...byCat.values()].filter(b => Math.abs(b.value) > 0.01),
         optionTypeBreakdown: mergedOTB,
+        optionTypeBreakdownIntrinsic: mergedOTBIntrinsic,
         strategyBreakdown: [...byStratCat.values()].filter(b => Math.abs(b.value) > 0.01),
       };
     }
