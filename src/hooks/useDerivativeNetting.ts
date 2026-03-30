@@ -45,6 +45,7 @@ export interface NettingResult {
   nettingExCCAndNP: number;
   breakdown: NettingBreakdownItem[];
   optionTypeBreakdown: OptionTypeBreakdown;
+  optionTypeBreakdownIntrinsic: OptionTypeBreakdown;
   strategyBreakdown: NettingBreakdownItem[];
 }
 
@@ -81,7 +82,8 @@ function resolveUnderlyingPriceForDerivative(
 /** Compute option type breakdown (4 buckets: sold PUT/CALL × ITM/OTM) */
 function computeOptionTypeBreakdown(
   positions: Position[],
-  underlyingPrices?: Record<string, UnderlyingPrice>
+  underlyingPrices?: Record<string, UnderlyingPrice>,
+  mode: 'netting_total' | 'netting_ex_cc_np' = 'netting_ex_cc_np'
 ): OptionTypeBreakdown {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   const result: OptionTypeBreakdown = {
@@ -102,10 +104,18 @@ function computeOptionTypeBreakdown(
 
     if (d.option_type === 'put') {
       if (underlyingPrice > 0 && strike >= underlyingPrice) {
-        // ITM PUT: intrinsic value (negative = cost)
-        const intrinsic = -(contracts * 100 * (strike - underlyingPrice)) / exchangeRate;
-        result.sold_put_itm.total += intrinsic;
-        result.sold_put_itm.details.push({ ticker, value: intrinsic });
+        // ITM PUT
+        if (mode === 'netting_total') {
+          // Buyback cost (market price from Excel)
+          const mv = -(contracts * 100 * marketPrice) / exchangeRate;
+          result.sold_put_itm.total += mv;
+          result.sold_put_itm.details.push({ ticker, value: mv });
+        } else {
+          // Intrinsic value (netting_ex_cc_np)
+          const intrinsic = -(contracts * 100 * (strike - underlyingPrice)) / exchangeRate;
+          result.sold_put_itm.total += intrinsic;
+          result.sold_put_itm.details.push({ ticker, value: intrinsic });
+        }
       } else {
         // OTM PUT: market value (negative = cost to close)
         const mv = (marketPrice * d.quantity * 100) / exchangeRate;
@@ -114,10 +124,18 @@ function computeOptionTypeBreakdown(
       }
     } else if (d.option_type === 'call') {
       if (underlyingPrice > 0 && strike < underlyingPrice) {
-        // ITM CALL: intrinsic value (negative = cost)
-        const intrinsic = -(contracts * 100 * (underlyingPrice - strike)) / exchangeRate;
-        result.sold_call_itm.total += intrinsic;
-        result.sold_call_itm.details.push({ ticker, value: intrinsic });
+        // ITM CALL
+        if (mode === 'netting_total') {
+          // Buyback cost (market price from Excel)
+          const mv = -(contracts * 100 * marketPrice) / exchangeRate;
+          result.sold_call_itm.total += mv;
+          result.sold_call_itm.details.push({ ticker, value: mv });
+        } else {
+          // Intrinsic value (netting_ex_cc_np)
+          const intrinsic = -(contracts * 100 * (underlyingPrice - strike)) / exchangeRate;
+          result.sold_call_itm.total += intrinsic;
+          result.sold_call_itm.details.push({ ticker, value: intrinsic });
+        }
       } else {
         // OTM CALL: market value (negative = cost to close)
         const mv = (marketPrice * d.quantity * 100) / exchangeRate;
@@ -238,10 +256,10 @@ export function computeSinglePortfolioNetting(
   overrides: DerivativeOverride[],
   underlyingPrices?: Record<string, UnderlyingPrice>,
   strategyConfigs: StrategyConfiguration[] = []
-): { totalNetting: number; nettingExCoveredCall: number; nettingExCCAndNP: number; breakdown: NettingBreakdownItem[]; optionTypeBreakdown: OptionTypeBreakdown; strategyBreakdown: NettingBreakdownItem[] } {
+): { totalNetting: number; nettingExCoveredCall: number; nettingExCCAndNP: number; breakdown: NettingBreakdownItem[]; optionTypeBreakdown: OptionTypeBreakdown; optionTypeBreakdownIntrinsic: OptionTypeBreakdown; strategyBreakdown: NettingBreakdownItem[] } {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   if (derivatives.length === 0) {
-    return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [], optionTypeBreakdown: { ...emptyOptionTypeBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } }, strategyBreakdown: [] };
+    return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [], optionTypeBreakdown: { ...emptyOptionTypeBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } }, optionTypeBreakdownIntrinsic: { ...emptyOptionTypeBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } }, strategyBreakdown: [] };
   }
 
   const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
@@ -386,13 +404,15 @@ export function computeSinglePortfolioNetting(
   addIfNonZero('leap_call', 'Leap Call', acc.leapCall.value, 'gain', acc.leapCall.details);
   addIfNonZero('other', 'Altre Strategie', acc.other.value, 'cost', acc.other.details);
 
-  // Compute option type breakdown
-  const optionTypeBreakdown = computeOptionTypeBreakdown(positions, underlyingPrices);
+  // Compute option type breakdown (buyback cost for netting_total)
+  const optionTypeBreakdown = computeOptionTypeBreakdown(positions, underlyingPrices, 'netting_total');
+  // Compute option type breakdown (intrinsic for netting_ex_cc_np)
+  const optionTypeBreakdownIntrinsic = computeOptionTypeBreakdown(positions, underlyingPrices, 'netting_ex_cc_np');
 
   // Compute strategy breakdown
   const strategyBreakdown = computeStrategyBreakdown(positions, overrides, underlyingPrices, strategyConfigs);
 
-  return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown, optionTypeBreakdown, strategyBreakdown };
+  return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown, optionTypeBreakdown, optionTypeBreakdownIntrinsic, strategyBreakdown };
 }
 
 export function useDerivativeNetting(
@@ -416,6 +436,7 @@ export function useDerivativeNetting(
       nettingExCCAndNP: summary?.totalValue ?? 0,
       breakdown: [],
       optionTypeBreakdown: emptyBreakdown,
+      optionTypeBreakdownIntrinsic: emptyBreakdown,
       strategyBreakdown: [],
     };
 
@@ -444,7 +465,8 @@ export function useDerivativeNetting(
       let mergedNettingExCC = 0;
       let mergedNettingExCCAndNP = 0;
       const mergedBreakdown: NettingBreakdownItem[] = [];
-      const mergedOTB: OptionTypeBreakdown = { ...emptyBreakdown, sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } };
+      const mergedOTB: OptionTypeBreakdown = { sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } };
+      const mergedOTBIntrinsic: OptionTypeBreakdown = { sold_put_itm: { total: 0, details: [] }, sold_call_itm: { total: 0, details: [] }, sold_put_otm: { total: 0, details: [] }, sold_call_otm: { total: 0, details: [] } };
       const mergedStrategyBreakdown: NettingBreakdownItem[] = [];
 
       for (const [pid, pPositions] of byPortfolio) {
@@ -457,10 +479,12 @@ export function useDerivativeNetting(
         mergedBreakdown.push(...result.breakdown);
         mergedStrategyBreakdown.push(...result.strategyBreakdown);
 
-        // Merge option type breakdown
+        // Merge option type breakdowns
         for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
           mergedOTB[key].total += result.optionTypeBreakdown[key].total;
           mergedOTB[key].details.push(...result.optionTypeBreakdown[key].details);
+          mergedOTBIntrinsic[key].total += result.optionTypeBreakdownIntrinsic[key].total;
+          mergedOTBIntrinsic[key].details.push(...result.optionTypeBreakdownIntrinsic[key].details);
         }
       }
 
@@ -494,14 +518,16 @@ export function useDerivativeNetting(
       }
 
       // Re-aggregate option type details by ticker
-      for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
-        const byTicker = new Map<string, OptionTypeDetail>();
-        for (const d of mergedOTB[key].details) {
-          const existing = byTicker.get(d.ticker);
-          if (existing) existing.value += d.value;
-          else byTicker.set(d.ticker, { ...d });
+      for (const otb of [mergedOTB, mergedOTBIntrinsic]) {
+        for (const key of ['sold_put_itm', 'sold_call_itm', 'sold_put_otm', 'sold_call_otm'] as const) {
+          const byTicker = new Map<string, OptionTypeDetail>();
+          for (const d of otb[key].details) {
+            const existing = byTicker.get(d.ticker);
+            if (existing) existing.value += d.value;
+            else byTicker.set(d.ticker, { ...d });
+          }
+          otb[key].details = [...byTicker.values()].sort((a, b) => a.value - b.value);
         }
-        mergedOTB[key].details = [...byTicker.values()].sort((a, b) => a.value - b.value);
       }
 
       return {
@@ -510,6 +536,7 @@ export function useDerivativeNetting(
         nettingExCCAndNP: summary.totalValue + mergedNettingExCCAndNP,
         breakdown: [...byCat.values()].filter(b => Math.abs(b.value) > 0.01),
         optionTypeBreakdown: mergedOTB,
+        optionTypeBreakdownIntrinsic: mergedOTBIntrinsic,
         strategyBreakdown: [...byStratCat.values()].filter(b => Math.abs(b.value) > 0.01),
       };
     }
@@ -523,6 +550,7 @@ export function useDerivativeNetting(
       nettingExCCAndNP: summary.totalValue + result.nettingExCCAndNP,
       breakdown: result.breakdown,
       optionTypeBreakdown: result.optionTypeBreakdown,
+      optionTypeBreakdownIntrinsic: result.optionTypeBreakdownIntrinsic,
       strategyBreakdown: result.strategyBreakdown,
     };
   }, [positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs]);
