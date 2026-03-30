@@ -550,6 +550,7 @@ export function useDerivativeNetting(
       nettingExCCAndNP: summary.totalValue + result.nettingExCCAndNP,
       breakdown: result.breakdown,
       optionTypeBreakdown: result.optionTypeBreakdown,
+      optionTypeBreakdownIntrinsic: result.optionTypeBreakdownIntrinsic,
       strategyBreakdown: result.strategyBreakdown,
     };
   }, [positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs]);
