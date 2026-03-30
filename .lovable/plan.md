@@ -1,50 +1,29 @@
 
 
-## Riprogettazione del Dialog di Riconciliazione
+## Problema
 
-### Problema
-Il dialog attuale mostra una lista piatta di gambe con badge colorati (❌/✅/🆕) e checkbox. Non si capisce come riconfigurare le strategie. L'utente vuole la stessa esperienza del wizard di configurazione strategie.
+Il dialog di riconciliazione usa `normalizeUnderlying(pos.description)` per raggruppare le azioni per sottostante (riga 182 del dialog). Questo usa solo `getCanonicalKey` + `normalizeForMatching`, che produce chiavi diverse per azioni e derivati quando i nomi non coincidono esattamente.
 
-### Soluzione
-Riscrivere `StrategyReconciliationDialog` per replicare la UI del wizard (`StrategyConfigWizard`) all'interno del dialog, mostrando per ogni sottostante con cambiamenti:
-- Un **banner di riepilogo cambiamenti** in cima (es. "2 gambe rimosse, 1 nuova")
-- Le **posizioni disponibili** come chip selezionabili (stessa UI del wizard: checkbox + label colorati per tipo)
-- Le **strategie già configurate** come card con bordo tratteggiato (stessa UI del wizard: select tipo, checkbox sintetica, badge posizioni con X per rimuovere, bottone elimina)
-- Il bottone **"Crea strategia"** quando si selezionano posizioni disponibili
-- Le gambe rimosse evidenziate in rosso con un badge "Rimossa" nella sezione riepilogo, ma NON incluse nel pool disponibile
+Per esempio:
+- Derivato underlying: `"SUPER MICRO COMP"` → normalizza a `"supermicrocomp"`
+- Azione description: `"AZ. SUPER MICRO COMPUTER INC"` → normalizza a `"supermicrocomputerinc"`
 
-### Struttura per sottostante (stessa del wizard)
-```text
-┌─ APPLE INC ──────────────────────────────────────┐
-│ ⚠ 1 gamba rimossa, 1 nuova opzione              │
-│                                                   │
-│ Posizioni disponibili (2)        [Crea strategia] │
-│ [☑ V CALL 250 SET/25] [☐ 100 azioni slot 1]     │
-│                                                   │
-│ ┌ Covered Call ▼  ☐ Sintetica          🗑 ──────┐│
-│ │ V CALL 240 GIU/25 ×  │  100 azioni ×          ││
-│ └────────────────────────────────────────────────┘│
-│                                                   │
-│ Rimosse: V CALL 230 MAR/25                       │
-└──────────────────────────────────────────────────┘
-```
+Le due chiavi sono diverse, quindi le azioni di Super Micro non finiscono nel pool delle posizioni disponibili.
 
-### Modifiche tecniche
+Il **wizard** invece usa `getUnderlyingKey(pos, allDerivatives)` che include un fallback con **token-overlap** (controlla se i token significativi come "SUPER", "MICRO" si sovrappongono) e anche un **includes** bidirezionale tra le stringhe normalizzate. Questo permette di associare correttamente `"SUPER MICRO COMPUTER"` con `"SUPER MICRO COMP"`.
 
-**`src/components/derivatives/StrategyReconciliationDialog.tsx`** — Riscrittura completa:
-- Nuovo state interno: `strategies: WizardStrategy[]` per sottostante (inizializzato dalle gambe "present" delle config esistenti)
-- Le gambe "new" vanno nel pool delle posizioni disponibili
-- Le gambe "missing" mostrate in una sezione separata con badge "Rimossa"
-- Stesse funzioni del wizard: `toggleSelected`, `createStrategyFromSelected`, `removeFromStrategy`, `deleteStrategy`, `updateStrategyType`, `toggleSynthetic`, `detectStrategyType`
-- Riuso delle stesse funzioni helper: `positionLabel`, `positionBadgeClass`, `formatExpiryMMY`
-- Il save costruisce `UpsertConfigParams[]` con le signatures dalle strategie configurate, preservando le config invariate
+## Soluzione
 
-**`src/lib/strategyReconciliation.ts`** — Aggiungere alle `LegStatus` la `position` anche per le gambe "present" (già presente), e restituire le posizioni attuali per underlying per popolare il pool disponibile
+Replicare nel dialog di riconciliazione la stessa logica `getUnderlyingKey` del wizard, passando la lista dei derivati come riferimento per il matching delle azioni.
 
-**`src/pages/Derivatives.tsx`** — Passare anche `positions` (le posizioni correnti) al dialog di riconciliazione per popolare il pool disponibile
+### Modifiche a `src/components/derivatives/StrategyReconciliationDialog.tsx`
 
-### File da modificare
-1. `src/components/derivatives/StrategyReconciliationDialog.tsx` — riscrittura UI
-2. `src/lib/strategyReconciliation.ts` — arricchire output con posizioni per il pool
-3. `src/pages/Derivatives.tsx` — passare posizioni al dialog
+1. Copiare le funzioni `getSignificantTokens`, `hasTokenOverlap` e `getUnderlyingKey` dal wizard (o importarle se estratte in un modulo condiviso)
+2. Nella funzione `initStates`, sostituire il blocco che raggruppa le azioni (righe 180-198):
+   - Invece di `normalizeUnderlying(raw)` sulle azioni, usare `getUnderlyingKey(pos, allDerivatives)` dove `allDerivatives` è la lista di tutte le posizioni derivative correnti
+   - Questo garantisce che le azioni vengano associate allo stesso gruppo dei derivati tramite token-overlap e includes bidirezionale
+
+### Nessuna modifica ad altri file
+
+La logica di `reconcileConfigs` in `strategyReconciliation.ts` non è impattata perché opera solo sui derivati. Il problema è esclusivamente nel raggruppamento delle azioni nel pool del dialog.
 
