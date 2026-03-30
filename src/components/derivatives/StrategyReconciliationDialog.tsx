@@ -81,8 +81,22 @@ export function StrategyReconciliationDialog({
   };
 
   const handleSave = async () => {
+    const changedConfigIds = new Set(items.map(item => item.config.id));
     const configs: UpsertConfigParams[] = [];
 
+    // Add unchanged configs as-is
+    for (const config of allConfigs) {
+      if (changedConfigIds.has(config.id)) continue;
+      configs.push({
+        underlying: config.underlying,
+        strategy_type: config.strategy_type,
+        position_signatures: config.position_signatures as unknown as PositionSignature[],
+        is_synthetic: config.is_synthetic,
+        linked_stock_id: config.linked_stock_id,
+      });
+    }
+
+    // Add updated configs from reconciliation
     for (const item of items) {
       const state = getItemState(item);
       const selectedSignatures: PositionSignature[] = [];
@@ -104,7 +118,6 @@ export function StrategyReconciliationDialog({
       }
     }
 
-    // Also include unchanged configs (not in items list) - they'll be preserved by batch upsert
     await onSave(configs);
     onOpenChange(false);
   };
