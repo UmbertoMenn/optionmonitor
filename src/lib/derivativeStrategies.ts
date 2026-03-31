@@ -670,7 +670,7 @@ export function categorizeDerivatives(
   
   // ============ STEP 5: Altre Strategie (più di 1 gamba per sottostante) ============
   // Re-group remaining derivatives
-  const afterFourLegRemaining = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+  const afterFourLegRemaining = filteredDerivatives.filter(d => !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
   const regrouped = new Map<string, Position[]>();
   
   for (const d of afterFourLegRemaining) {
