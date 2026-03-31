@@ -372,10 +372,15 @@ export function StrategyConfigWizard({
   const underlyingGroups = useMemo((): UnderlyingGroup[] => {
     if (!open) return [];
     const groupMap = new Map<string, { displayName: string; positions: Position[] }>();
-    const derivsOnly = allAvailable.filter(p => p.asset_type === 'derivative');
+    const derivsOnlyForGroups = allAvailable.filter(p => p.asset_type === 'derivative');
+    // Pre-compute underlying key map for O(n) total instead of O(n²)
+    const keyMapForGroups = new Map<string, string>();
+    for (const p of allAvailable) {
+      keyMapForGroups.set(p.id, getUnderlyingKey(p, derivsOnlyForGroups));
+    }
 
     for (const p of allAvailable) {
-      const key = getUnderlyingKey(p, derivsOnly);
+      const key = keyMapForGroups.get(p.id) || getUnderlyingKey(p, derivsOnlyForGroups);
       if (!groupMap.has(key)) {
         let display = key;
         if (p.asset_type === 'derivative' && p.underlying) {
@@ -406,6 +411,12 @@ export function StrategyConfigWizard({
 
   const restoreFromConfigs = useCallback((): WizardStrategy[] => {
     if (!existingConfigs || existingConfigs.length === 0) return [];
+    // Pre-compute key map once for O(n) lookups
+    const derivsOnlyRestore = allAvailable.filter(pp => pp.asset_type === 'derivative');
+    const keyMapRestore = new Map<string, string>();
+    for (const p of allAvailable) {
+      keyMapRestore.set(p.id, getUnderlyingKey(p, derivsOnlyRestore));
+    }
     const usedIds = new Set<string>();
     const restored: WizardStrategy[] = [];
 
@@ -414,10 +425,7 @@ export function StrategyConfigWizard({
       if (signatures.length === 0) continue;
 
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-      const groupPositions = allAvailable.filter(p => {
-        const derivsOnly = allAvailable.filter(pp => pp.asset_type === 'derivative');
-        return getUnderlyingKey(p, derivsOnly) === configUnderlyingKey;
-      });
+      const groupPositions = allAvailable.filter(p => keyMapRestore.get(p.id) === configUnderlyingKey);
 
       const matched: Position[] = [];
 
