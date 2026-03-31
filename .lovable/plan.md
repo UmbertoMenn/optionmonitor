@@ -1,37 +1,70 @@
 
 
-## Fix: Naked Put intrinsic più negativo del valore di mercato
+## Aggiungere gambe a strategie esistenti nel dialog di riconciliazione
 
-### Causa
-In `getBreakdownForViewMode`, per il view `netting_ex_cc_np`, il valore intrinseco delle naked put ITM viene calcolato usando il prezzo sottostante corrente (`underlyingPrices` o `snapshot_price` del sottostante), mentre il valore di mercato nel `netting_total` usa il `snapshot_price` dell'opzione. Se il prezzo dell'opzione è stale (non aggiornato), il valore intrinseco calcolato può superare il valore di mercato, il che è economicamente impossibile.
+### Problema
+Quando una gamba di un Iron Condor cambia (es. rollover), il dialog mostra 3 gambe nella strategia esistente e la nuova gamba nel pool "Posizioni disponibili". L'unico modo per risolvere è cancellare la strategia e ricrearla con tutte e 4 le gambe. Serve poter aggiungere direttamente una posizione dal pool a una strategia esistente.
 
 ### Soluzione
-Aggiungere un cap: il valore intrinseco per ogni posizione naked put non può mai essere più negativo del suo valore di mercato. Lo stesso principio va applicato anche a covered call e de-risking CC.
+Aggiungere un meccanismo per trasferire posizioni selezionate dal pool direttamente dentro una strategia già configurata, con un bottone "+" su ogni card strategia.
 
-### Modifica a `src/hooks/useDerivativeNetting.ts`
+### Modifiche a `src/components/derivatives/StrategyReconciliationDialog.tsx`
 
-**In `getBreakdownForViewMode`**, sezione naked put (righe ~500-538):
-- Dopo aver calcolato `tickerIntrinsic`, confrontarlo con il valore di mercato del ticker (`det.value`)
-- Se `tickerIntrinsic < det.value` (più negativo), usare `det.value` come cap
+**1. Nuova funzione `addToStrategy`**
+- Parametri: `groupKey`, `strategyId`, `positionIds: string[]`
+- Sposta le posizioni selezionate dal pool (`availablePositions`) dentro `strategy.positions`
+- Ricalcola `suggestedType` con `detectStrategyType` dopo l'aggiunta
+- Pulisce la selezione
 
-```typescript
-// Cap: intrinsic cannot exceed market value in absolute terms
-if (tickerIntrinsic < det.value) {
-  tickerIntrinsic = det.value;
-}
+**2. Bottone "Aggiungi selezionate" su ogni card strategia**
+- Visibile solo quando ci sono posizioni selezionate nel pool per quel sottostante
+- Posizionato accanto al bottone cestino nella riga header della strategia
+- Al click chiama `addToStrategy` con le posizioni selezionate
+- Label: icona `Plus` + numero selezionate (es. "+2")
+
+**3. UI aggiornata per ogni strategia**
+Nella riga header di ogni strategia (riga ~605-651), aggiungere tra il select e il cestino:
+
+```text
+[Select tipo ▾]  [✓ Auto]  [⚡ Sintetica]  [+2 Aggiungi]  [🗑]
 ```
 
-**Stessa logica per covered_call e derisking_cc** (righe ~440-497):
-- Cap `tickerIntrinsic` a `det.value` per evitare lo stesso problema con prezzi stale delle covered call
+Il bottone "+N Aggiungi" appare solo se `selectedCount > 0` per quel `groupKey`.
 
-**In `computeSinglePortfolioNetting`**, sezione naked_put (righe ~256-273):
-- Applicare lo stesso cap anche al calcolo di `nettingExCCAndNP`: se `-intrinsicValue` è più negativo di `nettingValue`, usare `nettingValue`
+### Dettaglio tecnico
 
 ```typescript
-const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
-nettingExCCAndNP += cappedIntrinsic;
+const addToStrategy = (groupKey: string, strategyId: string) => {
+  const state = underlyingStates.get(groupKey);
+  if (!state) return;
+  const selectedSet = selectedByGroup.get(groupKey);
+  if (!selectedSet || selectedSet.size === 0) return;
+  
+  const toAdd = state.availablePositions.filter(
+    p => selectedSet.has(p.id) && !assignedIds.has(p.id)
+  );
+  if (toAdd.length === 0) return;
+
+  setUnderlyingStates(prev => {
+    const next = new Map(prev);
+    const s = { ...next.get(groupKey)! };
+    s.strategies = s.strategies.map(st => {
+      if (st.id !== strategyId) return st;
+      const newPositions = [...st.positions, ...toAdd];
+      return { ...st, positions: newPositions, suggestedType: detectStrategyType(newPositions) };
+    });
+    s.availablePositions = s.availablePositions.filter(p => !selectedSet.has(p.id));
+    next.set(groupKey, s);
+    return next;
+  });
+  setSelectedByGroup(prev => {
+    const next = new Map(prev);
+    next.delete(groupKey);
+    return next;
+  });
+};
 ```
 
 ### File da modificare
-- `src/hooks/useDerivativeNetting.ts` — aggiungere cap intrinseco ≤ mercato in 3 punti
+- `src/components/derivatives/StrategyReconciliationDialog.tsx` — aggiungere `addToStrategy` + bottone nella UI strategia
 
