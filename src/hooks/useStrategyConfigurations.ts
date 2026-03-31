@@ -95,6 +95,7 @@ export function useStrategyConfigurations() {
           position_signatures: params.position_signatures as any,
           is_synthetic: params.is_synthetic || false,
           linked_stock_id: params.linked_stock_id || null,
+          linked_stock_slot_ids: (params.linked_stock_slot_ids || []) as any,
         }, { onConflict: 'portfolio_id,underlying,strategy_type' })
         .select().single();
       if (error) throw error;
