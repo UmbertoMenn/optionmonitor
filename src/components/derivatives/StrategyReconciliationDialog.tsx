@@ -500,8 +500,12 @@ export function StrategyReconciliationDialog({
         if (strategy.positions.length === 0) continue;
         const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
           || state.underlying;
-        const stockPos = strategy.positions.find(p => p.asset_type === 'stock' || p.asset_type === 'etf');
-        const realStockId = stockPos?.id?.replace(/__slot_\d+$/, '') || strategy.linkedStockId || null;
+        const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+        // Persist ALL stock slot IDs (with __slot_N suffix)
+        const stockSlotIds = stockPositions.map(s => s.id);
+        const realStockId = stockPositions.length > 0
+          ? stockPositions[0].id.replace(/__slot_\d+$/, '')
+          : (strategy.linkedStockId || null);
 
         configs.push({
           underlying,
@@ -509,11 +513,12 @@ export function StrategyReconciliationDialog({
           position_signatures: buildSignatures(strategy.positions),
           is_synthetic: strategy.isSynthetic,
           linked_stock_id: realStockId,
+          linked_stock_slot_ids: stockSlotIds,
         });
       }
     }
 
-    // Preserve unchanged configs
+    // Preserve unchanged configs (including their linked_stock_slot_ids)
     for (const config of allConfigs) {
       if (affectedUnderlyings.has(config.underlying)) continue;
       configs.push({
@@ -522,6 +527,7 @@ export function StrategyReconciliationDialog({
         position_signatures: config.position_signatures as unknown as PositionSignature[],
         is_synthetic: config.is_synthetic,
         linked_stock_id: config.linked_stock_id,
+        linked_stock_slot_ids: config.linked_stock_slot_ids || [],
       });
     }
 
