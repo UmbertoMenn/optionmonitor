@@ -476,9 +476,20 @@ export function categorizeDerivatives(
     }
   }
 
+  // ============ STRICT CONFIG GUARD ============
+  // When user has manual configurations, prevent auto-detection (STEPs 1-6) from
+  // consuming positions whose underlying is already configured. Those unmatched
+  // positions will fall through to STEP 6.5 → "Altre Strategie".
+  const hasStrictConfigs = strategyConfigs.length > 0;
+  const configuredUnderlyingKeys = new Set(
+    strategyConfigs.map(c => normalizeForMatching(c.underlying))
+  );
+  const isConfiguredUnderlying = (d: Position) =>
+    hasStrictConfigs && configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description));
+
   // ============ STEP 1: Find Covered Calls ============
-  const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id));
-  
+  const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
+
   console.log('[CoveredCall] Sold CALLs found:', soldCalls.map(c => ({ 
     desc: c.description, 
     underlying: c.underlying, 
