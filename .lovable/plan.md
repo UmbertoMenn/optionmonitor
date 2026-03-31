@@ -1,82 +1,84 @@
 
+Obiettivo
 
-## Fix: Put comprata riclassificata + Titoli non ripristinati nel Wizard
+- Fermare definitivamente la riclassificazione della PUT BAIDU come Protezione/Long Put.
+- Fare in modo che gli slot azionari assegnati a Covered Call / De-Risking Covered Call restino assegnati quando riapro “Riconfigura strategie”.
 
-### Bug 1: Put comprata in de-risking CC → appare come Long Put
+Root cause reale
 
-**Causa**: In `src/lib/derivativeStrategies.ts`, il case `derisking_covered_call` (linea 366-412) filtra `remaining` usando `normalizeForMatching`, ma il catch-all `filterBySignatures` alla fine del case consuma solo le posizioni che matchano le firme salvate. Il problema è che se la put comprata NON viene matchata dal loop `for (const call of calls)` (es. perché non ci sono abbastanza call), la put resta NON consumata nonostante sia nella configurazione. 
+1. `src/lib/derivativeStrategies.ts`
+   - Il ramo `derisking_covered_call` continua a costruire la strategia in modo euristico su tutti i `remaining` del sottostante.
+   - `filterBySignatures(...)` viene usato solo come cleanup finale, non come base della strategia configurata.
+   - Finché il path “configurato” non è strict-by-signature, una PUT comprata può restare fuori dalla DRCC e venire reinterpretata dal motore generico.
 
-Inoltre, nel case `covered_call` (linea 313-364), c'è una logica di auto-promozione che cerca bought puts per promuovere a de-risking. Se il config è `derisking_covered_call` ma il matching key non corrisponde esattamente, la put non viene consumata e cade nel STEP 4 (Long Puts auto-detection).
+2. `src/components/derivatives/StrategyConfigWizard.tsx`
+   - Al salvataggio viene persistito un solo `linked_stock_id`.
+   - In più, gli slot virtuali perdono il suffisso `__slot_n`, quindi il wizard non sa più quali slot erano stati scelti.
+   - Se una strategia contiene più slot stock, o se più strategie sullo stesso sottostante/tipo condividono slot diversi, al reopen gli slot tornano nel pool libero.
 
-**Fix**: Nella funzione `categorizeDerivatives`, nel case `derisking_covered_call`, dopo il loop dei call, consumare TUTTE le bought puts rimaste (non solo quelle shiftate). Attualmente la linea 409 `for (const p of boughtPuts) usedDerivatives.add(p.id)` fa questo, ma solo per le put rimaste dopo gli shift. Il vero fix è assicurarsi che il `filterBySignatures` finale consumi la put se la logica hardcoded non l'ha fatto. Questo già avviene alla linea 410-411. 
+Implementazione
 
-Il problema reale è probabilmente che `normalizeForMatching(config.underlying)` ≠ `normalizeForMatching(d.underlying)` per certi ticker. Fix: usare anche `getCanonicalKey` nel filtro `remaining` (linea 302-304), consistente con come il wizard salva le configurazioni.
+1. Rendere le strategie configurate 100% deterministiche
+   - In `categorizeDerivatives`, per `covered_call` e `derisking_covered_call`, partire da:
+     - `matched = filterBySignatures(remaining, config.position_signatures)`
+   - Costruire la strategia solo con `matched`, non con tutti i `remaining`.
+   - Marcare subito `matched` come usati.
+   - Nessuna auto-promozione/auto-downgrade nel path configurato: se il tipo salvato è `derisking_covered_call`, quella PUT deve restare lì.
 
-**File**: `src/lib/derivativeStrategies.ts` — linea 300-305
+2. Uniformare il matching del sottostante
+   - Usare un helper unico basato su:
+     - `getCanonicalKey(...) || normalizeForMatching(...)`
+   - Applicarlo in:
+     - filtro iniziale dei `remaining`
+     - strict guard
+     - cleanup/orphans
+   - Così elimino qualsiasi fuga dovuta a chiavi di matching incoerenti.
 
-```typescript
-// PRIMA
-const configKey = normalizeForMatching(config.underlying);
-const remaining = filteredDerivatives.filter(d => 
-  !usedDerivatives.has(d.id) && 
-  normalizeForMatching(d.underlying || d.description) === configKey
-);
+3. Persistire gli slot reali, non un solo stock id
+   - Aggiungere una colonna nuova in tabella, ad esempio:
+     - `linked_stock_slot_ids jsonb not null default '[]'::jsonb`
+   - Backfill dei record esistenti da `linked_stock_id` verso array legacy.
+   - Nessuna modifica alle policy: serve solo estendere lo schema.
 
-// DOPO  
-const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-const remaining = filteredDerivatives.filter(d => {
-  if (usedDerivatives.has(d.id)) return false;
-  const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
-  return posKey === configKey;
-});
-```
+4. Aggiornare salvataggio e ripristino del wizard
+   - `useStrategyConfigurations`: estendere i tipi con `linked_stock_slot_ids`.
+   - `StrategyConfigWizard.handleSave`:
+     - salvare tutti gli slot stock presenti nella strategia
+     - mantenere `linked_stock_id` solo come fallback legacy
+   - Dedup:
+     - oltre a unire le `position_signatures`, unire in modo univoco anche `linked_stock_slot_ids`
+   - `restoreFromConfigs`:
+     - ripristinare tutti gli slot salvati
+     - se il record è legacy o incompleto, assegnare abbastanza slot in base ai contratti CALL coperti, non solo il primo slot disponibile
 
-E aggiornare anche `configuredUnderlyingKeys` (linea 484-486) per usare lo stesso matching:
+5. Allineare anche la riconciliazione
+   - `src/components/derivatives/StrategyReconciliationDialog.tsx`
+   - Usare `linked_stock_slot_ids` per riagganciare tutti gli slot già assegnati anche nel flusso di riconciliazione.
 
-```typescript
-const configuredUnderlyingKeys = new Set(
-  strategyConfigs.map(c => getCanonicalKey(c.underlying) || normalizeForMatching(c.underlying))
-);
-const isConfiguredUnderlying = (d: Position) => {
-  if (!hasStrictConfigs) return false;
-  const k = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
-  return configuredUnderlyingKeys.has(k);
-};
-```
+Verifiche da coprire
 
-### Bug 2: Titoli (stock slots) tornano disponibili alla riapertura del Wizard
+- Caso BAIDU:
+  - config `derisking_covered_call` con CALL venduta + PUT comprata
+  - la PUT deve finire in `deRiskingCoveredCalls`
+  - `longPuts` deve restare vuoto per quella PUT
+- Reopen wizard:
+  - strategia con più stock slots
+  - dopo save + reopen gli stessi slot devono risultare già assegnati
+  - nessuno di quegli slot deve tornare tra le posizioni disponibili
 
-**Causa**: In `restoreFromConfigs` (linea 452-462), il restore dei titoli avviene solo se `config.linked_stock_id` è valorizzato. Ma il match cerca `p.id === config.linked_stock_id` oppure `p.id.startsWith(config.linked_stock_id + '__slot_')`. Il problema è che per strategie che NON sono covered call / derisking (es. naked_put, iron_condor), `linked_stock_id` è `null` perché non c'è uno stock nella strategia — questo è corretto.
+File coinvolti
 
-Ma per covered call e derisking, il `linked_stock_id` DEVE essere salvato. Il bug è che quando il wizard salva, `handleSave` cerca `strategy.positions.find(p => p.asset_type === 'stock')`. Se il titolo è nel pool ma NON è stato aggiunto alla strategia dall'utente (perché il wizard non lo aggiunge automaticamente durante il restore delle config salvate se il `linked_stock_id` non matcha), allora `stockPos` è undefined e `realStockId` diventa `null`.
+- `src/lib/derivativeStrategies.ts`
+- `src/components/derivatives/StrategyConfigWizard.tsx`
+- `src/components/derivatives/StrategyReconciliationDialog.tsx`
+- `src/hooks/useStrategyConfigurations.ts`
+- `supabase/migrations/...`
+- test di regressione in `src/test/...`
 
-**Fix** in `restoreFromConfigs`: se il `linked_stock_id` non matcha nessun slot esatto, fare un fallback cercando QUALSIASI stock slot disponibile nello stesso gruppo underlying:
+Dettagli tecnici
 
-```typescript
-// After linked_stock_id check, add fallback
-if (config.linked_stock_id) {
-  const stockSlot = groupPositions.find(p =>
-    !usedIds.has(p.id) &&
-    p.asset_type === 'stock' &&
-    (p.id === config.linked_stock_id || p.id.startsWith(config.linked_stock_id + '__slot_'))
-  );
-  if (stockSlot) {
-    usedIds.add(stockSlot.id);
-    matched.push(stockSlot);
-  }
-} 
-// Fallback: for CC/DRCC strategies, auto-assign first available stock in group
-if (!matched.some(p => p.asset_type === 'stock') && 
-    (config.strategy_type === 'covered_call' || config.strategy_type === 'derisking_covered_call')) {
-  const fallbackStock = groupPositions.find(p => !usedIds.has(p.id) && p.asset_type === 'stock');
-  if (fallbackStock) {
-    usedIds.add(fallbackStock.id);
-    matched.push(fallbackStock);
-  }
-}
-```
-
-### File da modificare
-1. **`src/lib/derivativeStrategies.ts`** — Fix matching key per configs + strict guard (linee 300-305, 484-488)
-2. **`src/components/derivatives/StrategyConfigWizard.tsx`** — Fallback stock restore nel `restoreFromConfigs` (linee 451-462)
-
+- Non serve toccare file auto-generati dell’integrazione backend.
+- Non servono nuove regole di accesso ai dati.
+- Questa correzione attacca la causa strutturale:
+  - strategia configurata = matching per firme salvate, non euristiche
+  - slot stock = persistenza esatta, non approssimata
