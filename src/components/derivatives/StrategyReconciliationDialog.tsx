@@ -269,10 +269,30 @@ export function StrategyReconciliationDialog({
         }
 
         if (presentPositions.length > 0) {
-          // Also check if config had a linked stock
+          // Restore stock slots from linked_stock_slot_ids (preferred) or linked_stock_id (legacy)
+          const slotIds = (item.config.linked_stock_slot_ids as string[]) || [];
           const linkedStockId = item.config.linked_stock_id;
-          if (linkedStockId) {
-            const stockPool = stocksByKey.get(key) || [];
+          const stockPool = stocksByKey.get(key) || [];
+          
+          if (slotIds.length > 0) {
+            // Restore all saved slots
+            for (const slotId of slotIds) {
+              const matchingSlot = stockPool.find(s => s.id === slotId && !assignedPositionIds.has(s.id));
+              if (matchingSlot) {
+                presentPositions.push(matchingSlot);
+                assignedPositionIds.add(matchingSlot.id);
+              } else {
+                // Fallback: try matching by base ID prefix
+                const baseId = slotId.replace(/__slot_\d+$/, '');
+                const fallbackSlot = stockPool.find(s => s.id.startsWith(baseId) && !assignedPositionIds.has(s.id));
+                if (fallbackSlot) {
+                  presentPositions.push(fallbackSlot);
+                  assignedPositionIds.add(fallbackSlot.id);
+                }
+              }
+            }
+          } else if (linkedStockId) {
+            // Legacy: single linked_stock_id
             const matchingSlot = stockPool.find(s => s.id.startsWith(linkedStockId) && !assignedPositionIds.has(s.id));
             if (matchingSlot) {
               presentPositions.push(matchingSlot);
