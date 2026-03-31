@@ -648,6 +648,8 @@ export function StrategyConfigWizard({
         ];
         if (cfg.is_synthetic) existing.is_synthetic = true;
         if (cfg.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = cfg.linked_stock_id;
+        const mergedSlots = new Set([...(existing.linked_stock_slot_ids || []), ...(cfg.linked_stock_slot_ids || [])]);
+        existing.linked_stock_slot_ids = Array.from(mergedSlots);
       } else {
         deduped.set(key, { ...cfg });
       }
