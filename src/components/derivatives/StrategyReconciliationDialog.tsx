@@ -441,6 +441,36 @@ export function StrategyReconciliationDialog({
     });
   };
 
+  const addToStrategy = (groupKey: string, strategyId: string) => {
+    const state = underlyingStates.get(groupKey);
+    if (!state) return;
+    const selectedSet = selectedByGroup.get(groupKey);
+    if (!selectedSet || selectedSet.size === 0) return;
+
+    const toAdd = state.availablePositions.filter(
+      p => selectedSet.has(p.id) && !assignedIds.has(p.id)
+    );
+    if (toAdd.length === 0) return;
+
+    setUnderlyingStates(prev => {
+      const next = new Map(prev);
+      const s = { ...next.get(groupKey)! };
+      s.strategies = s.strategies.map(st => {
+        if (st.id !== strategyId) return st;
+        const newPositions = [...st.positions, ...toAdd];
+        return { ...st, positions: newPositions, suggestedType: detectStrategyType(newPositions) };
+      });
+      s.availablePositions = s.availablePositions.filter(p => !selectedSet.has(p.id));
+      next.set(groupKey, s);
+      return next;
+    });
+    setSelectedByGroup(prev => {
+      const next = new Map(prev);
+      next.delete(groupKey);
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     const configs: UpsertConfigParams[] = [];
     const affectedUnderlyings = new Set<string>();
