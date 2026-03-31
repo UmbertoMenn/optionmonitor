@@ -542,7 +542,7 @@ export function Derivatives() {
               items={reconciliationItems}
               allConfigs={strategyConfigs}
               currentPositions={positions}
-              onSave={upsertBatch}
+              onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
             />
           </ErrorBoundary>
