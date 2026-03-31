@@ -544,8 +544,9 @@ export function categorizeDerivatives(
   
   for (const d of filteredDerivatives) {
     if (usedDerivatives.has(d.id)) continue;
+    if (isConfiguredUnderlying(d)) continue;
     const underlyingKey = normalizeForMatching(d.underlying || d.description);
-    
+
     if (!allOptionsByUnderlying.has(underlyingKey)) {
       allOptionsByUnderlying.set(underlyingKey, []);
     }
