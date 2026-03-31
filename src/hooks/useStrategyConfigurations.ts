@@ -21,6 +21,7 @@ export interface StrategyConfiguration {
   position_signatures: PositionSignature[];
   is_synthetic: boolean;
   linked_stock_id: string | null;
+  linked_stock_slot_ids: string[];
   created_at: string;
   updated_at: string;
 }
