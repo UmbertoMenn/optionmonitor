@@ -411,6 +411,12 @@ export function StrategyConfigWizard({
 
   const restoreFromConfigs = useCallback((): WizardStrategy[] => {
     if (!existingConfigs || existingConfigs.length === 0) return [];
+    // Pre-compute key map once for O(n) lookups
+    const derivsOnlyRestore = allAvailable.filter(pp => pp.asset_type === 'derivative');
+    const keyMapRestore = new Map<string, string>();
+    for (const p of allAvailable) {
+      keyMapRestore.set(p.id, getUnderlyingKey(p, derivsOnlyRestore));
+    }
     const usedIds = new Set<string>();
     const restored: WizardStrategy[] = [];
 
