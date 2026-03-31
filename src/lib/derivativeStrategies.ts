@@ -476,9 +476,20 @@ export function categorizeDerivatives(
     }
   }
 
+  // ============ STRICT CONFIG GUARD ============
+  // When user has manual configurations, prevent auto-detection (STEPs 1-6) from
+  // consuming positions whose underlying is already configured. Those unmatched
+  // positions will fall through to STEP 6.5 → "Altre Strategie".
+  const hasStrictConfigs = strategyConfigs.length > 0;
+  const configuredUnderlyingKeys = new Set(
+    strategyConfigs.map(c => normalizeForMatching(c.underlying))
+  );
+  const isConfiguredUnderlying = (d: Position) =>
+    hasStrictConfigs && configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description));
+
   // ============ STEP 1: Find Covered Calls ============
-  const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id));
-  
+  const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
+
   console.log('[CoveredCall] Sold CALLs found:', soldCalls.map(c => ({ 
     desc: c.description, 
     underlying: c.underlying, 
@@ -533,8 +544,9 @@ export function categorizeDerivatives(
   
   for (const d of filteredDerivatives) {
     if (usedDerivatives.has(d.id)) continue;
+    if (isConfiguredUnderlying(d)) continue;
     const underlyingKey = normalizeForMatching(d.underlying || d.description);
-    
+
     if (!allOptionsByUnderlying.has(underlyingKey)) {
       allOptionsByUnderlying.set(underlyingKey, []);
     }
@@ -597,7 +609,7 @@ export function categorizeDerivatives(
   
   // ============ STEP 3 & 4: Find Iron Condor and Double Diagonal ============
   // Group remaining derivatives by underlying
-  const remainingDerivatives = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+  const remainingDerivatives = filteredDerivatives.filter(d => !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
   const groupedByUnderlying = new Map<string, Position[]>();
   
   for (const d of remainingDerivatives) {
@@ -658,7 +670,7 @@ export function categorizeDerivatives(
   
   // ============ STEP 5: Altre Strategie (più di 1 gamba per sottostante) ============
   // Re-group remaining derivatives
-  const afterFourLegRemaining = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+  const afterFourLegRemaining = filteredDerivatives.filter(d => !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
   const regrouped = new Map<string, Position[]>();
   
   for (const d of afterFourLegRemaining) {
@@ -732,7 +744,7 @@ export function categorizeDerivatives(
   }
   
   // ============ STEP 6: Singole gambe ============
-  const singleLegs = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+  const singleLegs = filteredDerivatives.filter(d => !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));
   
   for (const option of singleLegs) {
     const underlyingStock = findUnderlyingStock(option, stockPositions);
@@ -786,6 +798,18 @@ export function categorizeDerivatives(
     }
   }
   
+  // ============ STEP 6.5: Orphans on configured underlyings → Altre Strategie ============
+  if (hasStrictConfigs) {
+    const orphans = filteredDerivatives.filter(d => 
+      !usedDerivatives.has(d.id) && 
+      configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description))
+    );
+    for (const opt of orphans) {
+      otherStrategies.push({ option: opt, underlying: findUnderlyingStock(opt, stockPositions) || null });
+      usedDerivatives.add(opt.id);
+    }
+  }
+
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
