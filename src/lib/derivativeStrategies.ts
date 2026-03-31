@@ -798,6 +798,18 @@ export function categorizeDerivatives(
     }
   }
   
+  // ============ STEP 6.5: Orphans on configured underlyings → Altre Strategie ============
+  if (hasStrictConfigs) {
+    const orphans = filteredDerivatives.filter(d => 
+      !usedDerivatives.has(d.id) && 
+      configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description))
+    );
+    for (const opt of orphans) {
+      otherStrategies.push({ option: opt, underlying: findUnderlyingStock(opt, stockPositions) || null });
+      usedDerivatives.add(opt.id);
+    }
+  }
+
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
