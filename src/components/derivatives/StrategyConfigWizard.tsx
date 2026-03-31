@@ -419,10 +419,7 @@ export function StrategyConfigWizard({
       if (signatures.length === 0) continue;
 
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-      const groupPositions = allAvailable.filter(p => {
-        const derivsOnly = allAvailable.filter(pp => pp.asset_type === 'derivative');
-        return getUnderlyingKey(p, derivsOnly) === configUnderlyingKey;
-      });
+      const groupPositions = allAvailable.filter(p => keyMapRestore.get(p.id) === configUnderlyingKey);
 
       const matched: Position[] = [];
 
