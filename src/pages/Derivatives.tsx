@@ -527,7 +527,7 @@ export function Derivatives() {
               derivatives={derivatives}
               allPositions={positions}
               existingConfigs={strategyConfigs}
-              onSave={upsertBatch}
+              onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
             />
           </ErrorBoundary>
