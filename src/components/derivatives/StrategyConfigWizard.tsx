@@ -819,9 +819,22 @@ export function StrategyConfigWizard({
                                   )}
                                 </div>
 
-                                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => deleteStrategy(strategy.id)}>
-                                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                                </Button>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {selectedCount > 0 && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[11px] px-2"
+                                      onClick={() => addToStrategy(group.key, strategy.id, group.positions)}
+                                    >
+                                      <Plus className="w-3 h-3 mr-0.5" />
+                                      +{selectedCount}
+                                    </Button>
+                                  )}
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => deleteStrategy(strategy.id)}>
+                                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                                  </Button>
+                                </div>
                               </div>
                               <div className="flex flex-wrap gap-1.5">
                                 {strategy.positions.map(p => (
