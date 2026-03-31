@@ -298,11 +298,12 @@ export function categorizeDerivatives(
   
   // ============ STEP 0.5: Apply Strategy Configurations ============
   for (const config of strategyConfigs) {
-    const configKey = normalizeForMatching(config.underlying);
-    const remaining = filteredDerivatives.filter(d => 
-      !usedDerivatives.has(d.id) && 
-      normalizeForMatching(d.underlying || d.description) === configKey
-    );
+    const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+    const remaining = filteredDerivatives.filter(d => {
+      if (usedDerivatives.has(d.id)) return false;
+      const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
+      return posKey === configKey;
+    });
     if (remaining.length === 0) continue;
 
     const linkedStock = config.linked_stock_id 
