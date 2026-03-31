@@ -298,11 +298,12 @@ export function categorizeDerivatives(
   
   // ============ STEP 0.5: Apply Strategy Configurations ============
   for (const config of strategyConfigs) {
-    const configKey = normalizeForMatching(config.underlying);
-    const remaining = filteredDerivatives.filter(d => 
-      !usedDerivatives.has(d.id) && 
-      normalizeForMatching(d.underlying || d.description) === configKey
-    );
+    const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+    const remaining = filteredDerivatives.filter(d => {
+      if (usedDerivatives.has(d.id)) return false;
+      const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
+      return posKey === configKey;
+    });
     if (remaining.length === 0) continue;
 
     const linkedStock = config.linked_stock_id 
@@ -482,10 +483,13 @@ export function categorizeDerivatives(
   // positions will fall through to STEP 6.5 → "Altre Strategie".
   const hasStrictConfigs = strategyConfigs.length > 0;
   const configuredUnderlyingKeys = new Set(
-    strategyConfigs.map(c => normalizeForMatching(c.underlying))
+    strategyConfigs.map(c => getCanonicalKey(c.underlying) || normalizeForMatching(c.underlying))
   );
-  const isConfiguredUnderlying = (d: Position) =>
-    hasStrictConfigs && configuredUnderlyingKeys.has(normalizeForMatching(d.underlying || d.description));
+  const isConfiguredUnderlying = (d: Position) => {
+    if (!hasStrictConfigs) return false;
+    const k = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
+    return configuredUnderlyingKeys.has(k);
+  };
 
   // ============ STEP 1: Find Covered Calls ============
   const soldCalls = filteredDerivatives.filter(d => d.option_type === 'call' && d.quantity < 0 && !usedDerivatives.has(d.id) && !isConfiguredUnderlying(d));

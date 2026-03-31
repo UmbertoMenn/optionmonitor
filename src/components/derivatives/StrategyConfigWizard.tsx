@@ -452,12 +452,21 @@ export function StrategyConfigWizard({
       if (config.linked_stock_id) {
         const stockSlot = groupPositions.find(p =>
           !usedIds.has(p.id) &&
-          (p.asset_type === 'stock' || p.asset_type === 'etf') &&
+          p.asset_type === 'stock' &&
           (p.id === config.linked_stock_id || p.id.startsWith(config.linked_stock_id + '__slot_'))
         );
         if (stockSlot) {
           usedIds.add(stockSlot.id);
           matched.push(stockSlot);
+        }
+      }
+      // Fallback: for CC/DRCC strategies, auto-assign first available stock in group
+      if (!matched.some(p => p.asset_type === 'stock') && 
+          (config.strategy_type === 'covered_call' || config.strategy_type === 'derisking_covered_call')) {
+        const fallbackStock = groupPositions.find(p => !usedIds.has(p.id) && p.asset_type === 'stock');
+        if (fallbackStock) {
+          usedIds.add(fallbackStock.id);
+          matched.push(fallbackStock);
         }
       }
 
