@@ -586,6 +586,18 @@ export function Derivatives() {
               existingConfigs={strategyConfigs}
               onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
+              archivedKeys={archivedItems.map(a => a.key)}
+              archivedItems={archivedItems}
+              onArchive={(key, displayName) => {
+                if (portfolio?.id) {
+                  archiveMutation.mutate({ portfolioId: portfolio.id, underlyingKey: key, displayName });
+                }
+              }}
+              onUnarchive={(key) => {
+                if (portfolio?.id) {
+                  unarchiveMutation.mutate({ portfolioId: portfolio.id, underlyingKey: key });
+                }
+              }}
             />
           </ErrorBoundary>
         )}
