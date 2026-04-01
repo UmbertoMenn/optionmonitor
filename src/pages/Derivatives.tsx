@@ -647,9 +647,12 @@ export function Derivatives() {
             </TooltipProvider>
           </div>
           {derivatives.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)}>
+            <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)} className="relative">
               <Settings className="w-4 h-4 mr-2" />
               {hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}
+              {needsWizard && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-orange-500" />
+              )}
             </Button>
           )}
         </div>
