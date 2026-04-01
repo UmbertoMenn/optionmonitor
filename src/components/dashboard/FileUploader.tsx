@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
 import { parsePortfolioExcel } from '@/lib/excelParser';
 import { usePortfolio } from '@/hooks/usePortfolio';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
