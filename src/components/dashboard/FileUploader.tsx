@@ -116,6 +116,12 @@ export function FileUploader() {
       toast.success('Portfolio caricato!', {
         description: `${positions.length} posizioni importate${dateInfo}.`,
       });
+
+      // If portfolio has derivatives, redirect to wizard for mandatory configuration
+      const hasDerivatives = positions.some(p => p.asset_type === 'derivative');
+      if (hasDerivatives) {
+        navigate('/derivatives?wizard=1');
+      }
     } catch (error) {
       console.error('Error parsing file:', error);
       toast.error('Errore elaborazione file', {
