@@ -40,6 +40,11 @@ interface WizardStrategy {
   suggestedType: string;
 }
 
+interface ArchivedItem {
+  key: string;
+  displayName: string;
+}
+
 interface StrategyConfigWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,6 +54,10 @@ interface StrategyConfigWizardProps {
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
   filterUnderlyings?: string[];
+  archivedKeys?: string[];
+  archivedItems?: ArchivedItem[];
+  onArchive?: (key: string, displayName: string) => void;
+  onUnarchive?: (key: string) => void;
 }
 
 function buildSignatures(positions: Position[]): PositionSignature[] {
