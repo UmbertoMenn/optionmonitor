@@ -219,7 +219,7 @@ export function Derivatives() {
         const portfolioDerivatives = portfolioPositions.filter(p => p.asset_type === 'derivative');
         const portfolioOverrides = overridesByPortfolio.get(pid) || [];
         const portfolioConfigs = strategyConfigs.filter(c => c.portfolio_id === pid);
-        const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides, portfolioConfigs);
+        const result = categorizeDerivatives(portfolioDerivatives, portfolioPositions, portfolioOverrides, portfolioConfigs, { configOnly: true });
 
         merged.coveredCalls.push(...result.coveredCalls);
         merged.deRiskingCoveredCalls.push(...result.deRiskingCoveredCalls);
