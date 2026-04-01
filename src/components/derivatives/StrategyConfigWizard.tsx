@@ -934,6 +934,34 @@ export function StrategyConfigWizard({
                 </Collapsible>
               );
             })}
+            {/* Archived section */}
+            {archivedItems.length > 0 && onUnarchive && (
+              <Collapsible open={archiveOpen} onOpenChange={setArchiveOpen}>
+                <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  {archiveOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  <Archive className="w-4 h-4" />
+                  Archivio ({archivedItems.length} sottostant{archivedItems.length === 1 ? 'e' : 'i'})
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-1 pl-6 pt-1">
+                    {archivedItems.map(item => (
+                      <div key={item.key} className="flex items-center justify-between py-1.5 px-3 rounded-md border border-dashed border-border">
+                        <span className="text-xs font-medium uppercase">{item.displayName}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[11px] px-2"
+                          onClick={() => onUnarchive(item.key)}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                          Ripristina
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         </div>
 
