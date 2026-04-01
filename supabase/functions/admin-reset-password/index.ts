@@ -39,14 +39,14 @@ serve(async (req) => {
     }
 
     // 2. Verify admin role
-    const { data: adminRole, error: roleError } = await supabaseAdmin
+    const { data: adminRole } = await supabaseAdmin
       .from("user_roles")
       .select("role")
       .eq("user_id", caller.id)
       .eq("role", "admin")
       .single();
 
-    if (roleError || !adminRole) {
+    if (!adminRole) {
       return new Response(
         JSON.stringify({ error: "Richiede privilegi admin" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -54,38 +54,39 @@ serve(async (req) => {
     }
 
     // 3. Parse body
-    const { username, password, full_name } = await req.json();
+    const { userId, newPassword } = await req.json();
 
-    if (!username || !password) {
+    if (!userId || !newPassword) {
       return new Response(
-        JSON.stringify({ error: "Username e password sono obbligatori" }),
+        JSON.stringify({ error: "userId e newPassword sono obbligatori" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Build internal email from username
-    const internalEmail = `${username.trim().toLowerCase()}@internal.local`;
+    if (newPassword.length < 6) {
+      return new Response(
+        JSON.stringify({ error: "La password deve essere di almeno 6 caratteri" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    // 4. Create user via Admin API (no session change)
-    const { data, error: createError } = await supabaseAdmin.auth.admin.createUser({
-      email: internalEmail,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: full_name || "", username: username.trim().toLowerCase() },
+    // 4. Update user password via Admin API
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword,
     });
 
-    if (createError) {
-      console.error("Error creating user:", createError);
+    if (updateError) {
+      console.error("Error resetting password:", updateError);
       return new Response(
-        JSON.stringify({ error: createError.message }),
+        JSON.stringify({ error: updateError.message }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`User ${data.user.id} created by admin ${caller.id} (username: ${username})`);
+    console.log(`Password reset for user ${userId} by admin ${caller.id}`);
 
     return new Response(
-      JSON.stringify({ success: true, user: { id: data.user.id, username } }),
+      JSON.stringify({ success: true }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: unknown) {

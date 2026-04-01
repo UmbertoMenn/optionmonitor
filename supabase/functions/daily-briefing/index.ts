@@ -855,18 +855,12 @@ serve(async (req: Request): Promise<Response> => {
         continue;
       }
 
-      const userName = user.full_name || user.email;
+      const userName = user.full_name || 'Utente';
 
-      // Send to user (only if their personal toggles are enabled)
+      // Send to user - only Telegram (no email for users)
       if (user.notify_telegram && user.telegram_chat_id) {
         const msg = buildTelegramMessage(portfolioBriefings);
         const ok = await sendTelegram(user.telegram_chat_id, msg);
-        if (ok) totalSent++;
-      }
-
-      if (user.notify_email && user.email) {
-        const html = buildEmailHTML(portfolioBriefings);
-        const ok = await sendEmail(user.email, `📋 Briefing Pre-Apertura — ${formatDateIT()}`, html);
         if (ok) totalSent++;
       }
 
@@ -885,9 +879,12 @@ serve(async (req: Request): Promise<Response> => {
             await sendTelegram(admin.telegram_chat_id, msg);
           }
 
-          if (shouldEmail && admin.email) {
-            const html = buildEmailHTML(portfolioBriefings, userName);
-            await sendEmail(admin.email, `📋 Briefing Pre-Apertura — ${userName} — ${formatDateIT()}`, html);
+          if (shouldEmail) {
+            const adminEmail = (admin as any).admin_contact_email || admin.email;
+            if (adminEmail) {
+              const html = buildEmailHTML(portfolioBriefings, userName);
+              await sendEmail(adminEmail, `📋 Briefing Pre-Apertura — ${userName} — ${formatDateIT()}`, html);
+            }
           }
         }
       }

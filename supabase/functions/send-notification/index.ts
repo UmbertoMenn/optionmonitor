@@ -324,18 +324,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const results: { email?: { success: boolean; error?: string }; telegram?: { success: boolean; error?: string } } = {};
 
-    // 2. Send email if enabled
-    if (userProfile.notify_email && userProfile.email) {
-      results.email = await sendEmail(userProfile.email, alertData);
-      await logNotification(
-        supabase,
-        alertData.alert_id,
-        alertData.user_id,
-        "email",
-        results.email.success ? "sent" : "failed",
-        results.email.error
-      );
-    }
+    // User email notifications removed - only Telegram for users
 
     // 3. Send telegram if enabled
     if (userProfile.notify_telegram && userProfile.telegram_chat_id) {
@@ -383,19 +372,18 @@ serve(async (req: Request): Promise<Response> => {
           const shouldEmail = admin.admin_notify_email && (pref ? pref.notify_email : true);
           const shouldTelegram = admin.admin_notify_telegram && (pref ? pref.notify_telegram : true);
 
-          if (shouldEmail && admin.email) {
-            const emailResult = await sendEmail(admin.email, alertData, true, userProfile.full_name || userProfile.email);
-            await logNotification(
-              supabase,
-              alertData.alert_id,
-              admin.user_id,
-              "email",
-              emailResult.success ? "sent" : "failed",
-              emailResult.error
-            );
+          if (shouldEmail) {
+            const adminEmail = (admin as any).admin_contact_email || admin.email;
+            if (adminEmail) {
+              const emailResult = await sendEmail(adminEmail, alertData, true, userProfile.full_name || (userProfile as any).username || 'Utente');
+              await logNotification(
+                supabase, alertData.alert_id, admin.user_id, "email",
+                emailResult.success ? "sent" : "failed", emailResult.error
+              );
+            }
           }
           if (shouldTelegram && admin.telegram_chat_id) {
-            const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || userProfile.email);
+            const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || (userProfile as any).username || 'Utente');
             await logNotification(
               supabase,
               alertData.alert_id,
