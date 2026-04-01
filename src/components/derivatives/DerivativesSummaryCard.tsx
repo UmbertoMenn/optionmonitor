@@ -364,6 +364,13 @@ export function DerivativesSummaryCard({
         }
       });
       
+      categories.deRiskingCoveredCalls.forEach(dr => {
+        const drKey = getMatchingKey(dr.coveredCall.underlying.description || dr.coveredCall.option.underlying || '');
+        if (drKey === normalizedKey) {
+          soldCallContracts += dr.coveredCall.contractsCovered;
+        }
+      });
+      
       const available = potentialContracts - soldCallContracts;
       if (available >= 1) {
         result.push({
