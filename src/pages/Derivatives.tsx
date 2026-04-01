@@ -43,7 +43,8 @@ import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { reconcileConfigs } from '@/lib/strategyReconciliation';
 import { StrategyReconciliationDialog } from '@/components/derivatives/StrategyReconciliationDialog';
 import { 
-  categorizeDerivatives, 
+  categorizeDerivatives,
+  normalizeForMatching, 
   formatOptionDescription,
   CoveredCallPosition,
   LongPutPosition,
