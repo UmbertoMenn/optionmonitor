@@ -347,6 +347,10 @@ export function StrategyConfigWizard({
   onSave,
   isSaving,
   filterUnderlyings,
+  archivedKeys = [],
+  archivedItems = [],
+  onArchive,
+  onUnarchive,
 }: StrategyConfigWizardProps) {
   // Build all available positions (derivatives + split stocks) — skip when closed
   const allAvailable = useMemo(() => {
