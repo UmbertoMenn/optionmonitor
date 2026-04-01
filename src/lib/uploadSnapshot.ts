@@ -73,7 +73,7 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       ? usdExposure.totalRisk / totalExposure
       : 0;
 
-    // 7. Upsert into historical_data
+    // 8. Upsert into historical_data
     const { error } = await supabase
       .from('historical_data')
       .upsert({

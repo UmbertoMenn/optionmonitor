@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { usePortfolio } from './usePortfolio';
 import { useDerivativeOverrides } from './useDerivativeOverrides';
+import { useStrategyConfigurations, StrategyConfiguration } from './useStrategyConfigurations';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk, RiskAnalysis } from '@/lib/riskCalculator';
 import { Position } from '@/types/portfolio';
@@ -18,6 +19,7 @@ function toSnapshotPositions(positions: Position[]): Position[] {
 export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
   const { positions, isLoading } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
+  const { configs: strategyConfigs, isLoading: isLoadingConfigs } = useStrategyConfigurations();
   const { selectedPortfolioId } = usePortfolioContext();
   
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
@@ -34,8 +36,6 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
     if (!positions || positions.length === 0) return empty;
     
     if (isGlobalAggregate) {
-      // Per-portfolio: group positions and overrides by portfolio_id, 
-      // run analysis separately, then sum totals and concat details
       const byPortfolio = new Map<string, Position[]>();
       positions.forEach(p => {
         if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
@@ -48,13 +48,20 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
         overridesByPortfolio.get(o.portfolio_id)!.push(o);
       });
 
+      const configsByPortfolio = new Map<string, StrategyConfiguration[]>();
+      strategyConfigs.forEach(c => {
+        if (!configsByPortfolio.has(c.portfolio_id)) configsByPortfolio.set(c.portfolio_id, []);
+        configsByPortfolio.get(c.portfolio_id)!.push(c);
+      });
+
       const merged = { ...empty };
 
       for (const [pid, pPositions] of byPortfolio) {
         const snap = toSnapshotPositions(pPositions);
         const derivs = snap.filter(p => p.asset_type === 'derivative');
         const pOverrides = overridesByPortfolio.get(pid) || [];
-        const cats = categorizeDerivatives(derivs, snap, pOverrides);
+        const pConfigs = configsByPortfolio.get(pid) || [];
+        const cats = categorizeDerivatives(derivs, snap, pOverrides, pConfigs);
         const result = analyzePortfolioRisk(snap, cats);
 
         merged.totalStockRisk += result.totalStockRisk;
@@ -80,12 +87,12 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
     // Single portfolio / user aggregate: standard logic
     const snapshotPositions = toSnapshotPositions(positions);
     const derivatives = snapshotPositions.filter(p => p.asset_type === 'derivative');
-    const categories = categorizeDerivatives(derivatives, snapshotPositions, overrides);
+    const categories = categorizeDerivatives(derivatives, snapshotPositions, overrides, strategyConfigs);
     return analyzePortfolioRisk(snapshotPositions, categories);
-  }, [positions, overrides, isGlobalAggregate]);
+  }, [positions, overrides, strategyConfigs, isGlobalAggregate]);
   
   return {
     ...analysis,
-    isLoading: isLoading || isLoadingOverrides
+    isLoading: isLoading || isLoadingOverrides || isLoadingConfigs
   };
 }
