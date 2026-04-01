@@ -26,12 +26,16 @@ export function useAdminPortfolios() {
       // Get all profiles to map user_id -> email/name
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('user_id, email, full_name');
+        .select('user_id, email, full_name, username');
 
       if (profilesError) throw profilesError;
 
       const profileMap = new Map(
-        (profiles || []).map(p => [p.user_id, { email: p.email, name: p.full_name }])
+        (profiles || []).map(p => [p.user_id, { 
+          email: p.email, 
+          name: p.full_name,
+          username: p.username || p.email?.replace('@internal.local', '') || null
+        }])
       );
 
       // Combine data
