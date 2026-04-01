@@ -373,7 +373,7 @@ serve(async (req: Request): Promise<Response> => {
           const shouldTelegram = admin.admin_notify_telegram && (pref ? pref.notify_telegram : true);
 
           if (shouldEmail && admin.email) {
-            const emailResult = await sendEmail(admin.email, alertData, true, userProfile.full_name || userProfile.email);
+            const adminEmail = (admin as any).admin_contact_email || admin.email;
             await logNotification(
               supabase,
               alertData.alert_id,
