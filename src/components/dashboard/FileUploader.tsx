@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
 import { parsePortfolioExcel } from '@/lib/excelParser';
 import { usePortfolio } from '@/hooks/usePortfolio';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,6 +25,7 @@ export function FileUploader() {
   const { user } = useAuth();
   const { isAdminMode, adminViewUserId } = usePortfolioContext();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const effectiveUserId = isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -114,6 +116,12 @@ export function FileUploader() {
       toast.success('Portfolio caricato!', {
         description: `${positions.length} posizioni importate${dateInfo}.`,
       });
+
+      // If portfolio has derivatives, redirect to wizard for mandatory configuration
+      const hasDerivatives = positions.some(p => p.asset_type === 'derivative');
+      if (hasDerivatives) {
+        navigate('/derivatives?wizard=1');
+      }
     } catch (error) {
       console.error('Error parsing file:', error);
       toast.error('Errore elaborazione file', {

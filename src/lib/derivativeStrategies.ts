@@ -176,7 +176,8 @@ export function categorizeDerivatives(
   derivatives: Position[],
   allPositions: Position[],
   overrides: DerivativeOverride[] = [],
-  strategyConfigs: StrategyConfiguration[] = []
+  strategyConfigs: StrategyConfiguration[] = [],
+  options?: { configOnly?: boolean }
 ): DerivativeCategories {
   // Filter out EUROFOREX instruments from derivatives (currency options, not equity-related)
   const filteredDerivatives = derivatives.filter(d => {
@@ -477,6 +478,19 @@ export function categorizeDerivatives(
         break;
       }
     }
+  }
+
+  // ============ CONFIG-ONLY MODE ============
+  // When configOnly is true, skip all auto-classification (Steps 1-6).
+  // All unmatched positions go directly to "Altre Strategie".
+  if (options?.configOnly) {
+    const orphans = filteredDerivatives.filter(d => !usedDerivatives.has(d.id));
+    for (const opt of orphans) {
+      otherStrategies.push({ option: opt, underlying: findUnderlyingStock(opt, stockPositions) || null });
+      usedDerivatives.add(opt.id);
+    }
+    const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
+    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
   }
 
   // ============ STRICT CONFIG GUARD ============
