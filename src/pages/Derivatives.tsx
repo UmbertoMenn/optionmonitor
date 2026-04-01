@@ -109,6 +109,9 @@ export function Derivatives() {
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
   const { premiums: ccPremiums, getPremiumByTickerAndSymbol } = useCoveredCallPremiums(portfolio?.id);
+  const { data: archivedItems = [] } = useArchivedUnderlyings(portfolio?.id ?? null);
+  const archiveMutation = useArchiveUnderlying();
+  const unarchiveMutation = useUnarchiveUnderlying();
   
   // Wrapper: save configs AND delete conflicting single overrides
   const handleSaveConfigs = useCallback(async (configs: UpsertConfigParams[]) => {
