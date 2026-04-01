@@ -66,7 +66,7 @@ export function useAdminPortfolios() {
     }
     acc[key].portfolios.push(portfolio);
     return acc;
-  }, {} as Record<string, { userId: string; email: string; name: string | null; portfolios: PortfolioWithOwner[] }>) || {};
+  }, {} as Record<string, { userId: string; email: string; name: string | null; username: string | null; portfolios: PortfolioWithOwner[] }>) || {};
 
   // Get admin's own portfolios (for copy feature)
   const adminPortfolios = allPortfoliosQuery.data?.portfolios?.filter(p => p.user_id === user?.id) || [];
