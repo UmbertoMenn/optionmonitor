@@ -324,18 +324,7 @@ serve(async (req: Request): Promise<Response> => {
 
     const results: { email?: { success: boolean; error?: string }; telegram?: { success: boolean; error?: string } } = {};
 
-    // 2. Send email if enabled
-    if (userProfile.notify_email && userProfile.email) {
-      results.email = await sendEmail(userProfile.email, alertData);
-      await logNotification(
-        supabase,
-        alertData.alert_id,
-        alertData.user_id,
-        "email",
-        results.email.success ? "sent" : "failed",
-        results.email.error
-      );
-    }
+    // User email notifications removed - only Telegram for users
 
     // 3. Send telegram if enabled
     if (userProfile.notify_telegram && userProfile.telegram_chat_id) {
