@@ -388,9 +388,7 @@ export function Derivatives() {
     return reconcileConfigs(strategyConfigs, positions);
   }, [hasConfigurations, strategyConfigs, positions]);
 
-  // Read ?wizard=1 query param (set by FileUploader after upload with derivatives)
   const [searchParams, setSearchParams] = useSearchParams();
-  const wizardQueryParam = searchParams.get('wizard') === '1';
 
   // Compute whether wizard is needed: derivatives exist but configs are missing or incomplete
   // Build archived keys set for fast lookups
@@ -446,21 +444,13 @@ export function Derivatives() {
     return uncoveredCount > 0;
   }, [derivatives, hasConfigurations, strategyConfigs, archivedKeysSet]);
 
-  // Auto-open wizard when needed OR when ?wizard=1 is present
-  const wizardAutoOpenedRef = useRef(false);
+   // Clean up legacy ?wizard=1 param without opening wizard
   useEffect(() => {
-    if (wizardAutoOpenedRef.current) return;
-    if (isLoading) return;
-    if (wizardQueryParam || needsWizard) {
-      wizardAutoOpenedRef.current = true;
-      setWizardOpen(true);
-      // Clear the query param to avoid re-opening on navigation
-      if (wizardQueryParam) {
-        searchParams.delete('wizard');
-        setSearchParams(searchParams, { replace: true });
-      }
+    if (searchParams.get('wizard') === '1') {
+      searchParams.delete('wizard');
+      setSearchParams(searchParams, { replace: true });
     }
-  }, [isLoading, wizardQueryParam, needsWizard, searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams]);
 
   // Auto-open reconciliation dialog once per mount when discrepancies found
   // (only if wizard is NOT already open)
@@ -676,6 +666,22 @@ export function Derivatives() {
               <Button onClick={() => setWizardOpen(true)}>
                 <Settings className="w-4 h-4 mr-2" />
                 Configura strategie
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Banner: pending unconfigured positions */}
+        {hasConfigurations && needsWizard && (
+          <Card className="border-warning/50 bg-warning/5">
+            <CardContent className="flex items-center justify-between py-3 px-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Info className="w-4 h-4 text-warning" />
+                <span>Ci sono posizioni derivati non ancora configurate.</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)}>
+                <Settings className="w-4 h-4 mr-2" />
+                Configura
               </Button>
             </CardContent>
           </Card>
