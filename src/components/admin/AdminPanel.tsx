@@ -486,47 +486,49 @@ export function AdminPanel() {
       </main>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
-        <DialogContent className="bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="text-loss">Conferma Eliminazione</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Stai per eliminare definitivamente l'utente <strong className="text-foreground">{displayName(userToDelete!)}</strong>.
-              <br /><br />
-              Questa azione eliminerà anche tutti i dati associati (portfolio, posizioni, depositi, dati storici).
-              <br /><br />
-              <strong>Questa azione non può essere annullata.</strong>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button 
-              variant="outline" 
-              onClick={() => setUserToDelete(null)}
-              disabled={isDeleting}
-            >
-              Annulla
-            </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleDeleteUser}
-              disabled={isDeleting}
-              className="bg-loss hover:bg-loss/90"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Eliminazione...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Elimina Utente
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {userToDelete && (
+        <Dialog open onOpenChange={(open) => !open && setUserToDelete(null)}>
+          <DialogContent className="bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="text-loss">Conferma Eliminazione</DialogTitle>
+              <DialogDescription className="text-muted-foreground">
+                Stai per eliminare definitivamente l'utente <strong className="text-foreground">{displayName(userToDelete)}</strong>.
+                <br /><br />
+                Questa azione eliminerà anche tutti i dati associati (portfolio, posizioni, depositi, dati storici).
+                <br /><br />
+                <strong>Questa azione non può essere annullata.</strong>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button 
+                variant="outline" 
+                onClick={() => setUserToDelete(null)}
+                disabled={isDeleting}
+              >
+                Annulla
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={handleDeleteUser}
+                disabled={isDeleting}
+                className="bg-loss hover:bg-loss/90"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Eliminazione...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Elimina Utente
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Reset Password Dialog */}
       <Dialog open={!!resetPasswordUser} onOpenChange={(open) => !open && setResetPasswordUser(null)}>
