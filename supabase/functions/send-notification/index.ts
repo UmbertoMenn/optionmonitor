@@ -383,7 +383,7 @@ serve(async (req: Request): Promise<Response> => {
             }
           }
           if (shouldTelegram && admin.telegram_chat_id) {
-            const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || userProfile.email);
+            const telegramResult = await sendTelegram(admin.telegram_chat_id, alertData, true, userProfile.full_name || (userProfile as any).username || 'Utente');
             await logNotification(
               supabase,
               alertData.alert_id,

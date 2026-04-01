@@ -879,9 +879,12 @@ serve(async (req: Request): Promise<Response> => {
             await sendTelegram(admin.telegram_chat_id, msg);
           }
 
-          if (shouldEmail && admin.email) {
-            const html = buildEmailHTML(portfolioBriefings, userName);
-            await sendEmail(admin.email, `📋 Briefing Pre-Apertura — ${userName} — ${formatDateIT()}`, html);
+          if (shouldEmail) {
+            const adminEmail = (admin as any).admin_contact_email || admin.email;
+            if (adminEmail) {
+              const html = buildEmailHTML(portfolioBriefings, userName);
+              await sendEmail(adminEmail, `📋 Briefing Pre-Apertura — ${userName} — ${formatDateIT()}`, html);
+            }
           }
         }
       }
