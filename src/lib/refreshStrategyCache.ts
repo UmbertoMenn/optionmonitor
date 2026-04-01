@@ -81,8 +81,15 @@ export async function refreshStrategyCacheForPortfolio(portfolioId: string): Pro
       }
     });
 
-    // 5. Categorize and save
-    const categories = categorizeDerivatives(derivatives, positions, overrides);
+    // 5. Fetch strategy configurations
+    const { data: configsRaw } = await supabase
+      .from('strategy_configurations')
+      .select('*')
+      .eq('portfolio_id', portfolioId);
+    const strategyConfigs = (configsRaw || []) as any[];
+
+    // 6. Categorize and save
+    const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
     await saveStrategyCache(portfolioId, categories, underlyingPrices);
 
     console.log('[refreshStrategyCache] Cache refreshed for portfolio', portfolioId);
