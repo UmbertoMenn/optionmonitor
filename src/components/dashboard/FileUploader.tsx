@@ -25,6 +25,7 @@ export function FileUploader() {
   const { user } = useAuth();
   const { isAdminMode, adminViewUserId } = usePortfolioContext();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const effectiveUserId = isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
