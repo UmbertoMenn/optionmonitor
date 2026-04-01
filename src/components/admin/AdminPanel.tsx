@@ -531,61 +531,63 @@ export function AdminPanel() {
       )}
 
       {/* Reset Password Dialog */}
-      <Dialog open={!!resetPasswordUser} onOpenChange={(open) => !open && setResetPasswordUser(null)}>
-        <DialogContent className="bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5" />
-              Reset Password
-            </DialogTitle>
-            <DialogDescription>
-              {resetDone
-                ? `La password di ${displayName(resetPasswordUser!)} è stata reimpostata. Comunicala all'utente.`
-                : `Reimposta la password per ${displayName(resetPasswordUser!)}.`
-              }
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Nuova password</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={generatedPassword}
-                  onChange={(e) => setGeneratedPassword(e.target.value)}
-                  className="bg-background-secondary border-border font-mono"
-                  readOnly={resetDone}
-                />
-                <Button variant="outline" size="icon" onClick={copyPassword}>
-                  {passwordCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </Button>
+      {resetPasswordUser && (
+        <Dialog open onOpenChange={(open) => !open && setResetPasswordUser(null)}>
+          <DialogContent className="bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5" />
+                Reset Password
+              </DialogTitle>
+              <DialogDescription>
+                {resetDone
+                  ? `La password di ${displayName(resetPasswordUser)} è stata reimpostata. Comunicala all'utente.`
+                  : `Reimposta la password per ${displayName(resetPasswordUser)}.`
+                }
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nuova password</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={generatedPassword}
+                    onChange={(e) => setGeneratedPassword(e.target.value)}
+                    className="bg-background-secondary border-border font-mono"
+                    readOnly={resetDone}
+                  />
+                  <Button variant="outline" size="icon" onClick={copyPassword}>
+                    {passwordCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setResetPasswordUser(null)}>
-              {resetDone ? 'Chiudi' : 'Annulla'}
-            </Button>
-            {!resetDone && (
-              <Button
-                onClick={handleResetPassword}
-                disabled={isResetting || !generatedPassword}
-                className="bg-primary hover:bg-primary-glow"
-              >
-                {isResetting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Reset in corso...
-                  </>
-                ) : (
-                  'Reimposta Password'
-                )}
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setResetPasswordUser(null)}>
+                {resetDone ? 'Chiudi' : 'Annulla'}
               </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {!resetDone && (
+                <Button
+                  onClick={handleResetPassword}
+                  disabled={isResetting || !generatedPassword}
+                  className="bg-primary hover:bg-primary-glow"
+                >
+                  {isResetting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Reset in corso...
+                    </>
+                  ) : (
+                    'Reimposta Password'
+                  )}
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
