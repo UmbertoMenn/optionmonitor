@@ -56,13 +56,9 @@ function AppRoutes() {
     toast.success('Benvenuto!');
   };
 
-  // Allow reset-password route even when not logged in
+  // Reset password is now handled by admin, redirect to login
   if (location.pathname === '/reset-password') {
-    return (
-      <Suspense fallback={<PageLoader />}>
-        <ResetPassword />
-      </Suspense>
-    );
+    return <AuthForm />;
   }
 
   if (loading) {

@@ -70,7 +70,7 @@ export function useAdminPortfolios() {
   // All registered users (from profiles), for copy target dropdown
   const allRegisteredUsers = (allPortfoliosQuery.data?.profiles || []).map(p => ({
     userId: p.user_id,
-    email: p.email,
+    username: (p as any).username || p.email?.replace('@internal.local', '') || null,
     name: p.full_name,
   }));
 
