@@ -30,7 +30,7 @@ export function useEquityExposurePct(options: UseEquityExposurePctOptions = {}):
   
   const { positions, summary, isLoading: isLoadingPortfolio } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
-  const { configs: strategyConfigs, isLoading: isLoadingConfigs } = useStrategyConfigurations();
+  const { configurations: strategyConfigs, isLoading: isLoadingConfigs } = useStrategyConfigurations();
   const { selectedPortfolioId } = usePortfolioContext();
   
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;

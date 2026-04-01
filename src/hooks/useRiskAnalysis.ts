@@ -19,7 +19,7 @@ function toSnapshotPositions(positions: Position[]): Position[] {
 export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
   const { positions, isLoading } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
-  const { configs: strategyConfigs, isLoading: isLoadingConfigs } = useStrategyConfigurations();
+  const { configurations: strategyConfigs, isLoading: isLoadingConfigs } = useStrategyConfigurations();
   const { selectedPortfolioId } = usePortfolioContext();
   
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
