@@ -609,7 +609,7 @@ export function StrategyConfigWizard({
 
   const handleAutoClassify = () => {
     startTransition(() => {
-      const auto = autoClassify(derivatives, allPositions);
+      const auto = autoClassify(derivatives, allPositions, archivedKeys);
       
       // Remap original stock IDs to virtual slot IDs
       const usedSlotIds = new Set<string>();
