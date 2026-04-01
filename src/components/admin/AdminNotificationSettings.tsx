@@ -62,7 +62,7 @@ export function AdminNotificationSettings() {
     try {
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('user_id, email, full_name, telegram_chat_id')
+        .select('user_id, email, full_name, telegram_chat_id, username')
         .neq('user_id', user!.id)
         .order('full_name');
 
@@ -82,7 +82,7 @@ export function AdminNotificationSettings() {
       setUserPrefs(
         (profiles || []).map((p) => {
           const pref = prefsMap.get(p.user_id);
-          const username = (p as any).username || p.email?.replace('@internal.local', '') || null;
+          const username = p.username || p.email?.replace('@internal.local', '') || null;
           return {
             user_id: p.user_id,
             username,

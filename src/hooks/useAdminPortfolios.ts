@@ -6,6 +6,7 @@ import { Portfolio } from '@/types/portfolio';
 export interface PortfolioWithOwner extends Portfolio {
   owner_email: string;
   owner_name: string | null;
+  owner_username: string | null;
 }
 
 export function useAdminPortfolios() {
@@ -26,12 +27,16 @@ export function useAdminPortfolios() {
       // Get all profiles to map user_id -> email/name
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('user_id, email, full_name');
+        .select('user_id, email, full_name, username');
 
       if (profilesError) throw profilesError;
 
       const profileMap = new Map(
-        (profiles || []).map(p => [p.user_id, { email: p.email, name: p.full_name }])
+        (profiles || []).map(p => [p.user_id, { 
+          email: p.email, 
+          name: p.full_name,
+          username: p.username || p.email?.replace('@internal.local', '') || null
+        }])
       );
 
       // Combine data
@@ -39,6 +44,7 @@ export function useAdminPortfolios() {
         ...p,
         owner_email: profileMap.get(p.user_id)?.email || 'Email sconosciuta',
         owner_name: profileMap.get(p.user_id)?.name || null,
+        owner_username: profileMap.get(p.user_id)?.username || null,
       })) as PortfolioWithOwner[];
 
       return { portfolios: portfoliosWithOwner, profiles: profiles || [] };
@@ -54,12 +60,13 @@ export function useAdminPortfolios() {
         userId: key,
         email: portfolio.owner_email,
         name: portfolio.owner_name,
+        username: portfolio.owner_username || portfolio.owner_email?.replace('@internal.local', '') || null,
         portfolios: [],
       };
     }
     acc[key].portfolios.push(portfolio);
     return acc;
-  }, {} as Record<string, { userId: string; email: string; name: string | null; portfolios: PortfolioWithOwner[] }>) || {};
+  }, {} as Record<string, { userId: string; email: string; name: string | null; username: string | null; portfolios: PortfolioWithOwner[] }>) || {};
 
   // Get admin's own portfolios (for copy feature)
   const adminPortfolios = allPortfoliosQuery.data?.portfolios?.filter(p => p.user_id === user?.id) || [];
@@ -70,7 +77,7 @@ export function useAdminPortfolios() {
   // All registered users (from profiles), for copy target dropdown
   const allRegisteredUsers = (allPortfoliosQuery.data?.profiles || []).map(p => ({
     userId: p.user_id,
-    username: (p as any).username || p.email?.replace('@internal.local', '') || null,
+    username: p.username || p.email?.replace('@internal.local', '') || null,
     name: p.full_name,
   }));
 
