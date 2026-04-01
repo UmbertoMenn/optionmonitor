@@ -1,52 +1,31 @@
 
+Problema individuato: il blank della sezione admin non sembra dipendere più dalla migrazione email→username. Il crash vero è in `src/components/admin/AdminPanel.tsx`.
 
-## Piano: Fix pannello admin nero + completare migrazione email→username
+Root cause:
+- I due dialog finali vengono renderizzati sempre.
+- Nel render vengono chiamati `displayName(userToDelete!)` e `displayName(resetPasswordUser!)` anche quando gli state sono `null`.
+- Il `!` è solo TypeScript: a runtime non protegge nulla. Quindi React prova a leggere `full_name` da `null` e la route `/admin` va in crash subito.
+- In `src/App.tsx` la route admin non è avvolta da `ErrorBoundary`, quindi il crash appare come schermata totalmente nera o bianca.
 
-### Problema identificato
-Diversi file non sono stati aggiornati completamente nella migrazione email→username:
+Piano di fix:
+1. Correggere `src/components/admin/AdminPanel.tsx`
+- Rendere i dialog di eliminazione e reset password condizionali, ad esempio mostrandoli solo se `userToDelete` / `resetPasswordUser` esistono davvero.
+- Rimuovere ogni accesso diretto a oggetti nulli nel render.
+- Usare fallback sicuri nei testi dei dialog invece di `displayName(...)` su valori non garantiti.
 
-1. **`src/hooks/useAdminPortfolios.ts`** — la query profiles seleziona solo `user_id, email, full_name` senza `username`. Il `portfoliosByUser` espone ancora `email` come chiave di raggruppamento.
+2. Mettere in sicurezza la route admin in `src/App.tsx`
+- Wrappare `<AdminPanel />` con `ErrorBoundary`, come già fatto per la dashboard.
+- In questo modo, se in futuro un componente admin rompe il render, vedremo un fallback leggibile invece di una pagina vuota.
 
-2. **`src/components/admin/PortfolioManager.tsx`** — linea 148 mostra `userGroup.email` (l'indirizzo `@internal.local`) e linea 152 mostra `userGroup.email` di nuovo. Deve mostrare `username`.
+3. Hardening rapido correlato
+- Ricontrollare `AdminPanel`, `PortfolioManager` e `AdminNotificationSettings` per eventuali altri accessi immediati a valori potenzialmente null/undefined.
+- Lasciare invariata la parte username, che nei file letti è già stata aggiornata.
 
-3. **`src/components/admin/AdminNotificationSettings.tsx`** — linea 65 la query non seleziona `username`, quindi `(p as any).username` è sempre undefined.
+Verifica prevista dopo il fix:
+- Aprire `/admin` con dialog chiusi: devono comparire header, tabs e tab “Utenti”.
+- Aprire dialog “Elimina utente” e “Reset password” per verificare che i testi si popolino correttamente.
+- Controllare sia tema dark sia light per confermare che non ci sia più la schermata blank.
 
-### File da modificare
-
-**`src/hooks/useAdminPortfolios.ts`**:
-- Aggiungere `username` alla select dei profiles (linea 29)
-- Aggiornare il profileMap per includere `username`
-- Nel `portfoliosByUser`, sostituire `email` con `username` derivato dal profilo
-- Negli `allRegisteredUsers`, usare il campo `username` direttamente
-
-**`src/components/admin/PortfolioManager.tsx`**:
-- Linea 148: sostituire `userGroup.email` con `userGroup.username`
-- Linea 150-153: aggiornare il sottotitolo per mostrare `@username` invece dell'email
-
-**`src/components/admin/AdminNotificationSettings.tsx`**:
-- Linea 65: aggiungere `username` alla select query
-
-### Dettaglio tecnico
-
-```typescript
-// useAdminPortfolios.ts - select aggiornata
-.select('user_id, email, full_name, username')
-
-// profileMap aggiornato
-const profileMap = new Map(
-  (profiles || []).map(p => [p.user_id, { 
-    email: p.email, 
-    name: p.full_name,
-    username: p.username || p.email?.replace('@internal.local', '') || null
-  }])
-);
-
-// portfoliosByUser con username
-acc[key] = {
-  userId: key,
-  username: profileMap.get(portfolio.user_id)?.username || portfolio.owner_email?.replace('@internal.local', ''),
-  name: portfolio.owner_name,
-  portfolios: [],
-};
-```
-
+Dettaglio tecnico:
+- Le righe critiche sono quelle che usano `userToDelete!` e `resetPasswordUser!` dentro il JSX dei dialog.
+- Non servono modifiche database o backend per questo fix: è un problema di render React lato client.
