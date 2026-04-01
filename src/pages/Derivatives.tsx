@@ -388,9 +388,7 @@ export function Derivatives() {
     return reconcileConfigs(strategyConfigs, positions);
   }, [hasConfigurations, strategyConfigs, positions]);
 
-  // Read ?wizard=1 query param (set by FileUploader after upload with derivatives)
   const [searchParams, setSearchParams] = useSearchParams();
-  const wizardQueryParam = searchParams.get('wizard') === '1';
 
   // Compute whether wizard is needed: derivatives exist but configs are missing or incomplete
   // Build archived keys set for fast lookups
