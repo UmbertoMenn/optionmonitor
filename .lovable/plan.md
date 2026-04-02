@@ -1,25 +1,46 @@
 
 
-## Fix: banner "posizioni non configurate" e doppio pulsante
+## Fix: escludere "TITOLI NON VALORIZZABILI" dal parsing Excel e chiarire ruolo archivio derivati
 
 ### Problema
-1. Il banner appare anche quando l'unica posizione non configurata è archiviata — il matching tra posizione e archivio usa `includes()` che può fallire per differenze di nome (es. "BIO ON SPA" vs "BIO ON").
-2. Quando il banner è visibile, ci sono due pulsanti per aprire il wizard: quello nell'header ("Riconfigura strategie") e quello nel banner ("Configura"), creando confusione.
+
+1. **"TITOLI NON VALORIZZABILI"** è una sezione del file Excel che il parser non riconosce. Poiché non c'è un `if` per questa sezione, le righe vengono parsate sotto la sezione precedente (es. azioni/derivati). BIO ON SPA finisce così tra i derivati con `asset_type = 'derivative'` senza `option_type`, `underlying` né `strike_price`.
+
+2. **L'archivio derivati** è stato erroneamente usato per escludere BIO ON da tutto, ma la sua funzione corretta è solo nascondere un sottostante dalla pagina Strategie Derivati, non dai calcoli generali.
 
 ### Correzione
 
-#### File: `src/pages/Derivatives.tsx`
+#### 1. Excel Parser — `src/lib/excelParser.ts`
 
-1. **Migliorare il matching archivio nel calcolo `needsWizard`**
-   - Usare `normalizeForMatching` / `getCanonicalKey` (già usati altrove nel progetto) invece di semplice `toUpperCase().trim()` + `Set.has()`.
-   - Applicare la stessa normalizzazione sia alla chiave della posizione sia alle chiavi archiviate, così "BIO ON SPA" e "BIO ON" matchano correttamente.
+Aggiungere il riconoscimento della sezione "TITOLI NON VALORIZZABILI" nella catena di `if` delle sezioni (riga ~211-233). Quando viene rilevata:
+- Impostare `currentSection = null` (o un nuovo flag `skipSection = true`)
+- Tutte le righe successive verranno saltate fino alla prossima sezione riconosciuta
+- Questo impedisce che BIO ON e simili vengano importati come posizioni
 
-2. **Rimuovere il banner duplicato**
-   - Eliminare il blocco `Card` del banner (righe 674-688).
-   - Il pulsante nell'header ("Riconfigura strategie" / "Configura strategie", riga 648-653) è già sufficiente come unico punto di accesso al wizard.
-   - Se `needsWizard` è vero, aggiungere un piccolo badge/dot arancione al pulsante esistente per segnalare visivamente che ci sono posizioni da configurare, senza duplicare CTA.
+Pattern da matchare: `firstCell.includes('NON VALORIZZABIL')` o `firstCell.includes('TITOLI NON VALORIZZABILI')`.
 
-### Risultato
-- Nessun falso positivo: le posizioni archiviate non contano come "da configurare".
-- Un solo punto di accesso al wizard, con indicatore visivo discreto se servono azioni.
+#### 2. Archivio derivati — ripristinare il significato corretto
+
+Verificare che l'archivio (`archived_underlyings`) venga usato SOLO per:
+- Pagina Strategie Derivati: esclusione dalla visualizzazione e dal conteggio `needsWizard`
+- Auto-classifica nel Wizard: esclusione dai suggerimenti
+
+E NON venga usato per:
+- Calcolo netting
+- Calcolo rischio / equity exposure
+- Snapshot / staging
+- Totali patrimonio
+
+File da verificare: `src/lib/derivativeStrategies.ts` (il filtro archivio nel `configOnly` path), `src/lib/refreshStrategyCache.ts`, `src/hooks/useDerivativeNetting.ts`, `src/hooks/useRiskAnalysis.ts`.
+
+### Risultato atteso
+
+- Al prossimo upload Excel, BIO ON e qualsiasi titolo sotto "TITOLI NON VALORIZZABILI" non verrà più importato
+- L'archivio derivati tornerà ad avere solo il ruolo UI nella pagina Strategie Derivati
+- I calcoli di netting, rischio e patrimonio non saranno influenzati dall'archivio derivati
+
+### File da modificare
+
+- `src/lib/excelParser.ts` — aggiungere sezione "NON VALORIZZABILI" come sezione da ignorare
+- Verificare e, se necessario, correggere `src/lib/derivativeStrategies.ts`, `src/lib/refreshStrategyCache.ts` per assicurarsi che l'archivio non escluda dai calcoli analitici
 
