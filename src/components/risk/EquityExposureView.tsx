@@ -38,7 +38,9 @@ interface EquityExposureViewProps {
   portfolioTotalValue?: number;
   etfAllocations?: Record<string, ETFAllocation>;
   isLoadingETFData?: boolean;
-  gpStockValue?: number;
+  gpStockHoldings?: GPHoldingRow[];
+  includeGP?: boolean;
+  onIncludeGPChange?: (value: boolean) => void;
 }
 
 export function EquityExposureView({ 
@@ -46,7 +48,9 @@ export function EquityExposureView({
   portfolioTotalValue,
   etfAllocations = {},
   isLoadingETFData = false,
-  gpStockValue = 0,
+  gpStockHoldings = [],
+  includeGP = true,
+  onIncludeGPChange,
 }: EquityExposureViewProps) {
   const [includeProtections, setIncludeProtections] = useState(true);
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
