@@ -322,6 +322,8 @@ export function RiskAnalyzer() {
                   onIncludeStrategiesChange={setSectorIncludeStrategies}
                   includeLeapCall={sectorIncludeLeapCall}
                   onIncludeLeapCallChange={setSectorIncludeLeapCall}
+                  includeGP={sectorIncludeGP}
+                  onIncludeGPChange={setSectorIncludeGP}
                   isResolvingSectors={sectorMappingsLoading}
                   resolvingCount={resolvingCount}
                   isAdmin={isAdmin}
