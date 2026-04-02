@@ -570,6 +570,23 @@ export function calculateSectorExposure(
     }
   }
   
+  // Process GP stock holdings as individual instruments
+  for (const gp of gpStockHoldings) {
+    if (gp.market_value <= 0) continue;
+    const name = gp.description || gp.ticker_code || 'Unknown';
+    const sector = getStockSectorWithMapping(name, sectorMappings);
+    const sectorExposure = getOrCreateSector(sector);
+    sectorExposure.totalRisk += gp.market_value;
+    sectorExposure.breakdown.stocks += gp.market_value;
+    sectorExposure.instruments.push({
+      name: `${name} (GP)`,
+      riskEUR: gp.market_value,
+      isETF: false,
+      isFromETFDecomposition: false,
+      category: 'stocks',
+    });
+  }
+  
   // Calculate percentages and sort
   let grandTotal = 0;
   for (const exposure of bySector.values()) {
