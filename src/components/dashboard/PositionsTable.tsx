@@ -61,12 +61,13 @@ export function PositionsTable({ positions, gpHoldings = [] }: PositionsTablePro
 
   return (
     <div className="space-y-4">
-      <Tabs value={selectedTab} onValueChange={(v) => setSelectedTab(v as AssetType | 'all')}>
+      <Tabs value={selectedTab} onValueChange={(v) => setSelectedTab(v as AssetType | 'all' | 'gp')}>
         <TabsList className="bg-background-tertiary border border-border">
           {assetTabs.map(tab => {
-            const count = tab.value === 'all' 
-              ? positions.length 
-              : positions.filter(p => p.asset_type === tab.value).length;
+            let count: number;
+            if (tab.value === 'all') count = positions.length;
+            else if (tab.value === 'gp') count = gpHoldings.length;
+            else count = positions.filter(p => p.asset_type === tab.value).length;
             
             if (count === 0 && tab.value !== 'all') return null;
             
