@@ -465,7 +465,7 @@ serve(async (req) => {
               
               if (isITM && (!currentState || currentState.current_state === 'safe')) {
                 if (cooldownPassed(currentState?.last_alerted_at || null, itmConfig.cooldown_minutes)) {
-                  const message = `La Covered Call è ITM`;
+                  const message = `La ${strategyType} è ITM`;
                   
                   await supabase.from('alerts').insert({
                     user_id: userId,
