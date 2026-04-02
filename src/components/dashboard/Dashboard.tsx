@@ -11,6 +11,7 @@ import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
+import { useGPHoldings } from '@/hooks/useGPHoldings';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -36,6 +37,7 @@ import { format, parseISO } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { Link, useNavigate } from 'react-router-dom';
 import { DepositEntry } from '@/types/deposits';
+import { PortfolioSummary, AssetType } from '@/types/portfolio';
 
 
 export function Dashboard() {
