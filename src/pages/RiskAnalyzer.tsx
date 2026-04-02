@@ -301,6 +301,9 @@ export function RiskAnalyzer() {
                   onIncludeNakedPutChange={setCurrencyIncludeNakedPut}
                   includeStrategies={currencyIncludeStrategies}
                   onIncludeStrategiesChange={setCurrencyIncludeStrategies}
+                  gpStockHoldings={gpStockHoldings}
+                  includeGP={currencyIncludeGP}
+                  onIncludeGPChange={setCurrencyIncludeGP}
                   includeLeapCall={currencyIncludeLeapCall}
                   onIncludeLeapCallChange={setCurrencyIncludeLeapCall}
                 />
