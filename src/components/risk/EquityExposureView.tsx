@@ -38,6 +38,7 @@ interface EquityExposureViewProps {
   portfolioTotalValue?: number;
   etfAllocations?: Record<string, ETFAllocation>;
   isLoadingETFData?: boolean;
+  gpStockValue?: number;
 }
 
 export function EquityExposureView({ 
@@ -45,11 +46,13 @@ export function EquityExposureView({
   portfolioTotalValue,
   etfAllocations = {},
   isLoadingETFData = false,
+  gpStockValue = 0,
 }: EquityExposureViewProps) {
   const [includeProtections, setIncludeProtections] = useState(true);
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
   const [includeStrategies, setIncludeStrategies] = useState(true);
   const [includeLeapCall, setIncludeLeapCall] = useState(true);
+  const [includeGP, setIncludeGP] = useState(true);
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   
