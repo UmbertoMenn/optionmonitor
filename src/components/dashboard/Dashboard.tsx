@@ -470,7 +470,7 @@ export function Dashboard() {
               <CardTitle className="text-lg">Posizioni</CardTitle>
             </CardHeader>
             <CardContent>
-              <PositionsTable positions={positions} />
+              <PositionsTable positions={positions} gpHoldings={gpHoldings} />
             </CardContent>
           </Card>
         )}
