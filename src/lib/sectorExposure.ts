@@ -859,7 +859,8 @@ export function calculateConsolidatedTopHoldings(
   analysis: RiskAnalysis,
   etfAllocations: Record<string, ETFAllocation>,
   options: ConsolidatedTopHoldingsOptions,
-  limit: number = 100 // Show all holdings by default
+  limit: number = 100, // Show all holdings by default
+  gpStockHoldings: GPHoldingRow[] = [],
 ): ConsolidatedHoldingWithDetails[] {
   // Key-based map for stable aggregation
   const holdingsByKey = new Map<string, ConsolidatedHoldingWithDetails>();
