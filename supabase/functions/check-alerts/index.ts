@@ -448,7 +448,7 @@ serve(async (req) => {
           }
           
           // ============ COVERED CALL ============
-          if (strategyType === 'Covered Call') {
+          if (strategyType === 'Covered Call' || strategyType === 'De-Risking Covered Call') {
             const soldCallStrike = strategy.sold_call_strike || 0;
             if (soldCallStrike <= 0) continue;
             
