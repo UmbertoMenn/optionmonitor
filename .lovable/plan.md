@@ -1,20 +1,29 @@
 
 
-## Fix: Includere gpRisk nel sorting delle Holdings Consolidate
+## Fix: Sorting Holdings Consolidate in ordine decrescente
 
 ### Problema
-Il sorting usa `stockRisk + nakedPutRisk + leapCallRisk + strategyRisk` ma non include `gpRisk`. Quando il toggle GP è attivo, le holdings con solo rischio GP vengono ordinate come se avessero valore 0.
+Il sorting in `EquityExposureView.tsx` (righe 189-197) ricalcola manualmente il valore lordo sommando tutti i campi risk (`stockRisk + nakedPutRisk + leapCallRisk + strategyRisk + gpRisk`), **ignorando lo stato dei toggle**. Quando un toggle è disattivato (es. Naked PUT off), il valore nakedPutRisk contribuisce comunque all'ordinamento, causando un ordine incoerente con i valori visualizzati.
 
-### Modifica
+Nel frattempo, `calculateConsolidatedTopHoldings` in `sectorExposure.ts` calcola già un campo `totalExposure` che rispetta i toggle attivi — ma il sorting in EquityExposureView lo ignora.
 
-**File: `src/components/risk/EquityExposureView.tsx`** (righe 192-193)
+### Soluzione
 
-Aggiungere `a.gpRisk` e `b.gpRisk` al calcolo del gross value per il sorting:
+**File: `src/components/risk/EquityExposureView.tsx`** (righe 188-197)
+
+Sostituire il sorting manuale con l'uso del campo `totalExposure` già calcolato:
 
 ```typescript
-const grossA = a.stockRisk + a.nakedPutRisk + a.leapCallRisk + a.strategyRisk + a.gpRisk;
-const grossB = b.stockRisk + b.nakedPutRisk + b.leapCallRisk + b.strategyRisk + b.gpRisk;
+const sortedConsolidatedHoldings = useMemo(() => 
+  [...consolidatedHoldings].sort((a, b) => {
+    return Math.abs(b.totalExposure) - Math.abs(a.totalExposure);
+  }),
+  [consolidatedHoldings]
+);
 ```
 
-Una sola riga per file, fix immediato.
+Questo garantisce che l'ordinamento sia sempre coerente con i valori effettivamente visualizzati, indipendentemente da quali toggle sono attivi o disattivi.
+
+### File da modificare
+1. `src/components/risk/EquityExposureView.tsx` — una sola modifica al sorting
 
