@@ -41,6 +41,8 @@ export interface Portfolio {
   average_balance: number | null;
   average_balance_date: string | null;
   snapshot_date: string | null;
+  gp_total_value?: number | null;
+  gp_cash_value?: number | null;
 }
 
 export interface PortfolioSummary {
