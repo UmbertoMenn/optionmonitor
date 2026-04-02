@@ -185,13 +185,10 @@ export function EquityExposureView({
     [strategyDetails]
   );
 
-  // Sort by gross stock exposure (without protections) to keep order stable
+  // Sort by totalExposure (already accounts for active toggles) in descending order
   const sortedConsolidatedHoldings = useMemo(() => 
     [...consolidatedHoldings].sort((a, b) => {
-      // Use gross values for sorting: stockRisk (not with protection) + other components
-      const grossA = a.stockRisk + a.nakedPutRisk + a.leapCallRisk + a.strategyRisk + a.gpRisk;
-      const grossB = b.stockRisk + b.nakedPutRisk + b.leapCallRisk + b.strategyRisk + b.gpRisk;
-      return grossB - grossA;
+      return Math.abs(b.totalExposure) - Math.abs(a.totalExposure);
     }),
     [consolidatedHoldings]
   );
