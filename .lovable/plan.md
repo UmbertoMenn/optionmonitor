@@ -1,46 +1,33 @@
 
 
-## Fix: escludere "TITOLI NON VALORIZZABILI" dal parsing Excel e chiarire ruolo archivio derivati
+## Fix: "Posizioni da monitorare" e Alert Settings sempre visibili
 
 ### Problema
 
-1. **"TITOLI NON VALORIZZABILI"** è una sezione del file Excel che il parser non riconosce. Poiché non c'è un `if` per questa sezione, le righe vengono parsate sotto la sezione precedente (es. azioni/derivati). BIO ON SPA finisce così tra i derivati con `asset_type = 'derivative'` senza `option_type`, `underlying` né `strike_price`.
+Il componente `DerivativesSummaryCard` restituisce `null` quando nessuna posizione richiede monitoraggio (`hasContent === false`, riga 542). Questo nasconde **entrambe** le card:
+1. **Posizioni da monitorare** — correttamente vuota se non ci sono criticità
+2. **Avvisi recenti (24h)** — che contiene anche il pulsante per accedere ad Alert Settings
 
-2. **L'archivio derivati** è stato erroneamente usato per escludere BIO ON da tutto, ma la sua funzione corretta è solo nascondere un sottostante dalla pagina Strategie Derivati, non dai calcoli generali.
+Risultato: quando tutte le posizioni sono sane, l'utente perde l'accesso agli avvisi recenti e alle impostazioni degli alert.
 
 ### Correzione
 
-#### 1. Excel Parser — `src/lib/excelParser.ts`
+#### File: `src/components/derivatives/DerivativesSummaryCard.tsx`
 
-Aggiungere il riconoscimento della sezione "TITOLI NON VALORIZZABILI" nella catena di `if` delle sezioni (riga ~211-233). Quando viene rilevata:
-- Impostare `currentSection = null` (o un nuovo flag `skipSection = true`)
-- Tutte le righe successive verranno saltate fino alla prossima sezione riconosciuta
-- Questo impedisce che BIO ON e simili vengano importati come posizioni
+1. **Separare la visibilità delle due card**
+   - La card "Posizioni da monitorare" può continuare a sparire quando `hasContent === false`
+   - La card "Avvisi recenti (24h)" deve essere **sempre visibile** quando ci sono configurazioni attive, indipendentemente dallo stato delle posizioni
 
-Pattern da matchare: `firstCell.includes('NON VALORIZZABIL')` o `firstCell.includes('TITOLI NON VALORIZZABILI')`.
+2. **Rimuovere il `return null` globale**
+   - Invece di fare `if (!hasContent) return null`, rendere condizionale solo la card di sinistra
+   - Se `hasContent` è false, mostrare solo la card "Avvisi recenti" a larghezza piena (o con un messaggio "Tutto OK" nella card di sinistra)
 
-#### 2. Archivio derivati — ripristinare il significato corretto
-
-Verificare che l'archivio (`archived_underlyings`) venga usato SOLO per:
-- Pagina Strategie Derivati: esclusione dalla visualizzazione e dal conteggio `needsWizard`
-- Auto-classifica nel Wizard: esclusione dai suggerimenti
-
-E NON venga usato per:
-- Calcolo netting
-- Calcolo rischio / equity exposure
-- Snapshot / staging
-- Totali patrimonio
-
-File da verificare: `src/lib/derivativeStrategies.ts` (il filtro archivio nel `configOnly` path), `src/lib/refreshStrategyCache.ts`, `src/hooks/useDerivativeNetting.ts`, `src/hooks/useRiskAnalysis.ts`.
+3. **Approccio specifico:**
+   - Se `hasContent` è `true`: layout a 2 colonne come oggi (monitoring + avvisi)
+   - Se `hasContent` è `false`: mostrare la card "Posizioni da monitorare" con messaggio "Nessuna criticità" + la card "Avvisi recenti" normalmente
 
 ### Risultato atteso
-
-- Al prossimo upload Excel, BIO ON e qualsiasi titolo sotto "TITOLI NON VALORIZZABILI" non verrà più importato
-- L'archivio derivati tornerà ad avere solo il ruolo UI nella pagina Strategie Derivati
-- I calcoli di netting, rischio e patrimonio non saranno influenzati dall'archivio derivati
-
-### File da modificare
-
-- `src/lib/excelParser.ts` — aggiungere sezione "NON VALORIZZABILI" come sezione da ignorare
-- Verificare e, se necessario, correggere `src/lib/derivativeStrategies.ts`, `src/lib/refreshStrategyCache.ts` per assicurarsi che l'archivio non escluda dai calcoli analitici
+- La card "Avvisi recenti (24h)" con il pulsante Settings è sempre accessibile
+- La card "Posizioni da monitorare" mostra un messaggio rassicurante quando non ci sono criticità
+- L'utente può sempre accedere alle impostazioni degli alert
 
