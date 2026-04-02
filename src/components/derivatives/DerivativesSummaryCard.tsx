@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2 } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2, CheckCircle2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
