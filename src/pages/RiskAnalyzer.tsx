@@ -84,7 +84,7 @@ export function RiskAnalyzer() {
     includeLeapCall: currencyIncludeLeapCall 
   });
   
-  // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names
+  // Extract stock info for sector mapping - includes ISIN + description + derivative underlying names + GP stocks
   const stocksForSectorMapping = useMemo(() => {
     const stocks: Array<{ isin: string; description: string }> = [];
     const names: string[] = []; // Derivative underlyings without ISIN
@@ -125,8 +125,17 @@ export function RiskAnalyzer() {
       }
     }
     
+    // 5. GP stock holdings (nome/ticker per risoluzione settore)
+    for (const gp of gpStockHoldings) {
+      const key = gp.ticker_code || gp.description;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        names.push(gp.description);
+      }
+    }
+    
     return { stocks, names };
-  }, [analysis]);
+  }, [analysis, gpStockHoldings]);
   
   // Fetch sector mappings when switching to sector view
   useEffect(() => {
