@@ -225,7 +225,7 @@ export function CurrencyExposureView({
     mergedCurrencyExposure.reduce((sum, c) => sum + c.totalRisk, 0),
     [mergedCurrencyExposure]
   );
-  const safeCurrencyExposure = currencyExposure.filter((c) => {
+  const safeCurrencyExposure = mergedCurrencyExposure.filter((c) => {
     return (
       typeof c.currency === 'string' &&
       Number.isFinite(c.totalRisk) &&
@@ -234,7 +234,7 @@ export function CurrencyExposureView({
     );
   });
 
-  const hasData = safeCurrencyExposure.length > 0 && Number.isFinite(grandTotal) && grandTotal > 0;
+  const hasData = safeCurrencyExposure.length > 0 && Number.isFinite(effectiveGrandTotal) && effectiveGrandTotal > 0;
 
   const nonEurTotal = useMemo(() => {
     return safeCurrencyExposure
