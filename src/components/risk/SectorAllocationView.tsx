@@ -41,6 +41,8 @@ interface SectorAllocationViewProps {
   onIncludeStrategiesChange: (value: boolean) => void;
   includeLeapCall: boolean;
   onIncludeLeapCallChange: (value: boolean) => void;
+  includeGP?: boolean;
+  onIncludeGPChange?: (value: boolean) => void;
   isResolvingSectors?: boolean;
   resolvingCount?: number;
   isAdmin?: boolean;
