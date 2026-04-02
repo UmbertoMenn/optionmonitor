@@ -105,6 +105,12 @@ export function EquityExposureView({
     };
   }, [stockDetails]);
 
+  // GP stock total value
+  const gpStockTotalValue = useMemo(() => 
+    gpStockHoldings.reduce((sum, h) => sum + h.market_value, 0),
+    [gpStockHoldings]
+  );
+
   // Dynamic grand total based on toggles
   const dynamicGrandTotal = useMemo(() => {
     const stockRisk = includeProtections ? totalPureStockRisk : grossPureStockRisk;
@@ -114,20 +120,23 @@ export function EquityExposureView({
       totalCommodityRisk + 
       (includeNakedPut ? totalNakedPutRisk : 0) + 
       (includeLeapCall ? totalLeapCallRisk : 0) + 
-      (includeStrategies ? totalStrategyRisk : 0)
+      (includeStrategies ? totalStrategyRisk : 0) +
+      (includeGP ? gpStockTotalValue : 0)
     );
   }, [
     includeProtections, 
     includeNakedPut, 
     includeLeapCall, 
     includeStrategies,
+    includeGP,
     totalETFRisk, 
     totalPureStockRisk, 
     grossPureStockRisk, 
     totalCommodityRisk, 
     totalNakedPutRisk, 
     totalLeapCallRisk, 
-    totalStrategyRisk
+    totalStrategyRisk,
+    gpStockTotalValue,
   ]);
 
   const getPercentage = (value: number) => dynamicGrandTotal > 0 ? (value / dynamicGrandTotal) * 100 : 0;
