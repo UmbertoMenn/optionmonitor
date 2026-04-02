@@ -249,6 +249,7 @@ function mapStrategyTypeToCategory(strategyType: string): string {
   switch (strategyType) {
     case 'Naked Put': return 'naked_put';
     case 'Covered Call': return 'covered_call';
+    case 'De-Risking Covered Call': return 'covered_call';
     case 'LEAP Call': return 'leap_call';
     default: return 'other';
   }
@@ -448,7 +449,7 @@ serve(async (req) => {
           }
           
           // ============ COVERED CALL ============
-          if (strategyType === 'Covered Call') {
+          if (strategyType === 'Covered Call' || strategyType === 'De-Risking Covered Call') {
             const soldCallStrike = strategy.sold_call_strike || 0;
             if (soldCallStrike <= 0) continue;
             
@@ -464,14 +465,14 @@ serve(async (req) => {
               
               if (isITM && (!currentState || currentState.current_state === 'safe')) {
                 if (cooldownPassed(currentState?.last_alerted_at || null, itmConfig.cooldown_minutes)) {
-                  const message = `La Covered Call è ITM`;
+                  const message = `La ${strategyType} è ITM`;
                   
                   await supabase.from('alerts').insert({
                     user_id: userId,
                     portfolio_id: portfolioId,
                     alert_type: ALERT_TYPES.ACTION_COVERED_CALL_ITM,
                     ticker,
-                    strategy_type: 'Covered Call',
+                    strategy_type: strategyType,
                     direction: 'up',
                     current_value: underlyingPrice,
                     threshold_value: soldCallStrike,
@@ -530,7 +531,7 @@ serve(async (req) => {
                     portfolio_id: portfolioId,
                     alert_type: ALERT_TYPES.DISTANCE_COVERED_CALL,
                     ticker,
-                    strategy_type: 'Covered Call',
+                    strategy_type: strategyType,
                     direction: 'up',
                     current_value: distancePct,
                     threshold_value: distConfig.threshold_pct,

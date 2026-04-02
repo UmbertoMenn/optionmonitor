@@ -86,6 +86,30 @@ export async function saveStrategyCache(
     });
   });
   
+  // 1b. De-Risking Covered Calls
+  (categories.deRiskingCoveredCalls || []).forEach((dcc) => {
+    const underlying = dcc.coveredCall.option.underlying || dcc.coveredCall.option.description || '';
+    const ticker = resolveTicker(underlying, underlyingPrices);
+    const posIds = [dcc.coveredCall.option.id, dcc.protectionPut.id];
+    if (dcc.syntheticPut) posIds.push(dcc.syntheticPut.id);
+    
+    records.push({
+      portfolio_id: portfolioId,
+      strategy_key: `dcc_${underlying}_${dcc.coveredCall.option.strike_price || 0}_${formatExpiryKey(dcc.coveredCall.option.expiry_date)}`,
+      strategy_type: 'De-Risking Covered Call',
+      underlying,
+      ticker,
+      position_ids: posIds,
+      sold_put_strike: null,
+      sold_call_strike: dcc.coveredCall.option.strike_price || null,
+      bought_put_strike: null,
+      bought_call_strike: null,
+      is_range_strategy: false,
+      sold_call_expiry: dcc.coveredCall.option.expiry_date || null,
+      sold_put_expiry: null,
+    });
+  });
+  
   // 2. Naked Puts
   categories.nakedPuts.forEach((np: NakedPutPosition, idx: number) => {
     const underlying = np.option.underlying || np.option.description || '';
