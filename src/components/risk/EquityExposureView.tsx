@@ -77,15 +77,15 @@ export function EquityExposureView({
     strategyDetails
   } = analysis;
   
-  // Calculate all consolidated holdings (no limit)
+  // Calculate all consolidated holdings (no limit) - include GP stocks
   const consolidatedHoldings = useMemo(() => {
     return calculateConsolidatedTopHoldings(analysis, etfAllocations, { 
       includeProtections,
       includeNakedPut,
       includeStrategies,
       includeLeapCall
-    });
-  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall]);
+    }, 100, includeGP ? gpStockHoldings : []);
+  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeGP, gpStockHoldings]);
 
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
