@@ -394,7 +394,8 @@ export function calculateSectorExposure(
     includeNakedPut = true, 
     includeStrategies = true, 
     includeLeapCall = true, 
-    sectorMappings = {} 
+    sectorMappings = {},
+    gpStockHoldings = [],
   } = options;
   const bySector = new Map<string, SectorExposure>();
   
