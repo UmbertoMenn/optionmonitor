@@ -321,7 +321,7 @@ export function CurrencyExposureView({
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-                <div className="text-3xl font-bold text-primary">{formatEUR(grandTotal)}</div>
+                <div className="text-3xl font-bold text-primary">{formatEUR(effectiveGrandTotal)}</div>
                 {hasData && (
                   <div className="text-sm text-muted-foreground mt-1">
                     Non-EUR totale: <span className="font-medium text-foreground">{formatEUR(nonEurTotal)}</span>
