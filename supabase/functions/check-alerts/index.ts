@@ -249,6 +249,7 @@ function mapStrategyTypeToCategory(strategyType: string): string {
   switch (strategyType) {
     case 'Naked Put': return 'naked_put';
     case 'Covered Call': return 'covered_call';
+    case 'De-Risking Covered Call': return 'covered_call';
     case 'LEAP Call': return 'leap_call';
     default: return 'other';
   }
