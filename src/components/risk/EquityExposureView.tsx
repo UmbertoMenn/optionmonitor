@@ -200,7 +200,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio ETF Azionari', 
       value: totalETFRisk, 
-      sortValue: totalETFRisk, // Fixed sort value
+      sortValue: totalETFRisk,
       percentage: getPercentage(totalETFRisk),
       color: 'bg-cyan-500',
       icon: TrendingUp,
@@ -211,7 +211,7 @@ export function EquityExposureView({
     { 
       label: 'Rischio Stocks', 
       value: displayedStockRisk, 
-      sortValue: grossPureStockRisk, // Always sort by gross value
+      sortValue: grossPureStockRisk,
       percentage: getPercentage(displayedStockRisk),
       color: 'bg-blue-500',
       icon: TrendingUp,
@@ -265,6 +265,17 @@ export function EquityExposureView({
       protectionSavings: 0,
       showProtectionSavings: false
     },
+    ...(gpStockHoldings.length > 0 ? [{
+      label: 'Rischio GP Azioni',
+      value: includeGP ? gpStockTotalValue : 0,
+      sortValue: gpStockTotalValue,
+      percentage: getPercentage(includeGP ? gpStockTotalValue : 0),
+      color: 'bg-emerald-500',
+      icon: Layers,
+      description: 'Azioni gestione patrimoniale',
+      protectionSavings: 0,
+      showProtectionSavings: false,
+    }] : []),
   ];
 
   const formatExpiry = (expiry: string) => {
