@@ -46,9 +46,49 @@ export function Dashboard() {
   const navigate = useNavigate();
   const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
-  const { portfolio, positions, summary, isLoading } = usePortfolio();
+  const { portfolio, positions, summary: rawSummary, isLoading } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
+  const { gpHoldings, gpSummary } = useGPHoldings();
+  
+  // Merge GP values into summary
+  const summary: PortfolioSummary | null = useMemo(() => {
+    if (!rawSummary) return null;
+    if (gpSummary.totalValue === 0) return rawSummary;
+    
+    const newTotal = rawSummary.totalValue + gpSummary.totalValue;
+    const byAssetType = [...rawSummary.byAssetType];
+    
+    // Add GP stock value to existing stock entry or create one
+    if (gpSummary.stockValue > 0) {
+      const stockEntry = byAssetType.find(e => e.type === 'stock');
+      if (stockEntry) stockEntry.value += gpSummary.stockValue;
+      else byAssetType.push({ type: 'stock' as AssetType, value: gpSummary.stockValue, percentage: 0, profitLoss: 0 });
+    }
+    if (gpSummary.bondValue > 0) {
+      const bondEntry = byAssetType.find(e => e.type === 'bond');
+      if (bondEntry) bondEntry.value += gpSummary.bondValue;
+      else byAssetType.push({ type: 'bond' as AssetType, value: gpSummary.bondValue, percentage: 0, profitLoss: 0 });
+    }
+    if (gpSummary.cashValue > 0) {
+      const cashEntry = byAssetType.find(e => e.type === 'cash');
+      if (cashEntry) cashEntry.value += gpSummary.cashValue;
+      else byAssetType.push({ type: 'cash' as AssetType, value: gpSummary.cashValue, percentage: 0, profitLoss: 0 });
+    }
+    
+    // Recalculate percentages
+    byAssetType.forEach(e => {
+      e.percentage = newTotal > 0 ? (e.value / newTotal) * 100 : 0;
+    });
+    
+    return {
+      ...rawSummary,
+      totalValue: newTotal,
+      cashValue: rawSummary.cashValue + gpSummary.cashValue,
+      investedValue: rawSummary.investedValue + gpSummary.stockValue + gpSummary.bondValue,
+      byAssetType,
+    };
+  }, [rawSummary, gpSummary]);
   
   // Fetch underlying prices for derivatives without stock in portfolio
   const derivativeUnderlyings = useMemo(() => 
