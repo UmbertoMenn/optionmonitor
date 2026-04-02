@@ -281,6 +281,9 @@ export function RiskAnalyzer() {
                 portfolioTotalValue={summary?.totalValue}
                 etfAllocations={allocations}
                 isLoadingETFData={isETFDataLoading}
+                gpStockHoldings={gpStockHoldings}
+                includeGP={equityIncludeGP}
+                onIncludeGPChange={setEquityIncludeGP}
               />
             ) : viewMode === 'currency' ? (
               <ErrorBoundary title="Errore nella vista Currency Exposure">
