@@ -27,9 +27,28 @@ interface DerivativesSummaryCardProps {
 function getMatchingKey(text: string): string {
   return getCanonicalKey(text) || normalizeForMatching(text);
 }
-// Get ticker from position
-function getTicker(position: Position | { description?: string; ticker?: string; underlying?: string }): string {
-  return position.ticker || position.description?.split(' ')[0] || 'N/A';
+
+// Resolve ticker for an underlying/description using underlyingPrices data
+function resolveTickerFromPrices(
+  underlyingOrDesc: string,
+  underlyingPrices: Record<string, UnderlyingPrice>
+): string | null {
+  const priceData = underlyingPrices[underlyingOrDesc];
+  if (priceData?.ticker) return priceData.ticker;
+  return null;
+}
+
+// Get display ticker: resolved ticker from prices > position.ticker > first word
+function getDisplayTicker(
+  underlyingOrDesc: string,
+  underlyingPrices: Record<string, UnderlyingPrice>,
+  fallbackTicker?: string | null
+): string {
+  const resolved = resolveTickerFromPrices(underlyingOrDesc, underlyingPrices);
+  if (resolved) return resolved;
+  if (fallbackTicker) return fallbackTicker;
+  // Last resort: first word (should rarely happen)
+  return underlyingOrDesc.split(' ')[0] || 'N/A';
 }
 
 // Badge tooltip descriptions
