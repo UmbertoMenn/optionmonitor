@@ -373,37 +373,70 @@ export function DerivativesSummaryCard({
   const availableCallsToSell = useMemo(() => {
     const result: { ticker: string; availableShares: number }[] = [];
     
+    // Build a ticker-based balance map
+    // Key = resolved ticker (e.g. "BABA"), value = { owned shares, sold call contracts }
+    const tickerBalance = new Map<string, { owned: number; soldCalls: number; displayTicker: string }>();
+    
+    // Helper to resolve a stock's ticker
+    const resolveStockTicker = (stock: Position): string => {
+      if (stock.ticker) return stock.ticker.toUpperCase();
+      // Try to resolve via underlyingPrices using description
+      const resolved = resolveTickerFromPrices(stock.description || '', underlyingPrices);
+      if (resolved) return resolved.toUpperCase();
+      // Fallback to matching key
+      return getMatchingKey(stock.description || '');
+    };
+    
+    // Helper to resolve a derivative's ticker via its underlying
+    const resolveDerivativeTicker = (underlying: string): string => {
+      const resolved = resolveTickerFromPrices(underlying, underlyingPrices);
+      if (resolved) return resolved.toUpperCase();
+      return getMatchingKey(underlying);
+    };
+    
+    // Count owned shares by ticker
     stockPositions.forEach(stock => {
-      const normalizedKey = getMatchingKey(stock.description || '');
-      const potentialContracts = Math.floor(stock.quantity / 100);
-      
-      let soldCallContracts = 0;
-      
-      categories.coveredCalls.forEach(cc => {
-        const ccKey = getMatchingKey(cc.underlying.description || cc.option.underlying || '');
-        if (ccKey === normalizedKey) {
-          soldCallContracts += cc.contractsCovered;
-        }
-      });
-      
-      categories.deRiskingCoveredCalls.forEach(dr => {
-        const drKey = getMatchingKey(dr.coveredCall.underlying.description || dr.coveredCall.option.underlying || '');
-        if (drKey === normalizedKey) {
-          soldCallContracts += dr.coveredCall.contractsCovered;
-        }
-      });
-      
-      const available = potentialContracts - soldCallContracts;
+      const ticker = resolveStockTicker(stock);
+      if (!tickerBalance.has(ticker)) {
+        tickerBalance.set(ticker, { owned: 0, soldCalls: 0, displayTicker: stock.ticker || ticker });
+      }
+      tickerBalance.get(ticker)!.owned += stock.quantity;
+    });
+    
+    // Count sold calls from covered calls
+    categories.coveredCalls.forEach(cc => {
+      const underlyingKey = cc.option.underlying || cc.underlying.description || '';
+      const ticker = resolveDerivativeTicker(underlyingKey);
+      if (!tickerBalance.has(ticker)) {
+        tickerBalance.set(ticker, { owned: 0, soldCalls: 0, displayTicker: ticker });
+      }
+      tickerBalance.get(ticker)!.soldCalls += cc.contractsCovered;
+    });
+    
+    // Count sold calls from de-risking covered calls
+    categories.deRiskingCoveredCalls.forEach(dr => {
+      const underlyingKey = dr.coveredCall.option.underlying || dr.coveredCall.underlying.description || '';
+      const ticker = resolveDerivativeTicker(underlyingKey);
+      if (!tickerBalance.has(ticker)) {
+        tickerBalance.set(ticker, { owned: 0, soldCalls: 0, displayTicker: ticker });
+      }
+      tickerBalance.get(ticker)!.soldCalls += dr.coveredCall.contractsCovered;
+    });
+    
+    // Calculate available
+    for (const [, data] of tickerBalance) {
+      const potentialContracts = Math.floor(data.owned / 100);
+      const available = potentialContracts - data.soldCalls;
       if (available >= 1) {
         result.push({
-          ticker: stock.ticker || stock.description?.split(' ')[0] || 'N/A',
+          ticker: data.displayTicker,
           availableShares: available * 100
         });
       }
-    });
+    }
     
     return result.sort((a, b) => b.availableShares - a.availableShares);
-  }, [stockPositions, categories.coveredCalls, categories.deRiskingCoveredCalls]);
+  }, [stockPositions, categories.coveredCalls, categories.deRiskingCoveredCalls, underlyingPrices]);
   
   // ============ 8. Altre Strategie OOR/OOB ============
   const otherStrategiesOOROOB = useMemo(() => {
