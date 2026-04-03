@@ -542,7 +542,7 @@ export function DerivativesSummaryCard({
         title: 'Covered Call',
         emoji: 'amber',
         badge: 'ITM',
-        items: coveredCallsITM.map(cc => `${cc.ticker} $${cc.strike} ×${cc.contracts}`),
+        items: coveredCallsITM.map(cc => `${cc.isDeRisking ? 'DR ' : ''}${cc.ticker} $${cc.strike} ×${cc.contracts}`),
       });
     }
     if (doubleDiagonalOOR.length > 0) {
