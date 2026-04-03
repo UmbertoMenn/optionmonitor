@@ -243,11 +243,12 @@ export function DerivativesSummaryCard({
     
     categories.coveredCalls.forEach(cc => {
       const strikePrice = cc.option.strike_price || 0;
-      const underlyingPrice = (cc.option.underlying ? underlyingPrices[cc.option.underlying]?.price : 0) || 0;
+      const underlyingKey = cc.option.underlying || '';
+      const underlyingPrice = (underlyingKey ? underlyingPrices[underlyingKey]?.price : 0) || 0;
       
       if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
         result.push({
-          ticker: getTicker(cc.underlying),
+          ticker: getDisplayTicker(underlyingKey, underlyingPrices, cc.underlying.ticker),
           strike: strikePrice,
           contracts: cc.contractsCovered
         });
