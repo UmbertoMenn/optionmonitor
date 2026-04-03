@@ -317,7 +317,7 @@ export function DerivativesSummaryCard({
         
         if (!isInRange) {
           result.push({
-            ticker: ic.underlying.split(' ')[0] || ic.underlying
+            ticker: getDisplayTicker(ic.underlying, underlyingPrices)
           });
         }
       }
