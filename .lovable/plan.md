@@ -1,29 +1,40 @@
 
 
-## Fix: Sorting Holdings Consolidate in ordine decrescente
+## Aggiornare snapshot storico dopo upload GP
 
 ### Problema
-Il sorting in `EquityExposureView.tsx` (righe 189-197) ricalcola manualmente il valore lordo sommando tutti i campi risk (`stockRisk + nakedPutRisk + leapCallRisk + strategyRisk + gpRisk`), **ignorando lo stato dei toggle**. Quando un toggle è disattivato (es. Naked PUT off), il valore nakedPutRisk contribuisce comunque all'ordinamento, causando un ordine incoerente con i valori visualizzati.
-
-Nel frattempo, `calculateConsolidatedTopHoldings` in `sectorExposure.ts` calcola già un campo `totalExposure` che rispetta i toggle attivi — ma il sorting in EquityExposureView lo ignora.
+Quando si carica un file GP, i dati vengono salvati in `gp_holdings` e i totali aggiornati su `portfolios`, ma NON viene ricalcolato e salvato lo snapshot storico in `historical_data`. Il valore GP influenza `total_value`, netting ed esposizioni, quindi lo snapshot diventa stale.
 
 ### Soluzione
+Dopo il salvataggio dei GP holdings e l'aggiornamento dei totali su `portfolios`, chiamare `upsertUploadSnapshot` usando la `snapshot_date` del portfolio (non una data GP).
 
-**File: `src/components/risk/EquityExposureView.tsx`** (righe 188-197)
+### Modifica
 
-Sostituire il sorting manuale con l'uso del campo `totalExposure` già calcolato:
+**File: `src/components/dashboard/FileUploader.tsx`** (dopo riga 220, dentro `onDropGP`)
+
+Aggiungere dopo le invalidazioni delle query:
 
 ```typescript
-const sortedConsolidatedHoldings = useMemo(() => 
-  [...consolidatedHoldings].sort((a, b) => {
-    return Math.abs(b.totalExposure) - Math.abs(a.totalExposure);
-  }),
-  [consolidatedHoldings]
-);
+// Re-compute and save historical snapshot using portfolio's snapshot date
+const portfolioSnapshotDate = portfolio?.snapshot_date;
+if (portfolioSnapshotDate) {
+  try {
+    await upsertUploadSnapshot({
+      portfolioId: targetPortfolioId,
+      snapshotDate: portfolioSnapshotDate,
+      cashValue: (portfolio?.cash_value || 0) + cashValue,
+    });
+    queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+  } catch (snapErr) {
+    console.error('[FileUploader] GP snapshot update failed:', snapErr);
+  }
+}
 ```
 
-Questo garantisce che l'ordinamento sia sempre coerente con i valori effettivamente visualizzati, indipendentemente da quali toggle sono attivi o disattivi.
+Il `cashValue` passato a `upsertUploadSnapshot` deve includere sia il cash del portfolio principale che il cash GP, dato che `upsertUploadSnapshot` calcola `totalValue = positionsValue + cashValue + gpTotalValue` — ma `gpTotalValue` include già il cash GP. Quindi il cashValue corretto è solo `portfolio.cash_value`.
+
+Correzione: passare `cashValue: portfolio?.cash_value || 0` (senza aggiungere il cash GP, che è già conteggiato tramite `gpTotalValue` dentro `upsertUploadSnapshot`).
 
 ### File da modificare
-1. `src/components/risk/EquityExposureView.tsx` — una sola modifica al sorting
+1. `src/components/dashboard/FileUploader.tsx` — aggiungere chiamata `upsertUploadSnapshot` in `onDropGP`
 
