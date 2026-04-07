@@ -100,6 +100,12 @@ function positionLabel(p: Position): string {
   const type = p.option_type?.toUpperCase() || '?';
   const strike = p.strike_price || '?';
   const expiry = formatExpiryMMY(p.expiry_date);
+  // Show slot label for split option contracts
+  const optSlotMatch = p.id.match(/__opt_slot_(\d+)$/);
+  if (optSlotMatch) {
+    const slotNum = parseInt(optSlotMatch[1]) + 1;
+    return `${prefix} ${side} ${type} ${strike} ${expiry} [${slotNum}]`;
+  }
   const qty = Math.abs(p.quantity) > 1 ? ` ×${Math.abs(p.quantity)}` : '';
   return `${prefix} ${side} ${type} ${strike} ${expiry}${qty}`;
 }
