@@ -725,7 +725,7 @@ export function StrategyConfigWizard({
         positions: strat.positions.map(p => {
           if (p.asset_type !== 'stock') return p;
           // Find matching virtual slot in allAvailable
-          const slot = allAvailable.find(a =>
+          const slot = effectivePositions.find(a =>
             (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
           );
           if (slot && slot.id !== p.id) {
