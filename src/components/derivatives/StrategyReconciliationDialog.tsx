@@ -573,11 +573,24 @@ export function StrategyReconciliationDialog({
               const rawAvailable = state.availablePositions.filter(p => !assignedIds.has(p.id));
               const effectiveAvailable: Position[] = [];
               for (const p of rawAvailable) {
-                if (p.asset_type === 'derivative' && splitOptionIds.has(p.id) && Math.abs(p.quantity) > 1) {
-                  const absQty = Math.abs(p.quantity);
-                  const sign = p.quantity >= 0 ? 1 : -1;
-                  for (let i = 0; i < absQty; i++) {
-                    effectiveAvailable.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+                if (splitPositionIds.has(p.id)) {
+                  if (p.asset_type === 'derivative' && Math.abs(p.quantity) > 1) {
+                    const absQty = Math.abs(p.quantity);
+                    const sign = p.quantity >= 0 ? 1 : -1;
+                    for (let i = 0; i < absQty; i++) {
+                      effectiveAvailable.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+                    }
+                  } else if ((p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200) {
+                    const slots = Math.floor(p.quantity / 100);
+                    for (let i = 0; i < slots; i++) {
+                      effectiveAvailable.push({ ...p, id: `${p.id}__slot_${i}`, quantity: 100 });
+                    }
+                    const remainder = p.quantity % 100;
+                    if (remainder > 0) {
+                      effectiveAvailable.push({ ...p, id: `${p.id}__slot_${slots}`, quantity: remainder });
+                    }
+                  } else {
+                    effectiveAvailable.push(p);
                   }
                 } else {
                   effectiveAvailable.push(p);
@@ -588,18 +601,25 @@ export function StrategyReconciliationDialog({
               const missingCount = state.missingLegs.length;
               const newCount = available.filter(p => p.asset_type === 'derivative').length;
 
-              const handleSplitOption = (posId: string) => {
-                setSplitOptionIds(prev => new Set(prev).add(posId));
+              const handleSplitPosition = (posId: string) => {
+                setSplitPositionIds(prev => new Set(prev).add(posId));
               };
 
-              const handleRejoinOption = (posId: string) => {
+              const handleRejoinPosition = (posId: string) => {
                 const origPos = rawAvailable.find(p => p.id === posId);
                 if (!origPos) return;
-                const absQty = Math.abs(origPos.quantity);
-                const slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+                let slotIds: string[] = [];
+                if (origPos.asset_type === 'derivative') {
+                  const absQty = Math.abs(origPos.quantity);
+                  slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+                } else if (origPos.asset_type === 'stock' || origPos.asset_type === 'etf') {
+                  const slots = Math.floor(origPos.quantity / 100);
+                  const hasRem = origPos.quantity % 100 > 0;
+                  slotIds = Array.from({ length: slots + (hasRem ? 1 : 0) }, (_, i) => `${posId}__slot_${i}`);
+                }
                 const anyAssigned = slotIds.some(id => assignedIds.has(id));
                 if (anyAssigned) return;
-                setSplitOptionIds(prev => {
+                setSplitPositionIds(prev => {
                   const next = new Set(prev);
                   next.delete(posId);
                   return next;
