@@ -138,35 +138,37 @@ export function reconcileConfigs(
 
       const legs: LegStatus[] = [];
       const matchedPositionIds = new Set<string>();
+      const usedQuantity = new Map<string, number>();
 
       // Check each saved signature against current positions (respecting quantity_abs)
       for (const sig of signatures) {
-        const matched = matchSignatureMulti(sig, currentPositionsForUnderlying, matchedPositionIds);
-        if (matched.length >= (sig.quantity_abs || 1)) {
+        const needed = sig.quantity_abs || 1;
+        const { matched, matchedCount } = matchSignatureMulti(sig, currentPositionsForUnderlying, matchedPositionIds, usedQuantity);
+        if (matchedCount >= needed) {
           // All contracts found
           legs.push({
             signature: sig,
-            label: formatSigLabel(sig) + (matched.length > 1 ? ` ×${matched.length}` : ''),
+            label: formatSigLabel(sig) + (needed > 1 ? ` ×${needed}` : ''),
             status: 'present',
             position: matched[0],
           });
-        } else if (matched.length > 0) {
+        } else if (matchedCount > 0) {
           // Partial match — mark present for what we found, missing for the rest
           legs.push({
-            signature: { ...sig, quantity_abs: matched.length },
-            label: formatSigLabel(sig) + ` ×${matched.length}`,
+            signature: { ...sig, quantity_abs: matchedCount },
+            label: formatSigLabel(sig) + ` ×${matchedCount}`,
             status: 'present',
             position: matched[0],
           });
           legs.push({
-            signature: { ...sig, quantity_abs: (sig.quantity_abs || 1) - matched.length },
-            label: formatSigLabel(sig) + ` ×${(sig.quantity_abs || 1) - matched.length}`,
+            signature: { ...sig, quantity_abs: needed - matchedCount },
+            label: formatSigLabel(sig) + ` ×${needed - matchedCount}`,
             status: 'missing',
           });
         } else {
           legs.push({
             signature: sig,
-            label: formatSigLabel(sig) + ((sig.quantity_abs || 1) > 1 ? ` ×${sig.quantity_abs}` : ''),
+            label: formatSigLabel(sig) + (needed > 1 ? ` ×${needed}` : ''),
             status: 'missing',
           });
         }
