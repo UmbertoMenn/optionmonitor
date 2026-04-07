@@ -403,26 +403,39 @@ export function StrategyConfigWizard({
     return [...virtualDerivs, ...virtualStocks];
   }, [open, derivatives, allPositions, filterUnderlyings]);
 
-  // Track which option positions the user has manually split
-  const [splitOptionIds, setSplitOptionIds] = useState<Set<string>>(new Set());
+  // Track which positions the user has manually split (options + stocks)
+  const [splitPositionIds, setSplitPositionIds] = useState<Set<string>>(new Set());
 
-  // Derive effective positions: if an option is in splitOptionIds, expand into virtual slots
+  // Derive effective positions: expand split options into single-contract slots, split stocks into 100-share slots
   const effectivePositions = useMemo(() => {
-    if (splitOptionIds.size === 0) return allAvailable;
+    if (splitPositionIds.size === 0) return allAvailable;
     const result: Position[] = [];
     for (const p of allAvailable) {
-      if (p.asset_type === 'derivative' && splitOptionIds.has(p.id) && Math.abs(p.quantity) > 1) {
-        const absQty = Math.abs(p.quantity);
-        const sign = p.quantity >= 0 ? 1 : -1;
-        for (let i = 0; i < absQty; i++) {
-          result.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+      if (splitPositionIds.has(p.id)) {
+        if (p.asset_type === 'derivative' && Math.abs(p.quantity) > 1) {
+          const absQty = Math.abs(p.quantity);
+          const sign = p.quantity >= 0 ? 1 : -1;
+          for (let i = 0; i < absQty; i++) {
+            result.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+          }
+        } else if ((p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200) {
+          const slots = Math.floor(p.quantity / 100);
+          for (let i = 0; i < slots; i++) {
+            result.push({ ...p, id: `${p.id}__slot_${i}`, quantity: 100 });
+          }
+          const remainder = p.quantity % 100;
+          if (remainder > 0) {
+            result.push({ ...p, id: `${p.id}__slot_${slots}`, quantity: remainder });
+          }
+        } else {
+          result.push(p);
         }
       } else {
         result.push(p);
       }
     }
     return result;
-  }, [allAvailable, splitOptionIds]);
+  }, [allAvailable, splitPositionIds]);
 
   // Group all positions by normalized underlying — skip when closed
   const underlyingGroups = useMemo((): UnderlyingGroup[] => {
