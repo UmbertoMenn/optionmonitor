@@ -390,6 +390,20 @@ export function StrategyConfigWizard({
       derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
     }
     
+    // Split derivative contracts with |quantity| > 1 into virtual single-contract slots
+    const virtualDerivs: Position[] = [];
+    for (const d of derivs) {
+      const absQty = Math.abs(d.quantity);
+      if (absQty > 1) {
+        const sign = d.quantity >= 0 ? 1 : -1;
+        for (let i = 0; i < absQty; i++) {
+          virtualDerivs.push({ ...d, id: `${d.id}__opt_slot_${i}`, quantity: sign * 1 });
+        }
+      } else {
+        virtualDerivs.push(d);
+      }
+    }
+    
     // Split stocks into 100-share virtual slots
     const virtualStocks: Position[] = [];
     for (const stock of stocks) {
@@ -407,7 +421,7 @@ export function StrategyConfigWizard({
       }
     }
     
-    return [...derivs, ...virtualStocks];
+    return [...virtualDerivs, ...virtualStocks];
   }, [open, derivatives, allPositions, filterUnderlyings]);
 
   // Group all positions by normalized underlying — skip when closed
