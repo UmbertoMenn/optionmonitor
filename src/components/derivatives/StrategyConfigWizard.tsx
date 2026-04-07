@@ -857,19 +857,28 @@ export function StrategyConfigWizard({
   const totalUnassigned = effectivePositions.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
   const [archiveOpen, setArchiveOpen] = useState(false);
 
-  // Split option handler
-  const handleSplitOption = (posId: string) => {
-    setSplitOptionIds(prev => new Set(prev).add(posId));
+  // Split position handler (options or stocks)
+  const handleSplitPosition = (posId: string) => {
+    setSplitPositionIds(prev => new Set(prev).add(posId));
   };
 
-  // Rejoin option handler — only if no slots are assigned
-  const handleRejoinOption = (posId: string) => {
-    // Check if any virtual slot of this position is assigned
-    const absQty = Math.abs(allAvailable.find(p => p.id === posId)?.quantity || 0);
-    const slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+  // Rejoin handler — only if no slots are assigned
+  const handleRejoinPosition = (posId: string) => {
+    const pos = allAvailable.find(p => p.id === posId);
+    if (!pos) return;
+    // Determine slot pattern based on type
+    let slotIds: string[] = [];
+    if (pos.asset_type === 'derivative') {
+      const absQty = Math.abs(pos.quantity);
+      slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+    } else if (pos.asset_type === 'stock' || pos.asset_type === 'etf') {
+      const slots = Math.floor(pos.quantity / 100);
+      const hasRemainder = pos.quantity % 100 > 0;
+      slotIds = Array.from({ length: slots + (hasRemainder ? 1 : 0) }, (_, i) => `${posId}__slot_${i}`);
+    }
     const anyAssigned = slotIds.some(id => assignedIds.has(id));
-    if (anyAssigned) return; // can't rejoin if slots are assigned
-    setSplitOptionIds(prev => {
+    if (anyAssigned) return;
+    setSplitPositionIds(prev => {
       const next = new Set(prev);
       next.delete(posId);
       return next;
