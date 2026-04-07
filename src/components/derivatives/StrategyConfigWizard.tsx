@@ -555,9 +555,11 @@ export function StrategyConfigWizard({
     return restored;
   }, [existingConfigs, allAvailable]);
 
-  // Restore saved configs when wizard opens via prop
+  // Restore saved configs when wizard opens — use ref to avoid re-running on reactive updates
+  const hasInitialized = useMemo(() => ({ current: false }), []);
   useEffect(() => {
-    if (open) {
+    if (open && !hasInitialized.current) {
+      hasInitialized.current = true;
       startTransition(() => {
         const restored = restoreFromConfigs();
         setStrategies(restored);
@@ -565,7 +567,10 @@ export function StrategyConfigWizard({
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
     }
-  }, [open, restoreFromConfigs]);
+    if (!open) {
+      hasInitialized.current = false;
+    }
+  }, [open, restoreFromConfigs, hasInitialized]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
     onOpenChange(isOpen);

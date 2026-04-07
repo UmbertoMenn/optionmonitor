@@ -122,23 +122,34 @@ export function reconcileConfigs(
       const legs: LegStatus[] = [];
       const matchedPositionIds = new Set<string>();
 
-      // Check each saved signature against current positions
+      // Check each saved signature against current positions (respecting quantity_abs)
       for (const sig of signatures) {
-        const matchingPos = currentPositionsForUnderlying.find(
-          p => !matchedPositionIds.has(p.id) && signaturesMatch(sig, p)
-        );
-        if (matchingPos) {
-          matchedPositionIds.add(matchingPos.id);
+        const matched = matchSignatureMulti(sig, currentPositionsForUnderlying, matchedPositionIds);
+        if (matched.length >= (sig.quantity_abs || 1)) {
+          // All contracts found
           legs.push({
             signature: sig,
-            label: formatSigLabel(sig),
+            label: formatSigLabel(sig) + (matched.length > 1 ? ` ×${matched.length}` : ''),
             status: 'present',
-            position: matchingPos,
+            position: matched[0],
+          });
+        } else if (matched.length > 0) {
+          // Partial match — mark present for what we found, missing for the rest
+          legs.push({
+            signature: { ...sig, quantity_abs: matched.length },
+            label: formatSigLabel(sig) + ` ×${matched.length}`,
+            status: 'present',
+            position: matched[0],
+          });
+          legs.push({
+            signature: { ...sig, quantity_abs: (sig.quantity_abs || 1) - matched.length },
+            label: formatSigLabel(sig) + ` ×${(sig.quantity_abs || 1) - matched.length}`,
+            status: 'missing',
           });
         } else {
           legs.push({
             signature: sig,
-            label: formatSigLabel(sig),
+            label: formatSigLabel(sig) + ((sig.quantity_abs || 1) > 1 ? ` ×${sig.quantity_abs}` : ''),
             status: 'missing',
           });
         }
