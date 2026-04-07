@@ -1,28 +1,40 @@
 
 
-## Piano: Split On-Demand per Opzioni (mantenendo auto-split azioni)
+## Problemi identificati
 
-### Comportamento finale
-- **Azioni**: auto-split in slot da 100 (invariato)
-- **Opzioni**: appaiono raggruppate con quantità originale (es. "-3 CALL AAPL 250 ×3"). Un'icona ✂️ accanto permette di splittarle in slot da 1 contratto. Un pulsante "Riunisci" permette di ri-aggregarle se non assegnate.
+### 1. Reconciliation si apre subito dopo il salvataggio
+**Causa root**: `matchSignatureMulti` in `strategyReconciliation.ts` cerca `quantity_abs` **righe di posizioni separate** nel database. Ma le posizioni reali NON sono splittate (es. una sola riga con quantity=-3). Se la signature dice `quantity_abs=3`, la funzione trova solo 1 riga → match parziale → segnala "missing" → il dialog di riconciliazione si apre automaticamente.
+
+**Fix**: Modificare `matchSignatureMulti` per considerare la quantità della posizione stessa. Se una posizione ha `|quantity| >= needed`, conta come match completo senza cercare altre righe.
+
+### 2. Slot azioni devono poter essere raggruppati
+**Stato attuale**: Le azioni con qty ≥ 200 vengono SEMPRE auto-splittate in slot da 100. L'utente vuole lo stesso approccio on-demand usato per le opzioni: raggruppate di default, splittabili con ✂️.
+
+**Fix**: Applicare lo stesso pattern `splitOptionIds` anche alle azioni → rinominare in `splitPositionIds`. Le azioni entrano nel pool con quantità originale. L'utente può splittarle on-demand in slot da 100.
+
+---
 
 ### Modifiche
 
-**File: `src/components/derivatives/StrategyConfigWizard.tsx`**
+**File: `src/lib/strategyReconciliation.ts`**
+- Modificare `matchSignatureMulti`: quando una singola posizione ha `|quantity| >= needed`, consumarla come match completo (contando quante unità "usa") anziché cercare N righe separate. Tenere traccia delle quantità consumate per posizione in una mappa `usedQuantity: Map<string, number>`.
 
-1. **Rimuovere auto-splitting opzioni** (righe 393-405): le opzioni entrano nel pool con quantità originale, senza creare `__opt_slot_N`
-2. **Aggiungere stato `splitOptionIds`** (`Set<string>`): traccia quali posizioni option l'utente ha scelto di splittare manualmente
-3. **Derivare posizioni effettive** in un `useMemo` tra `allAvailable` e il rendering: se un'opzione è in `splitOptionIds`, genera gli slot virtuali `__opt_slot_N`; altrimenti la lascia intera
-4. **Icona ✂️ (Scissors)**: accanto a ogni opzione con `|qty| > 1` non assegnata, al click aggiunge l'ID a `splitOptionIds`
-5. **Pulsante "Riunisci"**: visibile quando ci sono slot `__opt_slot_N` non assegnati della stessa posizione base → rimuove l'ID da `splitOptionIds`
-6. **`positionLabel()`**: per opzioni non splittate, mostra `×N`; per slot splittati, mostra `[1]`, `[2]`, ecc.
-7. **`buildSignatures()`**: per opzioni non splittate assegnate intere, `quantity_abs = |quantity|`; per slot virtuali, `quantity_abs = 1` (logica già presente, funziona)
-8. **`restoreFromConfigs()`**: se una config salvata ha `quantity_abs < |quantity originale|` dell'opzione, auto-aggiunge l'ID a `splitOptionIds` per ricreare gli slot necessari al ripristino
+**File: `src/components/derivatives/StrategyConfigWizard.tsx`**
+- Rimuovere auto-split azioni (righe 400-415): le azioni entrano nel pool con quantità originale
+- Rinominare `splitOptionIds` → `splitPositionIds` (unifica azioni e opzioni)
+- `effectivePositions`: se un'azione è in `splitPositionIds`, genera slot da 100; se un'opzione è in `splitPositionIds`, genera slot da 1
+- Icona ✂️ anche per azioni con qty ≥ 200
+- `restoreFromConfigs`: auto-aggiungere a `splitPositionIds` anche gli stock se la config ha `linked_stock_slot_ids` multipli
 
 **File: `src/components/derivatives/StrategyReconciliationDialog.tsx`**
-- Stesso approccio: rimuovere auto-splitting opzioni, aggiungere `splitOptionIds` + ✂️ + riunisci
+- Stesso approccio: rimuovere auto-split azioni, unificare in `splitPositionIds`
 
-### Nessuna modifica a:
-- `useStrategyConfigurations.ts` — `quantity_abs` già supportato
-- `strategyReconciliation.ts` — matching con `quantity_abs` già funzionante
+**File: `src/pages/Derivatives.tsx`**
+- Dopo il salvataggio dal wizard, impostare `reconciliationCheckedRef.current = true` per evitare che la riconciliazione si riapra immediatamente. Aggiungere un flag `justSaved` che blocca il ricalcolo della riconciliazione per un ciclo.
+
+### Riepilogo
+- 4 file modificati
+- Fix critico: reconciliation non si apre più dopo il salvataggio
+- Azioni e opzioni raggruppate di default, splittabili on-demand con ✂️
+- Stessa UX coerente per tutti i tipi di posizione
 
