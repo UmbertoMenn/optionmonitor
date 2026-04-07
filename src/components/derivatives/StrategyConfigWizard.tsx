@@ -652,7 +652,7 @@ export function StrategyConfigWizard({
       startTransition(() => {
         const { strategies: restored, autoSplitIds } = restoreFromConfigs();
         setStrategies(restored);
-        setSplitOptionIds(autoSplitIds);
+        setSplitPositionIds(autoSplitIds);
       });
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
