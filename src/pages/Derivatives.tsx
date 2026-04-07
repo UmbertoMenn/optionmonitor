@@ -114,7 +114,7 @@ export function Derivatives() {
   const archiveMutation = useArchiveUnderlying();
   const unarchiveMutation = useUnarchiveUnderlying();
   
-  // Wrapper: save configs AND delete conflicting single overrides
+  // Wrapper: save configs AND delete conflicting single overrides + block reconciliation auto-open
   const handleSaveConfigs = useCallback(async (configs: UpsertConfigParams[]) => {
     // Find all derivative position IDs covered by the new configs
     const allDerivs = positions.filter(p => p.asset_type === 'derivative');
@@ -125,7 +125,6 @@ export function Derivatives() {
       for (const d of allDerivs) {
         const posUnderlying = (d.underlying || d.description || '').toUpperCase().trim();
         if (!posUnderlying.includes(configKey) && !configKey.includes(posUnderlying)) continue;
-        // Check if this position matches any signature in the config
         const sigs = config.position_signatures || [];
         for (const sig of sigs) {
           if (
@@ -153,6 +152,10 @@ export function Derivatives() {
         console.log(`[SaveConfigs] Deleted ${ids.length} conflicting single overrides`);
       }
     }
+    
+    // Block reconciliation from auto-opening after this save
+    justSavedRef.current = true;
+    reconciliationCheckedRef.current = true;
     
     // Save the configs
     await upsertBatch(configs);
@@ -455,9 +458,11 @@ export function Derivatives() {
   }, [searchParams, setSearchParams]);
 
   // Auto-open reconciliation dialog once per mount when discrepancies found
-  // (only if wizard is NOT already open)
+  // (only if wizard is NOT already open and we didn't just save)
+  const justSavedRef = useRef(false);
   useEffect(() => {
     if (reconciliationCheckedRef.current) return;
+    if (justSavedRef.current) { justSavedRef.current = false; return; }
     if (reconciliationItems.length > 0 && !isLoading && !wizardOpen) {
       reconciliationCheckedRef.current = true;
       setReconciliationOpen(true);

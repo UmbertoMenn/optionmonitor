@@ -385,7 +385,7 @@ export function StrategyConfigWizard({
   onArchive,
   onUnarchive,
 }: StrategyConfigWizardProps) {
-  // Build all available positions (derivatives as-is + split stocks) — skip when closed
+  // Build all available positions (derivatives as-is + stocks as-is) — skip when closed
   const allAvailable = useMemo(() => {
     if (!open) return [];
     const stocks = allPositions.filter(p => p.asset_type === 'stock');
@@ -397,46 +397,45 @@ export function StrategyConfigWizard({
     // Options enter the pool with their original quantity (no auto-splitting)
     const virtualDerivs: Position[] = [...derivs];
     
-    // Split stocks into 100-share virtual slots
-    const virtualStocks: Position[] = [];
-    for (const stock of stocks) {
-      if (stock.quantity >= 200) {
-        const slots = Math.floor(stock.quantity / 100);
-        for (let i = 0; i < slots; i++) {
-          virtualStocks.push({ ...stock, id: `${stock.id}__slot_${i}`, quantity: 100 });
-        }
-        const remainder = stock.quantity % 100;
-        if (remainder > 0) {
-          virtualStocks.push({ ...stock, id: `${stock.id}__slot_${slots}`, quantity: remainder });
-        }
-      } else {
-        virtualStocks.push(stock);
-      }
-    }
+    // Stocks enter the pool with original quantity (no auto-splitting)
+    const virtualStocks: Position[] = [...stocks];
     
     return [...virtualDerivs, ...virtualStocks];
   }, [open, derivatives, allPositions, filterUnderlyings]);
 
-  // Track which option positions the user has manually split
-  const [splitOptionIds, setSplitOptionIds] = useState<Set<string>>(new Set());
+  // Track which positions the user has manually split (options + stocks)
+  const [splitPositionIds, setSplitPositionIds] = useState<Set<string>>(new Set());
 
-  // Derive effective positions: if an option is in splitOptionIds, expand into virtual slots
+  // Derive effective positions: expand split options into single-contract slots, split stocks into 100-share slots
   const effectivePositions = useMemo(() => {
-    if (splitOptionIds.size === 0) return allAvailable;
+    if (splitPositionIds.size === 0) return allAvailable;
     const result: Position[] = [];
     for (const p of allAvailable) {
-      if (p.asset_type === 'derivative' && splitOptionIds.has(p.id) && Math.abs(p.quantity) > 1) {
-        const absQty = Math.abs(p.quantity);
-        const sign = p.quantity >= 0 ? 1 : -1;
-        for (let i = 0; i < absQty; i++) {
-          result.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+      if (splitPositionIds.has(p.id)) {
+        if (p.asset_type === 'derivative' && Math.abs(p.quantity) > 1) {
+          const absQty = Math.abs(p.quantity);
+          const sign = p.quantity >= 0 ? 1 : -1;
+          for (let i = 0; i < absQty; i++) {
+            result.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+          }
+        } else if ((p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200) {
+          const slots = Math.floor(p.quantity / 100);
+          for (let i = 0; i < slots; i++) {
+            result.push({ ...p, id: `${p.id}__slot_${i}`, quantity: 100 });
+          }
+          const remainder = p.quantity % 100;
+          if (remainder > 0) {
+            result.push({ ...p, id: `${p.id}__slot_${slots}`, quantity: remainder });
+          }
+        } else {
+          result.push(p);
         }
       } else {
         result.push(p);
       }
     }
     return result;
-  }, [allAvailable, splitOptionIds]);
+  }, [allAvailable, splitPositionIds]);
 
   // Group all positions by normalized underlying — skip when closed
   const underlyingGroups = useMemo((): UnderlyingGroup[] => {
@@ -491,16 +490,17 @@ export function StrategyConfigWizard({
     const restored: WizardStrategy[] = [];
     const autoSplitIds = new Set<string>();
 
-    // First pass: detect which options need splitting
+    // First pass: detect which positions need splitting
     // An option needs splitting if a config uses quantity_abs < |original quantity|
+    // A stock needs splitting if config has multiple linked_stock_slot_ids
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
       if (signatures.length === 0) continue;
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
 
+      // Check options
       for (const sig of signatures) {
         const qtyNeeded = sig.quantity_abs || 1;
-        // Find the original (non-split) option in allAvailable
         const originalOption = allAvailable.find(p => {
           if (p.asset_type !== 'derivative') return false;
           if (keyMapRestore.get(p.id) !== configUnderlyingKey) return false;
@@ -517,16 +517,42 @@ export function StrategyConfigWizard({
           autoSplitIds.add(originalOption.id);
         }
       }
+
+      // Check stocks: if config has multiple linked_stock_slot_ids, auto-split the stock
+      const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (savedSlotIds.length > 1) {
+        // Find the base stock ID from the slot IDs
+        for (const slotId of savedSlotIds) {
+          const baseStockId = slotId.replace(/__slot_\d+$/, '');
+          const stock = allAvailable.find(p => p.id === baseStockId && (p.asset_type === 'stock' || p.asset_type === 'etf'));
+          if (stock && stock.quantity >= 200) {
+            autoSplitIds.add(stock.id);
+          }
+        }
+      }
     }
 
     // Build effective positions for restore (with splits applied)
     const restorePositions: Position[] = [];
     for (const p of allAvailable) {
-      if (p.asset_type === 'derivative' && autoSplitIds.has(p.id) && Math.abs(p.quantity) > 1) {
-        const absQty = Math.abs(p.quantity);
-        const sign = p.quantity >= 0 ? 1 : -1;
-        for (let i = 0; i < absQty; i++) {
-          restorePositions.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+      if (autoSplitIds.has(p.id)) {
+        if (p.asset_type === 'derivative' && Math.abs(p.quantity) > 1) {
+          const absQty = Math.abs(p.quantity);
+          const sign = p.quantity >= 0 ? 1 : -1;
+          for (let i = 0; i < absQty; i++) {
+            restorePositions.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+          }
+        } else if ((p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200) {
+          const slots = Math.floor(p.quantity / 100);
+          for (let i = 0; i < slots; i++) {
+            restorePositions.push({ ...p, id: `${p.id}__slot_${i}`, quantity: 100 });
+          }
+          const remainder = p.quantity % 100;
+          if (remainder > 0) {
+            restorePositions.push({ ...p, id: `${p.id}__slot_${slots}`, quantity: remainder });
+          }
+        } else {
+          restorePositions.push(p);
         }
       } else {
         restorePositions.push(p);
@@ -626,7 +652,7 @@ export function StrategyConfigWizard({
       startTransition(() => {
         const { strategies: restored, autoSplitIds } = restoreFromConfigs();
         setStrategies(restored);
-        setSplitOptionIds(autoSplitIds);
+        setSplitPositionIds(autoSplitIds);
       });
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
@@ -831,19 +857,28 @@ export function StrategyConfigWizard({
   const totalUnassigned = effectivePositions.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
   const [archiveOpen, setArchiveOpen] = useState(false);
 
-  // Split option handler
-  const handleSplitOption = (posId: string) => {
-    setSplitOptionIds(prev => new Set(prev).add(posId));
+  // Split position handler (options or stocks)
+  const handleSplitPosition = (posId: string) => {
+    setSplitPositionIds(prev => new Set(prev).add(posId));
   };
 
-  // Rejoin option handler — only if no slots are assigned
-  const handleRejoinOption = (posId: string) => {
-    // Check if any virtual slot of this position is assigned
-    const absQty = Math.abs(allAvailable.find(p => p.id === posId)?.quantity || 0);
-    const slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+  // Rejoin handler — only if no slots are assigned
+  const handleRejoinPosition = (posId: string) => {
+    const pos = allAvailable.find(p => p.id === posId);
+    if (!pos) return;
+    // Determine slot pattern based on type
+    let slotIds: string[] = [];
+    if (pos.asset_type === 'derivative') {
+      const absQty = Math.abs(pos.quantity);
+      slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+    } else if (pos.asset_type === 'stock' || pos.asset_type === 'etf') {
+      const slots = Math.floor(pos.quantity / 100);
+      const hasRemainder = pos.quantity % 100 > 0;
+      slotIds = Array.from({ length: slots + (hasRemainder ? 1 : 0) }, (_, i) => `${posId}__slot_${i}`);
+    }
     const anyAssigned = slotIds.some(id => assignedIds.has(id));
-    if (anyAssigned) return; // can't rejoin if slots are assigned
-    setSplitOptionIds(prev => {
+    if (anyAssigned) return;
+    setSplitPositionIds(prev => {
       const next = new Set(prev);
       next.delete(posId);
       return next;
@@ -951,20 +986,37 @@ export function StrategyConfigWizard({
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {availablePositions.map(p => {
-                                const baseId = p.id.replace(/__opt_slot_\d+$/, '');
+                                const baseOptId = p.id.replace(/__opt_slot_\d+$/, '');
+                                const baseStockId = p.id.replace(/__slot_\d+$/, '');
                                 const isOptSlot = /__opt_slot_\d+$/.test(p.id);
+                                const isStockSlot = /__slot_\d+$/.test(p.id);
                                 const isGroupedOption = p.asset_type === 'derivative' && Math.abs(p.quantity) > 1 && !isOptSlot;
-                                const isSplitOption = isOptSlot;
-                                // Show rejoin only on first slot of a split group
-                                const isFirstSlot = isSplitOption && p.id.endsWith('__opt_slot_0');
-                                // Count unassigned sibling slots for rejoin check
-                                const canRejoin = isFirstSlot && (() => {
+                                const isGroupedStock = (p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200 && !isStockSlot;
+                                const canSplit = isGroupedOption || isGroupedStock;
+                                
+                                // Show rejoin on first slot of a split group
+                                const isFirstOptSlot = isOptSlot && p.id.endsWith('__opt_slot_0');
+                                const isFirstStockSlot = isStockSlot && p.id.endsWith('__slot_0');
+                                const canRejoin = (isFirstOptSlot || isFirstStockSlot) && (() => {
+                                  const baseId = isOptSlot ? baseOptId : baseStockId;
                                   const origPos = allAvailable.find(ap => ap.id === baseId);
                                   if (!origPos) return false;
-                                  const absQty = Math.abs(origPos.quantity);
-                                  const slotIds = Array.from({ length: absQty }, (_, i) => `${baseId}__opt_slot_${i}`);
+                                  let slotIds: string[];
+                                  if (isOptSlot) {
+                                    const absQty = Math.abs(origPos.quantity);
+                                    slotIds = Array.from({ length: absQty }, (_, i) => `${baseId}__opt_slot_${i}`);
+                                  } else {
+                                    const slots = Math.floor(origPos.quantity / 100);
+                                    const hasRem = origPos.quantity % 100 > 0;
+                                    slotIds = Array.from({ length: slots + (hasRem ? 1 : 0) }, (_, i) => `${baseId}__slot_${i}`);
+                                  }
                                   return slotIds.every(id => !assignedIds.has(id));
                                 })();
+
+                                const splitTooltip = isGroupedOption
+                                  ? `Dividi in ${Math.abs(p.quantity)} contratti singoli`
+                                  : `Dividi in slot da 100 azioni`;
+                                const rejoinBaseId = isOptSlot ? baseOptId : baseStockId;
 
                                 return (
                                   <div key={p.id} className="inline-flex items-center gap-0.5">
@@ -982,19 +1034,19 @@ export function StrategyConfigWizard({
                                       />
                                       {positionLabel(p)}
                                     </label>
-                                    {isGroupedOption && (
+                                    {canSplit && (
                                       <TooltipProvider delayDuration={200}>
                                         <Tooltip>
                                           <TooltipTrigger asChild>
                                             <button
                                               className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                                              onClick={(e) => { e.preventDefault(); handleSplitOption(p.id); }}
+                                              onClick={(e) => { e.preventDefault(); handleSplitPosition(p.id); }}
                                             >
                                               <Scissors className="w-3.5 h-3.5" />
                                             </button>
                                           </TooltipTrigger>
                                           <TooltipContent side="top" className="text-xs">
-                                            Dividi in {Math.abs(p.quantity)} contratti singoli
+                                            {splitTooltip}
                                           </TooltipContent>
                                         </Tooltip>
                                       </TooltipProvider>
@@ -1005,13 +1057,13 @@ export function StrategyConfigWizard({
                                           <TooltipTrigger asChild>
                                             <button
                                               className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                                              onClick={(e) => { e.preventDefault(); handleRejoinOption(baseId); }}
+                                              onClick={(e) => { e.preventDefault(); handleRejoinPosition(rejoinBaseId); }}
                                             >
                                               <Merge className="w-3.5 h-3.5" />
                                             </button>
                                           </TooltipTrigger>
                                           <TooltipContent side="top" className="text-xs">
-                                            Riunisci contratti
+                                            Riunisci
                                           </TooltipContent>
                                         </Tooltip>
                                       </TooltipProvider>
