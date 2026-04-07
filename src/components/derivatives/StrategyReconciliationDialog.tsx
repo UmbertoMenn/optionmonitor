@@ -580,10 +580,42 @@ export function StrategyReconciliationDialog({
           <div className="space-y-3 pb-4 pt-2">
             {entries.map(([key, state]) => {
               const selectedSet = selectedByGroup.get(key) || new Set<string>();
-              const available = state.availablePositions.filter(p => !assignedIds.has(p.id));
+              // Derive effective available positions considering splits
+              const rawAvailable = state.availablePositions.filter(p => !assignedIds.has(p.id));
+              const effectiveAvailable: Position[] = [];
+              for (const p of rawAvailable) {
+                if (p.asset_type === 'derivative' && splitOptionIds.has(p.id) && Math.abs(p.quantity) > 1) {
+                  const absQty = Math.abs(p.quantity);
+                  const sign = p.quantity >= 0 ? 1 : -1;
+                  for (let i = 0; i < absQty; i++) {
+                    effectiveAvailable.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+                  }
+                } else {
+                  effectiveAvailable.push(p);
+                }
+              }
+              const available = effectiveAvailable;
               const selectedCount = available.filter(p => selectedSet.has(p.id)).length;
               const missingCount = state.missingLegs.length;
               const newCount = available.filter(p => p.asset_type === 'derivative').length;
+
+              const handleSplitOption = (posId: string) => {
+                setSplitOptionIds(prev => new Set(prev).add(posId));
+              };
+
+              const handleRejoinOption = (posId: string) => {
+                const origPos = rawAvailable.find(p => p.id === posId);
+                if (!origPos) return;
+                const absQty = Math.abs(origPos.quantity);
+                const slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+                const anyAssigned = slotIds.some(id => assignedIds.has(id));
+                if (anyAssigned) return;
+                setSplitOptionIds(prev => {
+                  const next = new Set(prev);
+                  next.delete(posId);
+                  return next;
+                });
+              };
 
               return (
                 <Collapsible key={key} defaultOpen>
@@ -653,23 +685,73 @@ export function StrategyReconciliationDialog({
                               )}
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {available.map(p => (
-                                <label
-                                  key={p.id}
-                                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
-                                    selectedSet.has(p.id)
-                                      ? 'bg-primary/10 border-primary'
-                                      : 'hover:bg-muted/50'
-                                  } ${positionBadgeClass(p)}`}
-                                >
-                                  <Checkbox
-                                    checked={selectedSet.has(p.id)}
-                                    onCheckedChange={() => toggleSelected(key, p.id)}
-                                    className="w-3.5 h-3.5"
-                                  />
-                                  {positionLabel(p)}
-                                </label>
-                              ))}
+                              {available.map(p => {
+                                const baseId = p.id.replace(/__opt_slot_\d+$/, '');
+                                const isOptSlot = /__opt_slot_\d+$/.test(p.id);
+                                const isGroupedOption = p.asset_type === 'derivative' && Math.abs(p.quantity) > 1 && !isOptSlot;
+                                const isSplitOption = isOptSlot;
+                                const isFirstSlot = isSplitOption && p.id.endsWith('__opt_slot_0');
+                                const canRejoin = isFirstSlot && (() => {
+                                  const origPos = rawAvailable.find(ap => ap.id === baseId);
+                                  if (!origPos) return false;
+                                  const absQty = Math.abs(origPos.quantity);
+                                  const slotIds = Array.from({ length: absQty }, (_, i) => `${baseId}__opt_slot_${i}`);
+                                  return slotIds.every(id => !assignedIds.has(id));
+                                })();
+
+                                return (
+                                  <div key={p.id} className="inline-flex items-center gap-0.5">
+                                    <label
+                                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
+                                        selectedSet.has(p.id)
+                                          ? 'bg-primary/10 border-primary'
+                                          : 'hover:bg-muted/50'
+                                      } ${positionBadgeClass(p)}`}
+                                    >
+                                      <Checkbox
+                                        checked={selectedSet.has(p.id)}
+                                        onCheckedChange={() => toggleSelected(key, p.id)}
+                                        className="w-3.5 h-3.5"
+                                      />
+                                      {positionLabel(p)}
+                                    </label>
+                                    {isGroupedOption && (
+                                      <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                                              onClick={(e) => { e.preventDefault(); handleSplitOption(p.id); }}
+                                            >
+                                              <Scissors className="w-3.5 h-3.5" />
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="text-xs">
+                                            Dividi in {Math.abs(p.quantity)} contratti singoli
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
+                                    {canRejoin && (
+                                      <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                                              onClick={(e) => { e.preventDefault(); handleRejoinOption(baseId); }}
+                                            >
+                                              <Merge className="w-3.5 h-3.5" />
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="text-xs">
+                                            Riunisci contratti
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
