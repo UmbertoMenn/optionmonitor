@@ -102,27 +102,29 @@ function detectStrategyType(positions: Position[]): string {
 }
 
 function buildSignatures(positions: Position[]): PositionSignature[] {
-  const sigMap = new Map<string, PositionSignature & { count: number }>();
+  const sigMap = new Map<string, PositionSignature & { totalQty: number }>();
   for (const o of positions) {
     if (o.asset_type !== 'derivative') continue;
     const baseId = o.id.replace(/__opt_slot_\d+$/, '');
     const sigKey = `${baseId}::${(o.option_type || '').toLowerCase()}::${o.strike_price || 0}::${o.expiry_date || ''}::${o.quantity >= 0 ? 1 : -1}`;
     if (sigMap.has(sigKey)) {
-      sigMap.get(sigKey)!.count++;
+      const isSlot = /__opt_slot_\d+$/.test(o.id);
+      sigMap.get(sigKey)!.totalQty += isSlot ? 1 : Math.abs(o.quantity);
     } else {
+      const isSlot = /__opt_slot_\d+$/.test(o.id);
       sigMap.set(sigKey, {
         option_type: o.option_type || 'unknown',
         strike: o.strike_price || 0,
         expiry: o.expiry_date || '',
         quantity_sign: o.quantity >= 0 ? 1 : -1,
         quantity_abs: 1,
-        count: 1,
+        totalQty: isSlot ? 1 : Math.abs(o.quantity),
       });
     }
   }
-  return Array.from(sigMap.values()).map(({ count, ...sig }) => ({
+  return Array.from(sigMap.values()).map(({ totalQty, ...sig }) => ({
     ...sig,
-    quantity_abs: count,
+    quantity_abs: totalQty,
   }));
 }
 
