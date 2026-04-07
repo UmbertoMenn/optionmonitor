@@ -455,9 +455,11 @@ export function Derivatives() {
   }, [searchParams, setSearchParams]);
 
   // Auto-open reconciliation dialog once per mount when discrepancies found
-  // (only if wizard is NOT already open)
+  // (only if wizard is NOT already open and we didn't just save)
+  const justSavedRef = useRef(false);
   useEffect(() => {
     if (reconciliationCheckedRef.current) return;
+    if (justSavedRef.current) { justSavedRef.current = false; return; }
     if (reconciliationItems.length > 0 && !isLoading && !wizardOpen) {
       reconciliationCheckedRef.current = true;
       setReconciliationOpen(true);
