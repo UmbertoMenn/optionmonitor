@@ -9,7 +9,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight, Search, Trash2, Archive, RotateCcw } from 'lucide-react';
+import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight, Search, Trash2, Archive, RotateCcw, Scissors, Merge } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
@@ -61,28 +62,31 @@ interface StrategyConfigWizardProps {
 }
 
 function buildSignatures(positions: Position[]): PositionSignature[] {
-  // Group derivative slots by base ID to count quantity_abs per signature
-  const sigMap = new Map<string, PositionSignature & { count: number }>();
+  // Group derivative positions by signature key, summing quantities
+  const sigMap = new Map<string, PositionSignature & { totalQty: number }>();
   for (const o of positions) {
     if (o.asset_type !== 'derivative') continue;
     const baseId = o.id.replace(/__opt_slot_\d+$/, '');
     const sigKey = `${baseId}::${(o.option_type || '').toLowerCase()}::${o.strike_price || 0}::${o.expiry_date || ''}::${o.quantity >= 0 ? 1 : -1}`;
     if (sigMap.has(sigKey)) {
-      sigMap.get(sigKey)!.count++;
+      // For split slots, each contributes 1; for grouped positions, contribute |quantity|
+      const isSlot = /__opt_slot_\d+$/.test(o.id);
+      sigMap.get(sigKey)!.totalQty += isSlot ? 1 : Math.abs(o.quantity);
     } else {
+      const isSlot = /__opt_slot_\d+$/.test(o.id);
       sigMap.set(sigKey, {
         option_type: o.option_type || 'unknown',
         strike: o.strike_price || 0,
         expiry: o.expiry_date || '',
         quantity_sign: o.quantity >= 0 ? 1 : -1,
         quantity_abs: 1,
-        count: 1,
+        totalQty: isSlot ? 1 : Math.abs(o.quantity),
       });
     }
   }
-  return Array.from(sigMap.values()).map(({ count, ...sig }) => ({
+  return Array.from(sigMap.values()).map(({ totalQty, ...sig }) => ({
     ...sig,
-    quantity_abs: count,
+    quantity_abs: totalQty,
   }));
 }
 
@@ -381,7 +385,7 @@ export function StrategyConfigWizard({
   onArchive,
   onUnarchive,
 }: StrategyConfigWizardProps) {
-  // Build all available positions (derivatives + split stocks) — skip when closed
+  // Build all available positions (derivatives as-is + split stocks) — skip when closed
   const allAvailable = useMemo(() => {
     if (!open) return [];
     const stocks = allPositions.filter(p => p.asset_type === 'stock');
@@ -390,19 +394,8 @@ export function StrategyConfigWizard({
       derivs = derivs.filter(d => filterUnderlyings.includes(d.underlying || ''));
     }
     
-    // Split derivative contracts with |quantity| > 1 into virtual single-contract slots
-    const virtualDerivs: Position[] = [];
-    for (const d of derivs) {
-      const absQty = Math.abs(d.quantity);
-      if (absQty > 1) {
-        const sign = d.quantity >= 0 ? 1 : -1;
-        for (let i = 0; i < absQty; i++) {
-          virtualDerivs.push({ ...d, id: `${d.id}__opt_slot_${i}`, quantity: sign * 1 });
-        }
-      } else {
-        virtualDerivs.push(d);
-      }
-    }
+    // Options enter the pool with their original quantity (no auto-splitting)
+    const virtualDerivs: Position[] = [...derivs];
     
     // Split stocks into 100-share virtual slots
     const virtualStocks: Position[] = [];
@@ -424,18 +417,39 @@ export function StrategyConfigWizard({
     return [...virtualDerivs, ...virtualStocks];
   }, [open, derivatives, allPositions, filterUnderlyings]);
 
+  // Track which option positions the user has manually split
+  const [splitOptionIds, setSplitOptionIds] = useState<Set<string>>(new Set());
+
+  // Derive effective positions: if an option is in splitOptionIds, expand into virtual slots
+  const effectivePositions = useMemo(() => {
+    if (splitOptionIds.size === 0) return allAvailable;
+    const result: Position[] = [];
+    for (const p of allAvailable) {
+      if (p.asset_type === 'derivative' && splitOptionIds.has(p.id) && Math.abs(p.quantity) > 1) {
+        const absQty = Math.abs(p.quantity);
+        const sign = p.quantity >= 0 ? 1 : -1;
+        for (let i = 0; i < absQty; i++) {
+          result.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+        }
+      } else {
+        result.push(p);
+      }
+    }
+    return result;
+  }, [allAvailable, splitOptionIds]);
+
   // Group all positions by normalized underlying — skip when closed
   const underlyingGroups = useMemo((): UnderlyingGroup[] => {
     if (!open) return [];
     const groupMap = new Map<string, { displayName: string; positions: Position[] }>();
-    const derivsOnlyForGroups = allAvailable.filter(p => p.asset_type === 'derivative');
+    const derivsOnlyForGroups = effectivePositions.filter(p => p.asset_type === 'derivative');
     // Pre-compute underlying key map for O(n) total instead of O(n²)
     const keyMapForGroups = new Map<string, string>();
-    for (const p of allAvailable) {
+    for (const p of effectivePositions) {
       keyMapForGroups.set(p.id, getUnderlyingKey(p, derivsOnlyForGroups));
     }
 
-    for (const p of allAvailable) {
+    for (const p of effectivePositions) {
       const key = keyMapForGroups.get(p.id) || getUnderlyingKey(p, derivsOnlyForGroups);
       if (!groupMap.has(key)) {
         let display = key;
@@ -452,7 +466,7 @@ export function StrategyConfigWizard({
     return Array.from(groupMap.entries())
       .map(([key, { displayName, positions }]) => ({ key, displayName, positions }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [open, allAvailable]);
+  }, [open, effectivePositions]);
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());
@@ -465,9 +479,9 @@ export function StrategyConfigWizard({
     return ids;
   }, [strategies]);
 
-  const restoreFromConfigs = useCallback((): WizardStrategy[] => {
-    if (!existingConfigs || existingConfigs.length === 0) return [];
-    // Pre-compute key map once for O(n) lookups
+  const restoreFromConfigs = useCallback((): { strategies: WizardStrategy[], autoSplitIds: Set<string> } => {
+    if (!existingConfigs || existingConfigs.length === 0) return { strategies: [], autoSplitIds: new Set() };
+    // Work with allAvailable (non-split options) to detect which ones need splitting
     const derivsOnlyRestore = allAvailable.filter(pp => pp.asset_type === 'derivative');
     const keyMapRestore = new Map<string, string>();
     for (const p of allAvailable) {
@@ -475,13 +489,63 @@ export function StrategyConfigWizard({
     }
     const usedIds = new Set<string>();
     const restored: WizardStrategy[] = [];
+    const autoSplitIds = new Set<string>();
+
+    // First pass: detect which options need splitting
+    // An option needs splitting if a config uses quantity_abs < |original quantity|
+    for (const config of existingConfigs) {
+      const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
+      if (signatures.length === 0) continue;
+      const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+
+      for (const sig of signatures) {
+        const qtyNeeded = sig.quantity_abs || 1;
+        // Find the original (non-split) option in allAvailable
+        const originalOption = allAvailable.find(p => {
+          if (p.asset_type !== 'derivative') return false;
+          if (keyMapRestore.get(p.id) !== configUnderlyingKey) return false;
+          const optType = (p.option_type || '').toLowerCase();
+          const sigType = (sig.option_type || '').toLowerCase();
+          if (optType !== sigType) return false;
+          if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) return false;
+          if ((p.expiry_date || '') !== (sig.expiry || '')) return false;
+          const posSign = p.quantity >= 0 ? 1 : -1;
+          if (posSign !== sig.quantity_sign) return false;
+          return true;
+        });
+        if (originalOption && Math.abs(originalOption.quantity) > 1 && qtyNeeded < Math.abs(originalOption.quantity)) {
+          autoSplitIds.add(originalOption.id);
+        }
+      }
+    }
+
+    // Build effective positions for restore (with splits applied)
+    const restorePositions: Position[] = [];
+    for (const p of allAvailable) {
+      if (p.asset_type === 'derivative' && autoSplitIds.has(p.id) && Math.abs(p.quantity) > 1) {
+        const absQty = Math.abs(p.quantity);
+        const sign = p.quantity >= 0 ? 1 : -1;
+        for (let i = 0; i < absQty; i++) {
+          restorePositions.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
+        }
+      } else {
+        restorePositions.push(p);
+      }
+    }
+
+    // Re-compute key map for restore positions
+    const derivsOnlyRestore2 = restorePositions.filter(pp => pp.asset_type === 'derivative');
+    const keyMapRestore2 = new Map<string, string>();
+    for (const p of restorePositions) {
+      keyMapRestore2.set(p.id, getUnderlyingKey(p, derivsOnlyRestore2));
+    }
 
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
       if (signatures.length === 0) continue;
 
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-      const groupPositions = allAvailable.filter(p => keyMapRestore.get(p.id) === configUnderlyingKey);
+      const groupPositions = restorePositions.filter(p => keyMapRestore2.get(p.id) === configUnderlyingKey);
 
       const matched: Position[] = [];
 
@@ -520,7 +584,6 @@ export function StrategyConfigWizard({
           }
         }
       } else if (config.linked_stock_id) {
-        // Legacy fallback: try exact match or prefix match
         const stockSlot = groupPositions.find(p =>
           !usedIds.has(p.id) &&
           p.asset_type === 'stock' &&
@@ -552,7 +615,7 @@ export function StrategyConfigWizard({
       }
     }
 
-    return restored;
+    return { strategies: restored, autoSplitIds };
   }, [existingConfigs, allAvailable]);
 
   // Restore saved configs when wizard opens — use ref to avoid re-running on reactive updates
@@ -561,8 +624,9 @@ export function StrategyConfigWizard({
     if (open && !hasInitialized.current) {
       hasInitialized.current = true;
       startTransition(() => {
-        const restored = restoreFromConfigs();
+        const { strategies: restored, autoSplitIds } = restoreFromConfigs();
         setStrategies(restored);
+        setSplitOptionIds(autoSplitIds);
       });
       setSelectedIdsByGroup(new Map());
       setSearchQuery('');
@@ -661,7 +725,7 @@ export function StrategyConfigWizard({
         positions: strat.positions.map(p => {
           if (p.asset_type !== 'stock') return p;
           // Find matching virtual slot in allAvailable
-          const slot = allAvailable.find(a =>
+          const slot = effectivePositions.find(a =>
             (a.id.startsWith(p.id + '__slot_') || a.id === p.id) && !usedSlotIds.has(a.id)
           );
           if (slot && slot.id !== p.id) {
@@ -764,10 +828,29 @@ export function StrategyConfigWizard({
     underlyingGroups.filter(g => archivedKeys.includes(g.key)).forEach(g => g.positions.forEach(p => ids.add(p.id)));
     return ids;
   }, [underlyingGroups, archivedKeys]);
-  const totalUnassigned = allAvailable.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
+  const totalUnassigned = effectivePositions.filter(p => !assignedIds.has(p.id) && !archivedPosIds.has(p.id)).length;
   const [archiveOpen, setArchiveOpen] = useState(false);
 
-  if (allAvailable.length === 0) return null;
+  // Split option handler
+  const handleSplitOption = (posId: string) => {
+    setSplitOptionIds(prev => new Set(prev).add(posId));
+  };
+
+  // Rejoin option handler — only if no slots are assigned
+  const handleRejoinOption = (posId: string) => {
+    // Check if any virtual slot of this position is assigned
+    const absQty = Math.abs(allAvailable.find(p => p.id === posId)?.quantity || 0);
+    const slotIds = Array.from({ length: absQty }, (_, i) => `${posId}__opt_slot_${i}`);
+    const anyAssigned = slotIds.some(id => assignedIds.has(id));
+    if (anyAssigned) return; // can't rejoin if slots are assigned
+    setSplitOptionIds(prev => {
+      const next = new Set(prev);
+      next.delete(posId);
+      return next;
+    });
+  };
+
+  if (effectivePositions.length === 0) return null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -867,23 +950,75 @@ export function StrategyConfigWizard({
                               )}
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                              {availablePositions.map(p => (
-                                <label
-                                  key={p.id}
-                                  className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
-                                    selectedSet.has(p.id)
-                                      ? 'bg-primary/10 border-primary'
-                                      : 'hover:bg-muted/50'
-                                  } ${positionBadgeClass(p)}`}
-                                >
-                                  <Checkbox
-                                    checked={selectedSet.has(p.id)}
-                                    onCheckedChange={() => toggleSelected(group.key, p.id)}
-                                    className="w-3.5 h-3.5"
-                                  />
-                                  {positionLabel(p)}
-                                </label>
-                              ))}
+                              {availablePositions.map(p => {
+                                const baseId = p.id.replace(/__opt_slot_\d+$/, '');
+                                const isOptSlot = /__opt_slot_\d+$/.test(p.id);
+                                const isGroupedOption = p.asset_type === 'derivative' && Math.abs(p.quantity) > 1 && !isOptSlot;
+                                const isSplitOption = isOptSlot;
+                                // Show rejoin only on first slot of a split group
+                                const isFirstSlot = isSplitOption && p.id.endsWith('__opt_slot_0');
+                                // Count unassigned sibling slots for rejoin check
+                                const canRejoin = isFirstSlot && (() => {
+                                  const origPos = allAvailable.find(ap => ap.id === baseId);
+                                  if (!origPos) return false;
+                                  const absQty = Math.abs(origPos.quantity);
+                                  const slotIds = Array.from({ length: absQty }, (_, i) => `${baseId}__opt_slot_${i}`);
+                                  return slotIds.every(id => !assignedIds.has(id));
+                                })();
+
+                                return (
+                                  <div key={p.id} className="inline-flex items-center gap-0.5">
+                                    <label
+                                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-xs cursor-pointer transition-colors ${
+                                        selectedSet.has(p.id)
+                                          ? 'bg-primary/10 border-primary'
+                                          : 'hover:bg-muted/50'
+                                      } ${positionBadgeClass(p)}`}
+                                    >
+                                      <Checkbox
+                                        checked={selectedSet.has(p.id)}
+                                        onCheckedChange={() => toggleSelected(group.key, p.id)}
+                                        className="w-3.5 h-3.5"
+                                      />
+                                      {positionLabel(p)}
+                                    </label>
+                                    {isGroupedOption && (
+                                      <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                                              onClick={(e) => { e.preventDefault(); handleSplitOption(p.id); }}
+                                            >
+                                              <Scissors className="w-3.5 h-3.5" />
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="text-xs">
+                                            Dividi in {Math.abs(p.quantity)} contratti singoli
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
+                                    {canRejoin && (
+                                      <TooltipProvider delayDuration={200}>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <button
+                                              className="p-0.5 rounded hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                                              onClick={(e) => { e.preventDefault(); handleRejoinOption(baseId); }}
+                                            >
+                                              <Merge className="w-3.5 h-3.5" />
+                                            </button>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="text-xs">
+                                            Riunisci contratti
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
