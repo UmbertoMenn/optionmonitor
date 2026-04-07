@@ -486,21 +486,24 @@ export function StrategyConfigWizard({
       const matched: Position[] = [];
 
       for (const sig of signatures) {
-        const match = groupPositions.find(p => {
-          if (usedIds.has(p.id)) return false;
-          if (p.asset_type !== 'derivative') return false;
-          const optType = (p.option_type || '').toLowerCase();
-          const sigType = (sig.option_type || '').toLowerCase();
-          if (optType !== sigType) return false;
-          if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) return false;
-          if ((p.expiry_date || '') !== (sig.expiry || '')) return false;
-          const posSign = p.quantity >= 0 ? 1 : -1;
-          if (posSign !== sig.quantity_sign) return false;
-          return true;
-        });
-        if (match) {
-          usedIds.add(match.id);
-          matched.push(match);
+        const qtyNeeded = sig.quantity_abs || 1;
+        for (let qi = 0; qi < qtyNeeded; qi++) {
+          const match = groupPositions.find(p => {
+            if (usedIds.has(p.id)) return false;
+            if (p.asset_type !== 'derivative') return false;
+            const optType = (p.option_type || '').toLowerCase();
+            const sigType = (sig.option_type || '').toLowerCase();
+            if (optType !== sigType) return false;
+            if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) return false;
+            if ((p.expiry_date || '') !== (sig.expiry || '')) return false;
+            const posSign = p.quantity >= 0 ? 1 : -1;
+            if (posSign !== sig.quantity_sign) return false;
+            return true;
+          });
+          if (match) {
+            usedIds.add(match.id);
+            matched.push(match);
+          }
         }
       }
 
