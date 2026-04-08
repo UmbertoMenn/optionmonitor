@@ -108,6 +108,8 @@ export interface GroupedOtherStrategy {
   totalPremium: number;
   totalProfitLoss: number;
   strategyName: string | null;
+  configId?: string;
+  configStrategyType?: string;
 }
 
 export interface DerivativeCategories {
