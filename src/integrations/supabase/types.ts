@@ -1117,6 +1117,7 @@ export type Database = {
           linked_stock_slot_ids: Json
           portfolio_id: string
           position_signatures: Json
+          sort_order: number
           strategy_type: string
           underlying: string
           updated_at: string | null
@@ -1129,6 +1130,7 @@ export type Database = {
           linked_stock_slot_ids?: Json
           portfolio_id: string
           position_signatures?: Json
+          sort_order?: number
           strategy_type: string
           underlying: string
           updated_at?: string | null
@@ -1141,6 +1143,7 @@ export type Database = {
           linked_stock_slot_ids?: Json
           portfolio_id?: string
           position_signatures?: Json
+          sort_order?: number
           strategy_type?: string
           underlying?: string
           updated_at?: string | null
