@@ -37,8 +37,8 @@ function positionLabel(p: Position): string {
   if (p.asset_type === 'stock' || p.asset_type === 'etf') {
     const slotMatch = p.id.match(/__slot_(\d+)$/);
     if (slotMatch) {
-      const slotNum = parseInt(slotMatch[1]) + 1;
-      return `${p.description} (${p.quantity} azioni) [slot ${slotNum}]`;
+      const letter = String.fromCharCode(65 + parseInt(slotMatch[1]));
+      return `${p.description} (${p.quantity} azioni) (${letter})`;
     }
     return `${p.description} (${p.quantity} azioni)`;
   }
