@@ -64,7 +64,7 @@ export function useStrategyConfigurations() {
       if (!portfolioId) return [];
       
       if (isGlobalAggregated && isAdmin) {
-        const { data, error } = await supabase.from('strategy_configurations').select('*');
+      const { data, error } = await supabase.from('strategy_configurations').select('*').order('sort_order', { ascending: true });
         if (error) throw error;
         return (data || []) as unknown as StrategyConfiguration[];
       }
