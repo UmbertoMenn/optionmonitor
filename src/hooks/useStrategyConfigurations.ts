@@ -79,7 +79,7 @@ export function useStrategyConfigurations() {
       }
       
       const { data, error } = await supabase
-        .from('strategy_configurations').select('*').eq('portfolio_id', portfolioId);
+        .from('strategy_configurations').select('*').eq('portfolio_id', portfolioId).order('sort_order', { ascending: true });
       if (error) throw error;
       return (data || []) as unknown as StrategyConfiguration[];
     },
