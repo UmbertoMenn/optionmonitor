@@ -1,22 +1,15 @@
 
 
-## Fix: Label confusionale per derivati splittati
+## Fix definitivo: Persistenza strategie derivati
 
-### Problema
-Quando un'opzione viene splittata, il label mostra `[1]`, `[2]`, `[3]` — che sembra indicare la quantità anziché il numero dello slot.
+### Problema risolto
+Salvando 3 strategie per lo stesso sottostante (es. GOOGLE), il sistema ne mostrava solo 2 a causa di deduplicazione automatica per `underlying + strategy_type`.
 
-### Soluzione
-Sostituire `[1]`, `[2]`, `[3]` con lettere: `(A)`, `(B)`, `(C)`. Le lettere non possono essere confuse con quantità numeriche e sono immediatamente comprensibili come identificatori di slot.
+### Modifiche applicate
 
-Esempio: `AAPL V CALL 250 GIU/25 (A)` invece di `AAPL V CALL 250 GIU/25 [1]`
-
-Stesso approccio per gli slot azioni: `AAPL (100 azioni) (A)` invece di `AAPL (100 azioni) [slot 1]`
-
-### File da modificare
-
-**`src/components/derivatives/StrategyConfigWizard.tsx`** — funzione `positionLabel()` (righe 93-115):
-- Slot opzioni: `[${slotNum}]` → `(${letter})`  dove letter = A, B, C...
-- Slot azioni: `[slot ${slotNum}]` → `(${letter})`
-
-**`src/components/derivatives/StrategyReconciliationDialog.tsx`** — stessa funzione `positionLabel()` (riga 36+): identiche modifiche
-
+1. **Database**: rimosso vincolo UNIQUE su `(portfolio_id, underlying, strategy_type)`, aggiunto campo `sort_order`
+2. **useStrategyConfigurations.ts**: rimossa deduplicazione in `upsertBatch`, lettura ordinata per `sort_order`, `upsert` singolo convertito in `insert`
+3. **StrategyConfigWizard.tsx**: rimossa deduplicazione in `handleSave`, aggiunto `sort_order` progressivo
+4. **derivativeStrategies.ts**: in config-only mode, ogni config produce un `GroupedOtherStrategy` separato (non più raggruppato per underlying); aggiunto `configId` e `configStrategyType` a `GroupedOtherStrategy`
+5. **Derivatives.tsx**: classificazione put_spread/diagonal_put_spread usa `configStrategyType` dal gruppo, non più `find()` per underlying
+6. **StrategyReconciliationDialog.tsx**: `handleSave` aggiunge `sort_order` progressivo
