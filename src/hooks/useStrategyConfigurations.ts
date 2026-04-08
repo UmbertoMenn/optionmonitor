@@ -92,7 +92,7 @@ export function useStrategyConfigurations() {
       if (!portfolioId) throw new Error('No portfolio selected');
       const { data, error } = await supabase
         .from('strategy_configurations')
-        .upsert({
+        .insert({
           portfolio_id: portfolioId,
           underlying: params.underlying,
           strategy_type: params.strategy_type,
@@ -100,7 +100,8 @@ export function useStrategyConfigurations() {
           is_synthetic: params.is_synthetic || false,
           linked_stock_id: params.linked_stock_id || null,
           linked_stock_slot_ids: (params.linked_stock_slot_ids || []) as any,
-        }, { onConflict: 'portfolio_id,underlying,strategy_type' })
+          sort_order: params.sort_order ?? 0,
+        })
         .select().single();
       if (error) throw error;
       return data;
