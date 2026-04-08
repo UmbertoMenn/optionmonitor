@@ -23,6 +23,7 @@ export interface StrategyConfiguration {
   is_synthetic: boolean;
   linked_stock_id: string | null;
   linked_stock_slot_ids: string[];
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +35,7 @@ export interface UpsertConfigParams {
   is_synthetic?: boolean;
   linked_stock_id?: string | null;
   linked_stock_slot_ids?: string[];
+  sort_order?: number;
 }
 
 export const STRATEGY_TYPE_LABELS: Record<string, string> = {
@@ -63,7 +65,7 @@ export function useStrategyConfigurations() {
       if (!portfolioId) return [];
       
       if (isGlobalAggregated && isAdmin) {
-        const { data, error } = await supabase.from('strategy_configurations').select('*');
+      const { data, error } = await supabase.from('strategy_configurations').select('*').order('sort_order', { ascending: true });
         if (error) throw error;
         return (data || []) as unknown as StrategyConfiguration[];
       }
@@ -71,13 +73,14 @@ export function useStrategyConfigurations() {
       if (isUserAggregated && userPortfolioIds.length > 0) {
         const { data, error } = await supabase
           .from('strategy_configurations').select('*')
-          .in('portfolio_id', userPortfolioIds);
+          .in('portfolio_id', userPortfolioIds)
+          .order('sort_order', { ascending: true });
         if (error) throw error;
         return (data || []) as unknown as StrategyConfiguration[];
       }
       
       const { data, error } = await supabase
-        .from('strategy_configurations').select('*').eq('portfolio_id', portfolioId);
+        .from('strategy_configurations').select('*').eq('portfolio_id', portfolioId).order('sort_order', { ascending: true });
       if (error) throw error;
       return (data || []) as unknown as StrategyConfiguration[];
     },
@@ -89,7 +92,7 @@ export function useStrategyConfigurations() {
       if (!portfolioId) throw new Error('No portfolio selected');
       const { data, error } = await supabase
         .from('strategy_configurations')
-        .upsert({
+        .insert({
           portfolio_id: portfolioId,
           underlying: params.underlying,
           strategy_type: params.strategy_type,
@@ -97,7 +100,8 @@ export function useStrategyConfigurations() {
           is_synthetic: params.is_synthetic || false,
           linked_stock_id: params.linked_stock_id || null,
           linked_stock_slot_ids: (params.linked_stock_slot_ids || []) as any,
-        }, { onConflict: 'portfolio_id,underlying,strategy_type' })
+          sort_order: params.sort_order ?? 0,
+        })
         .select().single();
       if (error) throw error;
       return data;
@@ -120,24 +124,8 @@ export function useStrategyConfigurations() {
       
       if (configs.length === 0) return;
       
-      // Deduplicate by (underlying, strategy_type) as safety net
-      const deduped = new Map<string, UpsertConfigParams>();
-      for (const c of configs) {
-        const key = `${c.underlying}::${c.strategy_type}`;
-        if (deduped.has(key)) {
-          const existing = deduped.get(key)!;
-          existing.position_signatures = [...existing.position_signatures, ...c.position_signatures];
-          if (c.is_synthetic) existing.is_synthetic = true;
-          if (c.linked_stock_id && !existing.linked_stock_id) existing.linked_stock_id = c.linked_stock_id;
-          // Merge slot ids uniquely
-          const mergedSlots = new Set([...(existing.linked_stock_slot_ids || []), ...(c.linked_stock_slot_ids || [])]);
-          existing.linked_stock_slot_ids = Array.from(mergedSlots);
-        } else {
-          deduped.set(key, { ...c });
-        }
-      }
-      
-      const rows = Array.from(deduped.values()).map(c => ({
+      // Save each config as a separate row with sort_order — NO deduplication
+      const rows = configs.map((c, index) => ({
         portfolio_id: portfolioId,
         underlying: c.underlying,
         strategy_type: c.strategy_type,
@@ -145,6 +133,7 @@ export function useStrategyConfigurations() {
         is_synthetic: c.is_synthetic || false,
         linked_stock_id: c.linked_stock_id || null,
         linked_stock_slot_ids: (c.linked_stock_slot_ids || []) as any,
+        sort_order: c.sort_order ?? index,
       }));
       
       const { error } = await supabase.from('strategy_configurations').insert(rows);

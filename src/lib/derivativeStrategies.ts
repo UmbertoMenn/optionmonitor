@@ -108,6 +108,8 @@ export interface GroupedOtherStrategy {
   totalPremium: number;
   totalProfitLoss: number;
   strategyName: string | null;
+  configId?: string;
+  configStrategyType?: string;
 }
 
 export interface DerivativeCategories {
@@ -194,6 +196,7 @@ export function categorizeDerivatives(
   const nakedPuts: NakedPutPosition[] = [];
   const leapCalls: LeapCallPosition[] = [];
   const otherStrategies: OtherStrategyPosition[] = [];
+  const configOtherGroups: GroupedOtherStrategy[] = []; // Per-config groups for config-only mode
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions (NOT ETFs for matching)
@@ -471,9 +474,24 @@ export function categorizeDerivatives(
         const sigMatched_def = sigs.length > 0
           ? filterBySignatures(remaining.filter(d => !usedDerivatives.has(d.id)), sigs)
           : remaining.filter(d => !usedDerivatives.has(d.id));
+        const configOptions: OtherStrategyPosition[] = [];
         for (const opt of sigMatched_def) {
-          otherStrategies.push({ option: opt, underlying: linkedStock || null });
+          const entry: OtherStrategyPosition = { option: opt, underlying: linkedStock || null };
+          otherStrategies.push(entry);
+          configOptions.push(entry);
           usedDerivatives.add(opt.id);
+        }
+        // Track per-config group (1 config = 1 group, never merged by underlying)
+        if (configOptions.length > 0) {
+          configOtherGroups.push({
+            underlying: config.underlying,
+            options: configOptions,
+            totalPremium: configOptions.reduce((sum, o) => sum + (o.option.market_value || 0), 0),
+            totalProfitLoss: configOptions.reduce((sum, o) => sum + (o.option.profit_loss || 0), 0),
+            strategyName: detectStrategyName(configOptions),
+            configId: config.id,
+            configStrategyType: config.strategy_type,
+          });
         }
         break;
       }
@@ -483,10 +501,9 @@ export function categorizeDerivatives(
   // ============ CONFIG-ONLY MODE ============
   // When configOnly is true, skip all auto-classification (Steps 1-6).
   // Orphans (unmatched positions) are DROPPED — they do NOT go to "Altre Strategie".
-  // "Altre Strategie" only contains positions explicitly mapped via a saved config with type 'other'.
+  // Use per-config groups to preserve separate strategies for the same underlying.
   if (options?.configOnly) {
-    const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
-    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups };
   }
 
   // ============ STRICT CONFIG GUARD ============
