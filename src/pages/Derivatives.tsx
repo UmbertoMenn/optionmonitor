@@ -267,12 +267,11 @@ export function Derivatives() {
     const remainingOtherStrategies: GroupedOtherStrategy[] = [];
 
     for (const group of categories.groupedOtherStrategies) {
-      const configMatch = strategyConfigs.find(c => 
-        c.underlying === group.underlying && (c.strategy_type === 'put_spread' || c.strategy_type === 'diagonal_put_spread')
-      );
-      if (configMatch?.strategy_type === 'put_spread' || (!configMatch && group.strategyName === 'Put Spread')) {
+      // Use configStrategyType (from per-config tracking) when available, fallback to heuristic
+      const stratType = group.configStrategyType;
+      if (stratType === 'put_spread' || (!stratType && group.strategyName === 'Put Spread')) {
         putSpreads.push(group);
-      } else if (configMatch?.strategy_type === 'diagonal_put_spread' || (!configMatch && group.strategyName === 'Diagonal Put Spread')) {
+      } else if (stratType === 'diagonal_put_spread' || (!stratType && group.strategyName === 'Diagonal Put Spread')) {
         diagonalPutSpreads.push(group);
       } else {
         remainingOtherStrategies.push(group);
@@ -280,7 +279,7 @@ export function Derivatives() {
     }
 
     return { putSpreads, diagonalPutSpreads, remainingOtherStrategies };
-  }, [categories.groupedOtherStrategies, strategyConfigs]);
+  }, [categories.groupedOtherStrategies]);
 
   // Calculate total covered call contracts per underlying (for partial coverage badge)
   const totalCoveredCallContractsByUnderlying = useMemo(() => {
