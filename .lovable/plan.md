@@ -1,17 +1,22 @@
 
 
-## Piano: Split On-Demand per Opzioni E Azioni
+## Fix: Label confusionale per derivati splittati
 
-### Stato: ✅ COMPLETATO
+### Problema
+Quando un'opzione viene splittata, il label mostra `[1]`, `[2]`, `[3]` — che sembra indicare la quantità anziché il numero dello slot.
 
-### Comportamento finale
-- **Azioni**: raggruppate di default, splittabili on-demand in slot da 100 con ✂️
-- **Opzioni**: raggruppate di default, splittabili on-demand in contratti singoli con ✂️
-- **Riconciliazione**: non si apre più immediatamente dopo il salvataggio
+### Soluzione
+Sostituire `[1]`, `[2]`, `[3]` con lettere: `(A)`, `(B)`, `(C)`. Le lettere non possono essere confuse con quantità numeriche e sono immediatamente comprensibili come identificatori di slot.
 
-### Modifiche effettuate
+Esempio: `AAPL V CALL 250 GIU/25 (A)` invece di `AAPL V CALL 250 GIU/25 [1]`
 
-1. **`src/lib/strategyReconciliation.ts`**: Fix `matchSignatureMulti` — ora gestisce quantità aggregate (una posizione con qty=-3 matcha una signature con quantity_abs=3)
-2. **`src/components/derivatives/StrategyConfigWizard.tsx`**: Rimosso auto-split azioni, unificato `splitPositionIds` per azioni e opzioni, ✂️ e Merge per entrambi
-3. **`src/components/derivatives/StrategyReconciliationDialog.tsx`**: Stesso approccio unificato per la riconciliazione
-4. **`src/pages/Derivatives.tsx`**: Aggiunto `justSavedRef` per bloccare auto-apertura riconciliazione dopo salvataggio
+Stesso approccio per gli slot azioni: `AAPL (100 azioni) (A)` invece di `AAPL (100 azioni) [slot 1]`
+
+### File da modificare
+
+**`src/components/derivatives/StrategyConfigWizard.tsx`** — funzione `positionLabel()` (righe 93-115):
+- Slot opzioni: `[${slotNum}]` → `(${letter})`  dove letter = A, B, C...
+- Slot azioni: `[slot ${slotNum}]` → `(${letter})`
+
+**`src/components/derivatives/StrategyReconciliationDialog.tsx`** — stessa funzione `positionLabel()` (riga 36+): identiche modifiche
+
