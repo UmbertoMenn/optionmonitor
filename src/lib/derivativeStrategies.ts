@@ -433,11 +433,7 @@ export function categorizeDerivatives(
       continue;
     }
 
-    console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): matched ${matchedVirtual.length} virtual positions`);
-
-    const linkedStock = (config.linked_stock_id
-      ? allPositions.find(p => p.id === config.linked_stock_id)
-      : null) || findUnderlyingStock(matchedVirtual[0], stockPositions);
+    console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): matched ${matchedVirtual.length} virtual positions, linkedStock: ${linkedStock?.description || 'none'}`);
 
     switch (config.strategy_type) {
       case 'covered_call': {
