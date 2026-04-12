@@ -158,6 +158,7 @@ export function computeMonitoring(
   stockPositions: Position[],
   underlyingPrices: Record<string, UnderlyingPrice>,
   configs: StrategyConfiguration[],
+  archivedKeys?: string[],
 ): MonitoringResult {
   return {
     uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, underlyingPrices),
@@ -167,7 +168,7 @@ export function computeMonitoring(
     nakedPutsITM: computeNakedPutsITM(categories, underlyingPrices),
     leapCallsInGain: computeLeapGain(categories, underlyingPrices),
     otherStrategiesOOROOB: computeOtherOOROOB(categories, underlyingPrices),
-    availableCallsToSell: computeAvailableCalls(allPositions, stockPositions, underlyingPrices, configs),
+    availableCallsToSell: computeAvailableCalls(allPositions, stockPositions, underlyingPrices, configs, archivedKeys),
   };
 }
 
@@ -442,7 +443,9 @@ function computeAvailableCalls(
   stockPositions: Position[],
   underlyingPrices: Record<string, UnderlyingPrice>,
   configs: StrategyConfiguration[],
+  archivedKeys?: string[],
 ): MonitoringAvailableCalls[] {
+  const archivedSet = new Set((archivedKeys || []).map(k => normalizeForMatching(k)));
   const balance = new Map<string, { owned: number; soldCalls: number; displayTicker: string }>();
 
   const ensure = (key: string, displayTicker?: string) => {
@@ -470,7 +473,13 @@ function computeAvailableCalls(
   }
 
   const result: MonitoringAvailableCalls[] = [];
-  for (const [, data] of balance) {
+  for (const [key, data] of balance) {
+    // Skip archived underlyings
+    if (archivedSet.size > 0) {
+      const normKey = normalizeForMatching(key);
+      const normTicker = normalizeForMatching(data.displayTicker);
+      if (archivedSet.has(normKey) || archivedSet.has(normTicker)) continue;
+    }
     const potential = Math.floor(data.owned / 100);
     const available = potential - data.soldCalls;
     if (available >= 1) {
