@@ -83,7 +83,7 @@ function getMatchingKey(text: string): string {
 }
 
 /** Cache per evitare iterazioni ripetute su underlyingPrices */
-let _resolveCacheRef: WeakRef<Record<string, UnderlyingPrice>> | null = null;
+let _resolveCachePricesRef: Record<string, UnderlyingPrice> | null = null;
 let _resolveCache = new Map<string, string | null>();
 
 function resolveTickerFromPrices(
@@ -91,8 +91,8 @@ function resolveTickerFromPrices(
   underlyingPrices: Record<string, UnderlyingPrice>
 ): string | null {
   // Invalidate cache if underlyingPrices object changed
-  if (!_resolveCacheRef || _resolveCacheRef.deref() !== underlyingPrices) {
-    _resolveCacheRef = new WeakRef(underlyingPrices);
+  if (_resolveCachePricesRef !== underlyingPrices) {
+    _resolveCachePricesRef = underlyingPrices;
     _resolveCache = new Map();
   }
 
