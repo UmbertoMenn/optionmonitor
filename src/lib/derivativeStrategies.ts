@@ -112,6 +112,17 @@ export interface GroupedOtherStrategy {
   configStrategyType?: string;
 }
 
+export interface ResolvedConfig {
+  configId: string;
+  strategyType: string;
+  underlying: string;
+  sortOrder: number;
+  isSynthetic: boolean;
+  linkedStock: Position | null;
+  matchedPositions: Position[];  // virtual, quantity-scaled
+  status: 'matched' | 'partial' | 'unmatched';
+}
+
 export interface DerivativeCategories {
   coveredCalls: CoveredCallPosition[];
   deRiskingCoveredCalls: DeRiskingCoveredCallPosition[];
@@ -122,6 +133,7 @@ export interface DerivativeCategories {
   leapCalls: LeapCallPosition[];
   otherStrategies: OtherStrategyPosition[];
   groupedOtherStrategies: GroupedOtherStrategy[];
+  resolvedConfigs: ResolvedConfig[];
 }
 
 /**
@@ -197,14 +209,16 @@ export function categorizeDerivatives(
   const leapCalls: LeapCallPosition[] = [];
   const otherStrategies: OtherStrategyPosition[] = [];
   const configOtherGroups: GroupedOtherStrategy[] = []; // Per-config groups for config-only mode
+  const resolvedConfigs: ResolvedConfig[] = []; // Track 1:1 config→result mapping
   const usedDerivatives = new Set<string>();
   
   // Get all stock positions (NOT ETFs for matching)
   const stockPositions = allPositions.filter(p => p.asset_type === 'stock');
   
-  // ============ PRE-COMPUTE: positions covered by strategy configs ============
+  // ============ PRE-COMPUTE: positions covered by strategy configs (quantity-aware) ============
   // These positions must NOT be consumed by single overrides (Step 0).
   const configCoveredIds = new Set<string>();
+  const precomputeUsedQty = new Map<string, number>();
   for (const config of strategyConfigs) {
     const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
     const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
@@ -213,8 +227,25 @@ export function categorizeDerivatives(
       const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
       return posKey === configKey;
     });
-    const matched = filterBySignatures(candidates, sigs);
-    for (const m of matched) configCoveredIds.add(m.id);
+    for (const sig of sigs) {
+      const needed = sig.quantity_abs || 1;
+      let rem = needed;
+      for (const p of candidates) {
+        if (rem <= 0) break;
+        if ((p.option_type || '').toLowerCase() !== sig.option_type.toLowerCase()) continue;
+        if (Math.abs((p.strike_price || 0) - sig.strike) > 0.01) continue;
+        if ((p.expiry_date || '') !== (sig.expiry || '')) continue;
+        if ((p.quantity >= 0 ? 1 : -1) !== sig.quantity_sign) continue;
+        const totalAbs = Math.abs(p.quantity);
+        const alreadyUsed = precomputeUsedQty.get(p.id) || 0;
+        const avail = totalAbs - alreadyUsed;
+        if (avail <= 0) continue;
+        const take = Math.min(avail, rem);
+        precomputeUsedQty.set(p.id, alreadyUsed + take);
+        rem -= take;
+        configCoveredIds.add(p.id);
+      }
+    }
   }
   
   // ============ STEP 0: Apply Manual Overrides ============
@@ -368,7 +399,22 @@ export function categorizeDerivatives(
       }
     }
 
-    if (matchedVirtual.length === 0) continue;
+    if (matchedVirtual.length === 0) {
+      console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): NO MATCH — 0 positions found for ${sigs.length} signatures`);
+      resolvedConfigs.push({
+        configId: config.id,
+        strategyType: config.strategy_type,
+        underlying: config.underlying,
+        sortOrder: config.sort_order,
+        isSynthetic: config.is_synthetic,
+        linkedStock: null,
+        matchedPositions: [],
+        status: 'unmatched',
+      });
+      continue;
+    }
+
+    console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): matched ${matchedVirtual.length} virtual positions`);
 
     const linkedStock = (config.linked_stock_id
       ? allPositions.find(p => p.id === config.linked_stock_id)
@@ -522,6 +568,18 @@ export function categorizeDerivatives(
         break;
       }
     }
+
+    // Track resolved config
+    resolvedConfigs.push({
+      configId: config.id,
+      strategyType: config.strategy_type,
+      underlying: config.underlying,
+      sortOrder: config.sort_order,
+      isSynthetic: config.is_synthetic,
+      linkedStock: linkedStock || null,
+      matchedPositions: matchedVirtual,
+      status: matchedVirtual.length === sigs.length ? 'matched' : 'partial',
+    });
   }
 
   // ============ CONFIG-ONLY MODE ============
@@ -529,7 +587,8 @@ export function categorizeDerivatives(
   // Orphans (unmatched positions) are DROPPED — they do NOT go to "Altre Strategie".
   // Use per-config groups to preserve separate strategies for the same underlying.
   if (options?.configOnly) {
-    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups };
+    console.log(`[ConfigOnly] resolvedConfigs: ${resolvedConfigs.length}, coveredCalls: ${coveredCalls.length}, deRisking: ${deRiskingCoveredCalls.length}, IC: ${ironCondors.length}, DD: ${doubleDiagonals.length}, NP: ${nakedPuts.length}, LC: ${leapCalls.length}, other: ${configOtherGroups.length}`);
+    return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies: configOtherGroups, resolvedConfigs };
   }
 
   // ============ STRICT CONFIG GUARD ============
@@ -872,7 +931,7 @@ export function categorizeDerivatives(
   // ============ STEP 7: Group other strategies by underlying ============
   const groupedOtherStrategies = groupOtherStrategiesByUnderlying(otherStrategies);
   
-  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies };
+  return { coveredCalls, deRiskingCoveredCalls, longPuts, ironCondors, doubleDiagonals, nakedPuts, leapCalls, otherStrategies, groupedOtherStrategies, resolvedConfigs };
 }
 
 /**
