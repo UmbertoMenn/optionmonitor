@@ -238,6 +238,7 @@ export function Derivatives() {
         merged.leapCalls.push(...result.leapCalls);
         merged.otherStrategies.push(...result.otherStrategies);
         merged.groupedOtherStrategies.push(...result.groupedOtherStrategies);
+        merged.resolvedConfigs.push(...result.resolvedConfigs);
       }
 
       raw = merged;
