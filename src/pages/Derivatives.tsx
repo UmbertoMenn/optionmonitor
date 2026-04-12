@@ -433,7 +433,7 @@ export function Derivatives() {
     }).length;
     return uncoveredCount > 0;
   }, [derivatives, hasConfigurations, categories.resolvedConfigs, isArchivedDerivative]);
-  }, [derivatives, hasConfigurations, strategyConfigs, isArchivedDerivative]);
+  
 
    // Clean up legacy ?wizard=1 param without opening wizard
   useEffect(() => {
