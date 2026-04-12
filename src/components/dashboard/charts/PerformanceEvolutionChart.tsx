@@ -10,6 +10,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
+import { calculateTimeWeightedAverage } from '@/lib/timeWeightedAverage';
 import { it } from 'date-fns/locale';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
