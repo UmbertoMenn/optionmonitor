@@ -221,8 +221,9 @@ export function categorizeDerivatives(
   const precomputeUsedQty = new Map<string, number>();
   for (const config of strategyConfigs) {
     const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
-    const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
-    if (sigs.length === 0) continue;
+    const sigsForPrecompute = (config.position_signatures as unknown as PositionSignature[]) || [];
+    const stockSlotIdsForPrecompute = (config.linked_stock_slot_ids as unknown as string[]) || [];
+    if (sigsForPrecompute.length === 0 && stockSlotIdsForPrecompute.length === 0 && !config.linked_stock_id) continue;
     const candidates = filteredDerivatives.filter(d => {
       const posKey = getCanonicalKey(d.underlying || d.description) || normalizeForMatching(d.underlying || d.description);
       return posKey === configKey;
@@ -350,7 +351,8 @@ export function categorizeDerivatives(
   for (const config of strategyConfigs) {
     const configKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
     const sigs = (config.position_signatures as unknown as PositionSignature[]) || [];
-    if (sigs.length === 0) continue;
+    const stockSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
+    if (sigs.length === 0 && stockSlotIds.length === 0 && !config.linked_stock_id) continue;
 
     // Pool: derivatives for this underlying not fully consumed by overrides
     const pool = filteredDerivatives.filter(d => {
