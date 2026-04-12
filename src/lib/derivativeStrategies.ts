@@ -401,7 +401,24 @@ export function categorizeDerivatives(
       }
     }
 
-    if (matchedVirtual.length === 0) {
+    // Resolve linked stock from slot IDs or legacy linked_stock_id
+    let linkedStock: Position | null = null;
+    if (stockSlotIds.length > 0) {
+      // Find first matching stock by slot ID
+      for (const slotId of stockSlotIds) {
+        const baseId = slotId.replace(/__slot_\d+$/, '');
+        const stock = allPositions.find(p => p.id === baseId && (p.asset_type === 'stock' || p.asset_type === 'etf'));
+        if (stock) { linkedStock = stock; break; }
+      }
+    }
+    if (!linkedStock && config.linked_stock_id) {
+      linkedStock = allPositions.find(p => p.id === config.linked_stock_id) || null;
+    }
+    if (!linkedStock && matchedVirtual.length > 0) {
+      linkedStock = findUnderlyingStock(matchedVirtual[0], stockPositions);
+    }
+
+    if (matchedVirtual.length === 0 && !linkedStock) {
       console.log(`[Step 0.5] Config ${config.id} (${config.underlying} / ${config.strategy_type}): NO MATCH — 0 positions found for ${sigs.length} signatures`);
       resolvedConfigs.push({
         configId: config.id,
