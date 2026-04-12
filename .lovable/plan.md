@@ -1,77 +1,86 @@
 
-Problema reale che ho verificato
 
-- Nel backend GOOGLE è già salvato come 3 configurazioni distinte. Quindi il salvataggio non è più il punto che collassa i record.
-- Il collasso avviene dopo la lettura: la pagina Derivati, il wizard e la riconciliazione non stanno ancora lavorando in modo davvero “config-driven” quando una config usa solo una parte di una riga aggregata.
+## Fix definitivo: la pagina Derivati deve rispecchiare SOLO le configurazioni salvate
 
-Perché oggi vedi 2 strategie invece di 3
+### Il problema reale
 
-1. `src/lib/derivativeStrategies.ts` usa ancora `filterBySignatures`, che è 1-riga=1-match e ignora davvero `quantity_abs`.
-   - Caso reale GOOGLE: esiste una CALL 305 con `quantity = -2`, ma due config diverse ne usano 1 contratto ciascuna.
-   - La prima config si prende tutta la riga `-2`, la renderizza come 2 contratti, e la seconda resta senza gamba e sparisce.
+Hai ragione. Il flusso dovrebbe essere banale:
+1. Leggi le config dal DB (3 per GOOGLE nel tuo portfolio)
+2. Per ogni config, trova le posizioni corrispondenti e arricchiscile con dati live
+3. Mostra 1 strategia per config. Fine.
 
-2. Il ripristino del wizard non ricrea bene gli stock splittati.
-   - Se una config salva anche un solo `linked_stock_slot_id` tipo `__slot_0`, oggi il titolo non viene splittato automaticamente alla riapertura.
-   - Risultato: una strategia si prende il titolo intero e le altre si riaccorpano.
+Ho verificato il DB: il tuo portfolio ha esattamente 3 config GOOGLE (sort_order 23, 55, 56). La logica quantity-aware in Step 0.5 sembra corretta sulla carta, ma il problema è che il codice ha troppi livelli di indirezione e punti di rottura. Ho individuato i problemi concreti:
 
-3. La riconciliazione può ancora distruggere strategie sorelle dello stesso sottostante.
-   - `StrategyReconciliationDialog` risalva le config “changed”, ma non garantisce di reincludere tutte le altre config dello stesso underlying.
-   - Questo può cancellare o rifondere configurazioni corrette.
+**Problema 1 — `configCoveredIds` usa il vecchio matching 1:1 (righe 206-218)**
+La pre-computazione usa `filterBySignatures` che è 1:1, ignorando `quantity_abs`. Questo può "bruciare" l'intera riga -2 per la prima config, lasciando la seconda senza match nel precompute. Anche se Step 0.5 è quantity-aware, il precompute potrebbe avere effetti collaterali.
 
-Fix definitivo che implementerò
+**Problema 2 — `configOnly` return non distingue per config**
+Il return a riga 532 restituisce array piatti (`coveredCalls`, `nakedPuts`, ecc.) senza alcun legame con la config di origine. Se due covered call dello stesso underlying finiscono nello stesso array, la pagina non sa che vengono da 2 config diverse. Non c'è modo di garantire 1:1.
 
-1. Creare un resolver unico, shared, quantity-aware
-   - Nuova utility centralizzata che risolve `strategy_configurations` + posizioni correnti.
-   - Deve produrre 1 risultato per config salvata.
-   - Deve poter “affettare” la stessa riga reale in più gambe virtuali quando `quantity_abs` divide una posizione aggregata.
-   - Deve risolvere anche gli stock slot salvati (`__slot_n`) in modo deterministico.
+**Problema 3 — Il wizard `restoreFromConfigs` non usa lo stesso codice della pagina**
+Ha una sua logica di matching separata. Se il restore fallisce, raggruppa tutto insieme.
 
-2. Sostituire il percorso `configOnly` in `categorizeDerivatives`
-   - Eliminare la dipendenza da `filterBySignatures` per le config salvate.
-   - Non consumare più l’intero `position.id` quando una config usa solo parte della quantità.
-   - Renderizzare Covered Call, De-Risking, Naked Put, LEAP, Other, spread, ecc. usando le gambe già risolte dal resolver.
-   - Portare anche `sort_order` nei risultati per mantenere l’ordine configurato.
+### La soluzione
 
-3. Rendere il Wizard un ripristino fedele
-   - `StrategyConfigWizard.restoreFromConfigs()` userà lo stesso resolver.
-   - Auto-split derivati quando una config usa solo parte della quantità.
-   - Auto-split stock se esiste qualunque `linked_stock_slot_id` con suffisso `__slot_`, anche se è uno solo.
-   - Alla riapertura il wizard deve mostrare esattamente le 3 strategie GOOGLE separate.
+Invertire completamente l'approccio nel percorso `configOnly`:
 
-4. Correggere la riconciliazione
-   - `reconcileConfigs()` riuserà lo stesso matching centralizzato.
-   - `StrategyReconciliationDialog` inizializzerà e risalverà tutte le config del sottostante coinvolto, non solo quelle con delta.
-   - Così non potrà più cancellare o fondere strategie sorelle.
+**Invece di** far categorizzare le posizioni e poi provare a mapparle alle config,
+**fare**: iterare sulle config, e per ognuna costruire il risultato renderizzabile.
 
-5. Allineare tutta la pagina Derivati alla stessa sorgente di verità
-   - `needsWizard` in `src/pages/Derivatives.tsx` smetterà di usare matching semplificato.
-   - Pagina, wizard, riconciliazione e cache useranno la stessa identica risoluzione config-driven.
+#### File 1: `src/lib/derivativeStrategies.ts`
 
-File coinvolti
+Riscrivere il blocco `configOnly` (prima del return a riga 532) per produrre un risultato **indicizzato per config**:
 
-- `src/lib/derivativeStrategies.ts`
-- nuovo helper condiviso in `src/lib/`
-- `src/components/derivatives/StrategyConfigWizard.tsx`
-- `src/lib/strategyReconciliation.ts`
-- `src/components/derivatives/StrategyReconciliationDialog.tsx`
-- `src/pages/Derivatives.tsx`
+- Aggiungere un campo `resolvedConfigs` al tipo `DerivativeCategories`: una lista ordinata dove ogni elemento corrisponde a una config salvata e contiene:
+  - `configId`, `strategyType`, `underlying`, `sortOrder`
+  - `matchedPositions`: le posizioni virtuali (già quantity-aware) assegnate
+  - `linkedStock`: il titolo collegato
+  - `isSynthetic`: flag
+  - `status`: 'matched' | 'partial' | 'unmatched'
 
-Nota importante
+- Nel percorso `configOnly`, il return include `resolvedConfigs` e gli array categorizzati come oggi (per retrocompatibilità con risk/equity/snapshot).
 
-- Non serve un’altra migrazione database: il backend già contiene 3 righe GOOGLE distinte. Il bug è nella risoluzione/renderizzazione, non nella persistenza.
+- Eliminare `configCoveredIds` precompute con `filterBySignatures` — non serve più nel percorso configOnly, Step 0.5 è già quantity-aware.
 
-Verifica finale
+#### File 2: `src/pages/Derivatives.tsx`
 
-1. Caso reale GOOGLE:
-   - backend = 3 config
-   - pagina Derivati = 3 strategie visibili
-   - “Riconfigura strategie” = 3 card separate
+Usare `resolvedConfigs` come fonte primaria per il rendering:
 
-2. Caso quantità aggregate:
-   - una CALL `-2` distribuita su 2 config deve diventare 2 strategie visibili da 1 contratto ciascuna
+- Per ogni `resolvedConfig`, in base al suo `strategyType`, renderizzare la sezione corretta (covered call, naked put, other, ecc.)
+- NON più iterare su `categories.coveredCalls` / `categories.nakedPuts` separatamente — iterare su `resolvedConfigs` e distribuire nelle sezioni
+- Questo garantisce: **1 config = 1 card visibile**, sempre
 
-3. Caso stock slot:
-   - una config che salva solo `__slot_0` deve riaprire il wizard già splittata correttamente
+#### File 3: `src/components/derivatives/StrategyConfigWizard.tsx`
 
-4. Coerenza totale:
-   - pagina Derivati, wizard, riconciliazione e badge arancione devono dare lo stesso identico risultato
+`restoreFromConfigs` è già quasi corretto — la logica di split automatico e matching per firma funziona. Unico fix: assicurarsi che il matching usi esattamente la stessa logica di `categorizeDerivatives` Step 0.5 (stessa funzione `getCanonicalKey`, stesso ordine di consumo).
+
+#### File 4: `src/components/derivatives/StrategyReconciliationDialog.tsx`
+
+Quando risalva, includere TUTTE le config del portfolio (non solo quelle del sottostante coinvolto) per evitare di cancellare sorelle.
+
+### Dettaglio tecnico: nuovo tipo `ResolvedConfig`
+
+```text
+interface ResolvedConfig {
+  configId: string;
+  strategyType: string;
+  underlying: string;
+  sortOrder: number;
+  isSynthetic: boolean;
+  linkedStock: Position | null;
+  matchedPositions: Position[];  // virtual, quantity-scaled
+  status: 'matched' | 'partial' | 'unmatched';
+}
+```
+
+### Cosa NON cambia
+- Il DB è già corretto (3 config per GOOGLE)
+- La migrazione precedente (rimozione vincolo UNIQUE) è già applicata
+- Il salvataggio `upsertBatch` funziona correttamente
+- Gli array piatti (`coveredCalls`, `nakedPuts`, ecc.) restano per retrocompatibilità con risk analyzer, equity exposure, snapshot
+
+### Risultato atteso
+- 3 config GOOGLE → 3 strategie visibili, sempre
+- "Riconfigura strategie" → 3 card separate nel wizard
+- Nessuna euristica, nessun raggruppamento, nessuna magia
+
