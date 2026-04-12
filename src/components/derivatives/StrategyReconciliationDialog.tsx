@@ -511,8 +511,10 @@ export function StrategyReconciliationDialog({
       affectedUnderlyings.add(state.underlying);
       for (const strategy of state.strategies) {
         if (strategy.positions.length === 0) continue;
-        const underlying = strategy.positions.find(p => p.asset_type === 'derivative')?.underlying
-          || state.underlying;
+        const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+        const underlying = derivPos
+          ? (derivPos.underlying || state.underlying)
+          : (getCanonicalKey(strategy.positions[0]?.description || '') || state.underlying);
         const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
         // Persist ALL stock slot IDs (with __slot_N suffix)
         const stockSlotIds = stockPositions.map(s => s.id);
