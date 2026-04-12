@@ -1,127 +1,74 @@
 
-## Fix: la quota parte di azioni deve essere gestibile dentro qualunque strategia
 
-### Diagnosi corretta
+## Discrepanza P/L tra StatsCards e Grafico Evoluzione Rendimento
 
-Hai ragione: il bug non è “strategia con solo stock”.  
-Il bug vero è questo:
+### Causa radice
 
-```text
-lo stock può essere splittato nel pool disponibile
-ma non viene trattato bene quando entra / esce / viene ripristinato dentro una strategia
+Il grafico e le card usano **formule diverse** per calcolare la giacenza media (denominatore del rendimento %):
+
+**StatsCards** (corretto):
+```
+giacenza media = media ponderata per il tempo
+  (ogni livello di balance pesato per i giorni in cui è rimasto a quel livello)
 ```
 
-Ho verificato il codice e il backend:
+**Grafico** (sbagliato):
+```
+avgBalance = entry.average_balance   // dal DB, che è SEMPRE 0
+fallback → initialValue + cumulativeDeposits / 2   // approssimazione grezza
+```
 
-- il backend salva già `linked_stock_slot_ids`, quindi il problema non è il database
-- nel wizard lo split delle azioni esiste, ma oggi è pensato quasi solo per il pool libero
-- la pagina Derivati e il restore non usano in modo coerente gli slot salvati
+Il campo `average_balance` nella tabella `historical_data` è **sempre 0** per tutti gli snapshot di maurog (e probabilmente per tutti gli utenti). Quindi il grafico usa il fallback `initialValue + deposits/2`, che è una stima grossolana e diversa dalla media ponderata temporale calcolata dinamicamente dalle StatsCards.
 
-### Perché oggi si rompe
+### Esempio numerico (maurog, dal 01/07/25, netting ex CC e NP)
 
-1. `StrategyConfigWizard` mostra forbici/merge solo sulle **posizioni disponibili**, non sulle azioni già dentro una strategia.  
-   Quindi se una strategia contiene lo stock intero da 200, lì non puoi davvero trasformarlo in 2 slot da 100.
+| | StatsCards | Grafico |
+|---|---|---|
+| P/L assoluto | ~19,751 | ~19,751 (uguale) |
+| Giacenza media | ~647,000 (time-weighted) | ~669,616 (initial + deposits/2) |
+| Rendimento % | **3.05%** | **2.72%** |
 
-2. `restoreFromConfigs` auto-splitta lo stock solo se la config salva già un `__slot_N`.  
-   Se una config vecchia o generata male ha solo `linked_stock_id`, si riapre con lo stock intero e resti bloccato.
+Il P/L assoluto è lo stesso perché la formula `valore_attuale - valore_iniziale - versamenti` è identica. La differenza sta solo nel denominatore della %.
 
-3. `categorizeDerivatives` non usa davvero `linked_stock_slot_ids` per materializzare la quota stock in pagina: prende `linked_stock_id` o il titolo intero trovato via matching.  
-   Quindi anche se hai salvato 100 azioni, la pagina può tornare a ragionare come se fossero 200.
+### Fix
 
-4. Le config con `position_signatures = []` vengono saltate, quindi le strategie stock-only o quasi-stock-only non sono affidabili.
+**File: `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`**
 
-### Cosa implementerò
+Estrarre la funzione `calculateTimeWeightedAverage` da StatsCards in un modulo condiviso (o duplicarla nel chart), e usarla nel `chartData` memo al posto del fallback `initialValue + cumulativeDeposits / 2`.
 
-#### 1) Wizard: split/rejoin anche dentro la strategia
-File: `src/components/derivatives/StrategyConfigWizard.tsx`
+Per ogni punto del grafico:
+1. Calcolare la giacenza media time-weighted dal primo punto fino a quel punto
+2. Usare quella come denominatore per il rendimento %
 
-- aggiungere la stessa logica di split/rejoin anche ai badge dentro `strategy.positions`
-- se una strategia contiene uno stock intero da 200:
-  - click forbici sul badge della strategia
-  - il badge viene sostituito con gli slot `__slot_0`, `__slot_1`
-- così puoi:
-  - lasciare 1 slot da 100 nella strategia
-  - rimuovere l’altro slot e riportarlo nel pool
-  - aggiungerlo a un’altra strategia con `+1`
+Concretamente, nel loop `sorted.map(...)` (riga 481):
 
-Questo è il fix chiave: la quota parte stock deve essere manipolabile **dentro** la strategia, non solo prima.
+```typescript
+// PRIMA (sbagliato):
+const avgBalance = entry.average_balance > 0 
+  ? entry.average_balance 
+  : initialValue + cumulativeDeposits / 2;
 
-#### 2) Unificare la generazione degli slot
-File: `src/components/derivatives/StrategyConfigWizard.tsx`
+// DOPO (corretto):
+const avgBalance = calculateTimeWeightedAverage(
+  initialDate, snapshotDate, initialValue, sortedDeposits
+).average;
+```
 
-- estrarre una helper condivisa per generare slot stock/opzioni
-- usare la stessa helper per:
-  - pool disponibile
-  - restore da config
-  - split dentro strategia
-  - rejoin
+E lo stesso per il punto "current" appended (riga 532).
 
-Così evitiamo che pool e strategia producano ID diversi o comportamenti diversi.
+### File da modificare
 
-#### 3) Save/restore: gli slot devono restare gli slot
-File: `src/components/derivatives/StrategyConfigWizard.tsx`
+1. **Creare `src/lib/timeWeightedAverage.ts`** — Estrarre `calculateTimeWeightedAverage` come funzione riutilizzabile
+2. **`src/components/dashboard/charts/PerformanceEvolutionChart.tsx`** — Importare e usare la funzione condivisa
+3. **`src/components/dashboard/StatsCards.tsx`** — Importare dalla nuova location (refactor, nessun cambio logica)
 
-- salvare sempre `linked_stock_slot_ids` quando nella strategia ci sono slot
-- mantenere `linked_stock_id` solo come fallback legacy
-- nel restore:
-  - priorità assoluta agli `linked_stock_slot_ids`
-  - fallback a `linked_stock_id` solo se gli slot non esistono
-- se una config legacy si riapre con stock intero, da quel momento il badge dentro strategia sarà splittabile
-
-#### 4) Pagina Derivati: usare davvero gli slot salvati
-File: `src/lib/derivativeStrategies.ts`
-
-- nel resolver config-driven, risolvere lo stock da `linked_stock_slot_ids`
-- costruire la quota stock reale della strategia con la somma degli slot salvati
-- usare `linked_stock_id` solo se non ci sono slot
-- permettere anche config con:
-  - `position_signatures = []`
-  - ma `linked_stock_slot_ids.length > 0`
-
-Questo evita che una strategia da 100 azioni torni a essere mostrata come 200.
-
-#### 5) Riconciliazione: stessa UX del wizard
-File: `src/components/derivatives/StrategyReconciliationDialog.tsx`
-
-- portare lo stesso split/rejoin dentro `strategy.positions`
-- usare la stessa helper di slot generation
-- mantenere save/restore coerenti col wizard principale
+### Cosa non cambia
+- Il P/L assoluto resta identico (stessa formula)
+- La logica dei versamenti (filtro per periodo) resta identica
+- Il benchmark non è toccato
+- Il downsampling non è toccato
 
 ### Risultato atteso
-
-```text
-200 azioni GOOGLE
-→ split in 100 + 100
-→ posso metterne 100 in una strategia esistente
-→ posso creare una nuova strategia con l’altro 100
-→ salvo
-→ riapro
-→ trovo ancora 100/100, non 200/0
-```
-
-### Dettagli tecnici
-
-- Nessuna migrazione database necessaria
-- Il backend è già pronto: `linked_stock_slot_ids` esiste e viene salvato
-- I file da toccare sono:
-  - `src/components/derivatives/StrategyConfigWizard.tsx`
-  - `src/lib/derivativeStrategies.ts`
-  - `src/components/derivatives/StrategyReconciliationDialog.tsx`
-
-### Verifiche da fare dopo il fix
-
-1. Caso misto:
-   - 200 azioni + derivati
-   - split dello stock dentro una strategia esistente
-   - lasciare 100 nella prima, spostare 100 nella seconda
-
-2. Caso nuova strategia:
-   - creare strategia nuova con solo 1 slot da 100
-
-3. Caso restore:
-   - salva, chiudi, riapri wizard
-   - gli slot restano separati
-
-4. Caso pagina Derivati:
-   - la card deve riflettere la quota stock salvata, non lo stock intero
+- StatsCards mostra +3.05% → il grafico mostra +3.05%
+- StatsCards mostra -1.77% → il grafico mostra -1.77%
 
