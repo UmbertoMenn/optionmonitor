@@ -56,6 +56,7 @@ import {
   GroupedOtherStrategy,
   DerivativeCategories,
   DeRiskingCoveredCallPosition,
+  ResolvedConfig,
 } from '@/lib/derivativeStrategies';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/formatters';
 import { 
