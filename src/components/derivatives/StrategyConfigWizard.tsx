@@ -495,8 +495,8 @@ export function StrategyConfigWizard({
     // A stock needs splitting if config has multiple linked_stock_slot_ids
     for (const config of existingConfigs) {
       const signatures = (config.position_signatures as unknown as PositionSignature[]) || [];
-      const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
-      if (signatures.length === 0 && savedSlotIds.length === 0 && !config.linked_stock_id) continue;
+      const slotIdsForCheck = (config.linked_stock_slot_ids as unknown as string[]) || [];
+      if (signatures.length === 0 && slotIdsForCheck.length === 0 && !config.linked_stock_id) continue;
       const configUnderlyingKey = getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
 
       // Check options
