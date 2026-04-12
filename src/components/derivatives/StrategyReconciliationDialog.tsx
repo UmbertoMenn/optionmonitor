@@ -621,34 +621,8 @@ export function StrategyReconciliationDialog({
           <div className="space-y-3 pb-4 pt-2">
             {entries.map(([key, state]) => {
               const selectedSet = selectedByGroup.get(key) || new Set<string>();
-              // Derive effective available positions considering splits
               const rawAvailable = state.availablePositions.filter(p => !assignedIds.has(p.id));
-              const effectiveAvailable: Position[] = [];
-              for (const p of rawAvailable) {
-                if (splitPositionIds.has(p.id)) {
-                  if (p.asset_type === 'derivative' && Math.abs(p.quantity) > 1) {
-                    const absQty = Math.abs(p.quantity);
-                    const sign = p.quantity >= 0 ? 1 : -1;
-                    for (let i = 0; i < absQty; i++) {
-                      effectiveAvailable.push({ ...p, id: `${p.id}__opt_slot_${i}`, quantity: sign * 1 });
-                    }
-                  } else if ((p.asset_type === 'stock' || p.asset_type === 'etf') && p.quantity >= 200) {
-                    const slots = Math.floor(p.quantity / 100);
-                    for (let i = 0; i < slots; i++) {
-                      effectiveAvailable.push({ ...p, id: `${p.id}__slot_${i}`, quantity: 100 });
-                    }
-                    const remainder = p.quantity % 100;
-                    if (remainder > 0) {
-                      effectiveAvailable.push({ ...p, id: `${p.id}__slot_${slots}`, quantity: remainder });
-                    }
-                  } else {
-                    effectiveAvailable.push(p);
-                  }
-                } else {
-                  effectiveAvailable.push(p);
-                }
-              }
-              const available = effectiveAvailable;
+              const available = getEffectiveAvailablePositions(rawAvailable);
               const selectedCount = available.filter(p => selectedSet.has(p.id)).length;
               const missingCount = state.missingLegs.length;
               const newCount = available.filter(p => p.asset_type === 'derivative').length;
