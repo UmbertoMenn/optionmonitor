@@ -184,7 +184,7 @@ export function computeMonitoring(
   archivedKeys?: string[],
 ): MonitoringResult {
   return {
-    uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, underlyingPrices),
+    uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, underlyingPrices, categories),
     coveredCallsITM: computeCoveredCallsITM(categories, underlyingPrices),
     doubleDiagonalOOR: computeDDOOR(categories, underlyingPrices),
     ironCondorOOR: computeICOOR(categories, underlyingPrices),
@@ -203,12 +203,13 @@ function computeUncoveredCalls(
   allPositions: Position[],
   stockPositions: Position[],
   underlyingPrices: Record<string, UnderlyingPrice>,
+  categories: DerivativeCategories,
 ): MonitoringUncoveredCall[] {
-  const balance = new Map<string, { owned: number; netSoldCalls: number; displayTicker: string }>();
+  const balance = new Map<string, { owned: number; netSoldCalls: number; syntheticCovered: number; displayTicker: string }>();
 
   const ensure = (key: string, displayTicker?: string) => {
     if (!balance.has(key)) {
-      balance.set(key, { owned: 0, netSoldCalls: 0, displayTicker: displayTicker || key });
+      balance.set(key, { owned: 0, netSoldCalls: 0, syntheticCovered: 0, displayTicker: displayTicker || key });
     }
   };
 
@@ -232,9 +233,27 @@ function computeUncoveredCalls(
     }
   }
 
+  // Count synthetic covered contracts (deep ITM sold puts or bought calls acting as stock)
+  for (const cc of categories.coveredCalls) {
+    if (cc.isSynthetic) {
+      const underlyingKey = cc.option.underlying || '';
+      const key = resolveKey(underlyingKey, underlyingPrices);
+      ensure(key);
+      balance.get(key)!.syntheticCovered += cc.contractsCovered;
+    }
+  }
+  for (const dr of categories.deRiskingCoveredCalls) {
+    if (dr.isSynthetic) {
+      const underlyingKey = dr.coveredCall.option.underlying || '';
+      const key = resolveKey(underlyingKey, underlyingPrices);
+      ensure(key);
+      balance.get(key)!.syntheticCovered += dr.coveredCall.contractsCovered;
+    }
+  }
+
   const result: MonitoringUncoveredCall[] = [];
   for (const [, data] of balance) {
-    const coveredContracts = Math.floor(data.owned / 100);
+    const coveredContracts = Math.floor(data.owned / 100) + data.syntheticCovered;
     const net = Math.max(0, data.netSoldCalls); // don't go negative
     if (net > coveredContracts) {
       result.push({
