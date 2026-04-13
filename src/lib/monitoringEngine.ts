@@ -214,8 +214,8 @@ function computeUncoveredCalls(
 
   // Count shares
   for (const stock of stockPositions) {
-    const key = stock.ticker ? stock.ticker.toUpperCase() : resolveKey(stock.description || '', underlyingPrices);
-    ensure(key, stock.ticker || key);
+    const { key, display } = resolveStockKey(stock, underlyingPrices);
+    ensure(key, display);
     balance.get(key)!.owned += stock.quantity;
   }
 
@@ -485,8 +485,8 @@ function computeAvailableCalls(
 
   // Count shares
   for (const stock of stockPositions) {
-    const key = stock.ticker ? stock.ticker.toUpperCase() : resolveKey(stock.description || '', underlyingPrices);
-    ensure(key, stock.ticker || key);
+    const { key, display } = resolveStockKey(stock, underlyingPrices);
+    ensure(key, display);
     balance.get(key)!.owned += stock.quantity;
   }
 
