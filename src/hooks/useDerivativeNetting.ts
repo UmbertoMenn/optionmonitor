@@ -39,7 +39,8 @@ export type StrategySectionCategory =
   | 'diagonal_put_spread'
   | 'leap_call'
   | 'long_put'
-  | 'other';
+  | 'other'
+  | 'orphans';
 
 export const STRATEGY_SECTION_LABELS: Record<StrategySectionCategory, string> = {
   covered_call: 'Covered Call',
@@ -52,6 +53,7 @@ export const STRATEGY_SECTION_LABELS: Record<StrategySectionCategory, string> = 
   leap_call: 'Leap Call',
   long_put: 'Protezioni',
   other: 'Altre Strategie',
+  orphans: 'Posizioni Orfane',
 };
 
 function getEffectiveExchangeRate(position: Position): number {
