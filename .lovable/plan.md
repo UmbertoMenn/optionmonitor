@@ -1,70 +1,211 @@
 
 
-## Fix completo: Netting allineato a Strategie Derivati + auto-cleanup config invalide
+## Fix definitivo: GOOGLE non deve finire in Posizioni Orfane
 
-Combina il refactor del netting (già approvato) con la pulizia automatica delle config strategia che diventano invalide quando le posizioni cambiano (es. IC META con 4 gambe → 3 gambe dopo upload).
+### Perché succede ancora
 
----
+Ho trovato due problemi reali nel codice attuale, non uno solo.
 
-### Parte A — Netting copia esatta di Strategie Derivati (già approvato)
+#### 1) Il netting non usa davvero la stessa fonte della pagina Strategie Derivati
+In `src/hooks/useDerivativeNetting.ts`, `buildCanonicalLegs()` ricostruisce le gambe leggendo:
+- `coveredCalls`
+- `deRiskingCoveredCalls`
+- `ironCondors`
+- `doubleDiagonals`
+- `nakedPuts`
+- `longPuts`
+- `leapCalls`
+- `groupedOtherStrategies`
 
-**File: `src/hooks/useDerivativeNetting.ts`**
+Ma la fonte più affidabile della pagina Derivati è `resolvedConfigs[].matchedPositions` dentro `categorizeDerivatives(...)`.
 
-1. Eliminare la ricostruzione `positionCategory` basata su raw positions
-2. Costruire i leg canonici direttamente da `categories` (output di `categorizeDerivatives({ configOnly: true })`):
-   - per ogni `coveredCalls[]`, `deRiskingCoveredCalls[]`, `ironCondors[]`, `doubleDiagonals[]`, `nakedPuts[]`, `leapCalls[]`, `longPuts[]`, `groupedOtherStrategies[]` → estrarre i `matchedPositions` virtuali (gambe già "affettate" dal resolver quantity-aware)
-3. Calcolare orfani **quantity-aware**:
-   ```text
-   per ogni derivato originale:
-     consumed = somma(quantity dei pezzi virtuali in tutte le categorie con stesso source id)
-     residuo = |quantity originale| - consumed
-     se residuo > 0 → crea gamba virtuale "orphan" con quantity proporzionale
-   ```
-4. Calcolo netting (totale, ex CC, ex CC&NP) sui leg canonici + residui:
-   - Covered Call / De-Risking CC: solo perdita intrinseca ITM della sold call (capped a market value)
-   - Naked Put: solo perdita intrinseca ITM (capped)
-   - Tutte le altre 6 categorie + orphans: market value pieno
-5. Stessa logica replicata in `getBreakdownForViewMode`
+Questo conta perché una config può avere `matchedVirtual` corretti, ma non entrare nelle sezioni finali per le regole di costruzione della categoria. In quel caso:
+- la pagina/config sa che la strategia esiste
+- il netting non prende quei `matchedPositions`
+- la quantità resta “non consumata”
+- il residuo finisce in `orphans`
 
-**File: `src/components/dashboard/DynamicPortfolioChart.tsx`**: nessuna modifica logica, solo verifica che la 10ª colonna "Posizioni Orfane" continui a renderizzarsi correttamente.
+È esattamente il tipo di bug che spiega GOOGLE o MU nelle orfane pur essendo configurati.
 
----
+#### 2) La dashboard non tratta correttamente l’aggregato utente
+La pagina Derivati, quando `isAggregatedView` è true, categorizza **per portfolio** e poi mergea i risultati.
+La dashboard invece passa a `useDerivativeNetting(...)` solo `isGlobalAggregate`, quindi fa lo split per portfolio solo nell’aggregato globale admin, non nell’aggregato utente.
 
-### Parte B — Auto-cleanup config invalide (nuovo)
+Quindi su “Il Mio Aggregato” il netting può mischiare:
+- posizioni di portfolio A
+- config di portfolio B
 
-**Problema**: una `strategy_configurations` di tipo `iron_condor` salvata con 4 leg signatures resta nel DB anche se l'utente carica un nuovo Excel dove una gamba è scomparsa. Il resolver in `categorizeDerivatives` non riesce a matchare la firma completa → la config non produce `matchedPositions` → META non appare in nessuna sezione e le 3 gambe residue finiscono in "Posizioni Orfane".
-
-**Fix in 2 livelli**:
-
-**B.1 — Rilevamento incompletezza nel resolver**
-
-In `src/lib/derivativeStrategies.ts` (funzione `categorizeDerivatives`, ramo `configOnly`): quando una config ha `expectedLegs` (4 per IC/DD, 2 per put spread, 1 per CC/NP/Leap, ecc.) ma il resolver matcha < `expectedLegs`, marcare la config come **incompleta** e:
-- non collocare i leg parzialmente matchati nella sezione strategica
-- restituirli come parte di un nuovo array `categories.incompleteConfigPositions` (gambe virtuali con flag `incomplete: true` e riferimento alla config)
-- la categoria di destinazione finale (orphans) li raccoglierà tramite la logica quantity-aware del netting
-
-**B.2 — Notifica + cleanup UI nella pagina Strategie Derivati**
-
-In `src/pages/Derivatives.tsx` (e/o componente correlato dove si listano le config):
-- dopo `categorizeDerivatives({ configOnly: true })`, ispezionare le config che hanno generato 0 `matchedPositions` malgrado abbiano `expectedLegs > 0`
-- mostrare un banner / toast: *"3 configurazioni non sono più valide perché le posizioni sottostanti sono cambiate (es. META Iron Condor: 4 gambe → 3 gambe). [Rivedi e correggi]"*
-- aggiungere azione "Rimuovi configurazioni invalide" che chiama `deleteStrategyConfigurations(invalidIds)` (già esiste nel hook `useStrategyConfigurations`)
-
-In alternativa più automatica (preferita): integrare con il dialogo già esistente di **Strategy Reconciliation** (vedi memoria `features/derivatives-management/strategy-reconciliation`). Quando il reconciliation engine viene eseguito post-upload, deve:
-- rilevare config con leg mancanti (firma originale non più presente)
-- proporle nel diff dialog come "Configurazione obsoleta — rimuovere"
-- al conferma utente: cancellazione dal DB
-
-**File da modificare per B**:
-1. `src/lib/derivativeStrategies.ts` — esporre conteggio leg mancanti per config
-2. `src/lib/strategyReconciliation.ts` — aggiungere check "config con leg insufficienti"
-3. `src/components/derivatives/StrategyReconciliationDialog.tsx` — sezione "Configurazioni obsolete"
+Questo crea falsi residui e quindi falsi orfani.
 
 ---
 
-### Risultato atteso (Mauro G + scenari simili)
+## Cosa implementare
 
-- **Netting dashboard**: MU resta in Double Diagonal, GOOGLE deep ITM in Covered/De-Risking CC, "Altre Strategie" mostra solo SMCI 38, "Posizioni Orfane" solo residui veri
-- **META con IC degradato**: il sistema rileva la config IC orfana, mostra nel dialog di riconciliazione "META Iron Condor: 1 gamba mancante", l'utente può rimuoverla o riconfigurarla come Put Spread/Other; le 3 gambe residue finiscono correttamente in "Posizioni Orfane" del netting fino alla riconfigurazione
-- **Coerenza 1:1** tra dashboard e pagina Strategie Derivati garantita dall'uso della stessa fonte canonica (`matchedPositions` del resolver)
+### A. Rifare il netting partendo da `resolvedConfigs.matchedPositions`
+**File:** `src/hooks/useDerivativeNetting.ts`
+
+Sostituire l’attuale `buildCanonicalLegs()` con una costruzione canonica basata su:
+- `categorizeDerivatives(..., { configOnly: true })`
+- `categories.resolvedConfigs`
+
+Per ogni `resolvedConfig`:
+- usare **direttamente** `matchedPositions`
+- mappare la `strategyType` alla categoria netting:
+  - `covered_call` → `covered_call`
+  - `derisking_covered_call` → `derisking_cc`
+  - `iron_condor` → `iron_condor`
+  - `double_diagonal` → `double_diagonal`
+  - `naked_put` → `naked_put`
+  - `put_spread` → `put_spread`
+  - `diagonal_put_spread` → `diagonal_put_spread`
+  - `leap_call` → `leap_call`
+  - `other` → `other`
+
+Per CC / De-Risking / Naked Put mantenere il riferimento a `linkedStock` del `resolvedConfig` per i calcoli intrinseci.
+
+Questo elimina la dipendenza dalle sezioni display e usa la vera sorgente configurata.
+
+---
+
+### B. Calcolare gli orfani solo come residui veri
+Sempre in `src/hooks/useDerivativeNetting.ts`:
+
+Per ogni derivato originale:
+- sommare quanta quantità è stata consumata dai `matchedPositions` delle config
+- usare `sourceId` = id raw senza suffissi virtuali
+- creare orfano solo se:
+```text
+residuo = |qty originale| - qty consumata > 0
+```
+
+Il residuo va creato proporzionalmente su:
+- `quantity`
+- `market_value`
+- `snapshot_market_value`
+- `profit_loss`
+
+Così GOOGLE finisce in orfani solo se resta davvero una parte non assegnata alla config.
+
+---
+
+### C. Separare SEMPRE per portfolio nelle viste aggregate
+**File:** `src/hooks/useDerivativeNetting.ts`
+
+L’hook deve smettere di usare il solo booleano `isGlobalAggregate`.
+Va introdotta la logica “aggregated view” coerente con la pagina Derivati:
+- raggruppare sempre per `portfolio_id` quando sono presenti più portfolio nella vista
+- applicare `computeSinglePortfolioNetting(...)` separatamente per ogni portfolio
+- poi fare merge del breakdown
+
+Questo rende coerente dashboard e pagina Derivati sia per:
+- aggregato globale admin
+- aggregato utente
+
+---
+
+### D. Non derivare più il breakdown “ex CC / ex CC&NP” dalle sezioni visuali
+**File:** `src/hooks/useDerivativeNetting.ts`
+
+Anche `getBreakdownForViewMode(...)` deve usare la stessa lista canonica di leg costruita da `resolvedConfigs + residui`, non le categorie ricostruite.
+
+Regole:
+- `netting_total`: market value pieno
+- `netting_ex_cc`: per `covered_call` e `derisking_cc` usare solo perdita intrinseca ITM della sold call, con cap al costo di chiusura
+- `netting_ex_cc_np`: stessa regola + naked put ITM intrinseca capped
+- tutte le altre categorie, inclusi `orphans`: market value pieno
+
+---
+
+### E. Rendere visibile la differenza tra config matchata e config degradata
+**File:** `src/lib/derivativeStrategies.ts`
+
+Nel ramo `configOnly`, oltre a `resolvedConfigs`, rendere esplicito quando una config è:
+- `matched`
+- `partial`
+- `unmatched`
+
+e usare questi stati nel netting:
+- `matched` / `partial`: i `matchedPositions` vanno comunque consumati
+- `unmatched`: nessun consumo, tutto residuo → `orphans`
+
+Questo evita che una config parzialmente riconosciuta venga persa completamente.
+
+---
+
+### F. Sistemare il bug delle config rimaste con tipo sbagliato dopo variazione gambe
+**Problema esempio:** META era Iron Condor, poi resta a 3 gambe, ma nel DB la config è ancora `iron_condor`.
+
+#### Fix
+**File:** `src/lib/strategyReconciliation.ts`  
+**File:** `src/components/derivatives/StrategyReconciliationDialog.tsx`
+
+Estendere la riconciliazione in modo che:
+- una config con leg mancanti sia marcata `isDegraded`
+- se il set di leg residuo corrisponde a un altro tipo rilevabile, venga proposta una conversione suggerita
+- al salvataggio, la nuova config sostituisca quella obsoleta
+
+Esempio:
+- META 4 leg → 3 leg
+- non deve più essere considerata iron condor valida
+- non deve sparire nel nulla
+- fino a riconfigurazione, le gambe effettivamente matchate/non matchate devono ricadere correttamente negli orfani/residui
+- nel dialogo va proposta la correzione o rimozione
+
+---
+
+## File da modificare
+
+1. `src/hooks/useDerivativeNetting.ts`
+   - rifare `buildCanonicalLegs()` usando `resolvedConfigs.matchedPositions`
+   - consumo quantity-aware dai `resolvedConfigs`
+   - split per portfolio in tutte le viste aggregate
+   - allineare anche `getBreakdownForViewMode()`
+
+2. `src/lib/derivativeStrategies.ts`
+   - esporre meglio i `resolvedConfigs` come fonte canonica del match
+   - mantenere `status` affidabile per matched/partial/unmatched
+
+3. `src/lib/strategyReconciliation.ts`
+   - rafforzare detection config degrade/obsolete
+
+4. `src/components/derivatives/StrategyReconciliationDialog.tsx`
+   - proporre pulizia/correzione delle config degradate
+
+---
+
+## Risultato atteso
+
+Per GOOGLE:
+- se è davvero dentro una covered call sintetica/de-risking configurata, non apparirà più in `Posizioni Orfane`
+
+Per MU:
+- se è configurata come Double Diagonal e i `matchedPositions` esistono, resterà in Double Diagonal
+
+Per META degradata:
+- non verrà mostrata come Iron Condor valida
+- le gambe residue finiranno correttamente tra i residui/orfani finché non viene riconfigurata
+- la UI proporrà la correzione della config
+
+Per la home:
+- il netting userà finalmente la stessa base logica della pagina Strategie Derivati
+- niente più casi in cui una posizione configurata sparisce dalla sezione giusta e riappare negli orfani
+
+## Dettagli tecnici
+
+```text
+Nuova sorgente canonica netting:
+categorizeDerivatives(..., { configOnly: true })
+  -> resolvedConfigs[]
+     -> matchedPositions[]
+
+Orfani:
+raw derivative qty
+- somma qty matchedPositions con stesso sourceId
+= residuo reale
+
+Aggregato:
+group by portfolio_id
+computeSinglePortfolioNetting per portfolio
+merge breakdown finale
+```
 
