@@ -39,7 +39,8 @@ export type StrategySectionCategory =
   | 'diagonal_put_spread'
   | 'leap_call'
   | 'long_put'
-  | 'other';
+  | 'other'
+  | 'orphans';
 
 export const STRATEGY_SECTION_LABELS: Record<StrategySectionCategory, string> = {
   covered_call: 'Covered Call',
@@ -52,6 +53,7 @@ export const STRATEGY_SECTION_LABELS: Record<StrategySectionCategory, string> = 
   leap_call: 'Leap Call',
   long_put: 'Protezioni',
   other: 'Altre Strategie',
+  orphans: 'Posizioni Orfane',
 };
 
 function getEffectiveExchangeRate(position: Position): number {
@@ -82,7 +84,7 @@ export function computeSinglePortfolioNetting(
     return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [] };
   }
 
-  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
+  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs, { configOnly: true });
 
   // Build position ID → category sets
   const positionCategory = new Map<string, StrategySectionCategory>();
@@ -169,7 +171,16 @@ export function computeSinglePortfolioNetting(
     leap_call: makeAcc(),
     long_put: makeAcc(),
     other: makeAcc(),
+    orphans: makeAcc(),
   };
+
+  // Detect orphans: derivatives not classified into any of the 9 strategy buckets
+  const isOrphan = (id: string) => !positionCategory.has(id);
+  for (const d of derivatives) {
+    if (isOrphan(d.id)) {
+      positionCategory.set(d.id, 'orphans');
+    }
+  }
 
   let totalNetting = 0;
   let nettingExCoveredCall = 0;
@@ -283,7 +294,7 @@ export function computeSinglePortfolioNetting(
   // Aggregate details by ticker within each category
   const allCategories: StrategySectionCategory[] = [
     'covered_call', 'derisking_cc', 'iron_condor', 'double_diagonal',
-    'naked_put', 'put_spread', 'diagonal_put_spread', 'leap_call', 'long_put', 'other'
+    'naked_put', 'put_spread', 'diagonal_put_spread', 'leap_call', 'long_put', 'other', 'orphans'
   ];
 
   for (const cat of allCategories) {
@@ -422,7 +433,7 @@ export function getBreakdownForViewMode(
 
   // For netting_ex_cc_np: recalculate covered_call, derisking_cc, naked_put with intrinsic values
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
-  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs);
+  const categories = categorizeDerivatives(derivatives, positions, overrides, strategyConfigs, { configOnly: true });
   const coveredCallMap = new Map(categories.coveredCalls.map(cc => [cc.option.id, cc]));
   const deRiskingCCMap = new Map(categories.deRiskingCoveredCalls.map(dcc => [dcc.coveredCall.option.id, dcc]));
   const nakedPutMap = new Map(categories.nakedPuts.map(np => [np.option.id, np]));
