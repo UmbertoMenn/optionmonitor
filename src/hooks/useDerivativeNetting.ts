@@ -78,12 +78,31 @@ interface CanonicalLeg {
   associatedUnderlying?: Position | null;
 }
 
+/** Mappa lo strategy_type del DB alla categoria di netting */
+function mapStrategyTypeToCategory(strategyType: string): StrategySectionCategory {
+  switch (strategyType) {
+    case 'covered_call': return 'covered_call';
+    case 'derisking_covered_call': return 'derisking_cc';
+    case 'iron_condor': return 'iron_condor';
+    case 'double_diagonal': return 'double_diagonal';
+    case 'naked_put': return 'naked_put';
+    case 'put_spread': return 'put_spread';
+    case 'diagonal_put_spread': return 'diagonal_put_spread';
+    case 'leap_call': return 'leap_call';
+    case 'long_put': return 'long_put';
+    default: return 'other';
+  }
+}
+
 /**
  * Costruisce la lista canonica di "gambe virtuali" classificate, usando
- * ESATTAMENTE l'output di categorizeDerivatives({ configOnly: true }).
+ * DIRETTAMENTE i resolvedConfigs prodotti da categorizeDerivatives({ configOnly: true }).
  *
- * Questa è la stessa fonte usata dalla pagina Strategie Derivati, garantendo
- * coerenza 1:1 tra dashboard e pagina derivati.
+ * Questa è la VERA fonte canonica: ogni resolvedConfig porta i suoi matchedPositions
+ * (gambe virtuali quantity-aware) e il linkedStock associato. In questo modo qualsiasi
+ * config matched/partial consuma davvero le posizioni, e nessuna posizione configurata
+ * può rifinire erroneamente in "Posizioni Orfane" solo perché filtrata fuori da una
+ * sezione display.
  */
 function buildCanonicalLegs(
   derivatives: Position[],
@@ -98,112 +117,17 @@ function buildCanonicalLegs(
 
   const legs: CanonicalLeg[] = [];
 
-  // Covered Calls (standard + sintetiche): la sold call + eventuale syntheticPut
-  for (const cc of categories.coveredCalls) {
-    legs.push({
-      sourceId: stripVirtualSuffix(cc.option.id),
-      category: 'covered_call',
-      position: cc.option,
-      associatedUnderlying: cc.underlying,
-    });
-    if (cc.syntheticPut) {
+  // FONTE CANONICA: usa direttamente resolvedConfigs.matchedPositions
+  for (const rc of categories.resolvedConfigs) {
+    if (rc.status === 'unmatched') continue; // niente da consumare
+    const cat = mapStrategyTypeToCategory(rc.strategyType);
+    for (const matched of rc.matchedPositions) {
+      if (matched.asset_type !== 'derivative') continue; // ignora stock virtuali eventuali
       legs.push({
-        sourceId: stripVirtualSuffix(cc.syntheticPut.id),
-        category: 'covered_call',
-        position: cc.syntheticPut,
-        associatedUnderlying: cc.underlying,
-      });
-    }
-  }
-
-  // De-Risking Covered Calls: sold call + protection put (+ syntheticPut)
-  for (const dcc of categories.deRiskingCoveredCalls) {
-    legs.push({
-      sourceId: stripVirtualSuffix(dcc.coveredCall.option.id),
-      category: 'derisking_cc',
-      position: dcc.coveredCall.option,
-      associatedUnderlying: dcc.coveredCall.underlying,
-    });
-    legs.push({
-      sourceId: stripVirtualSuffix(dcc.protectionPut.id),
-      category: 'derisking_cc',
-      position: dcc.protectionPut,
-      associatedUnderlying: dcc.coveredCall.underlying,
-    });
-    if (dcc.syntheticPut) {
-      legs.push({
-        sourceId: stripVirtualSuffix(dcc.syntheticPut.id),
-        category: 'derisking_cc',
-        position: dcc.syntheticPut,
-        associatedUnderlying: dcc.coveredCall.underlying,
-      });
-    }
-  }
-
-  // Iron Condors: 4 leg
-  for (const ic of categories.ironCondors) {
-    [ic.soldPut, ic.boughtPut, ic.soldCall, ic.boughtCall].forEach(p => {
-      legs.push({
-        sourceId: stripVirtualSuffix(p.id),
-        category: 'iron_condor',
-        position: p,
-      });
-    });
-  }
-
-  // Double Diagonals: 4 leg
-  for (const dd of categories.doubleDiagonals) {
-    [dd.soldPut, dd.boughtPut, dd.soldCall, dd.boughtCall].forEach(p => {
-      legs.push({
-        sourceId: stripVirtualSuffix(p.id),
-        category: 'double_diagonal',
-        position: p,
-      });
-    });
-  }
-
-  // Naked Puts
-  for (const np of categories.nakedPuts) {
-    legs.push({
-      sourceId: stripVirtualSuffix(np.option.id),
-      category: 'naked_put',
-      position: np.option,
-      associatedUnderlying: np.underlying,
-    });
-  }
-
-  // Long Puts (Protezioni)
-  for (const lp of categories.longPuts) {
-    legs.push({
-      sourceId: stripVirtualSuffix(lp.option.id),
-      category: 'long_put',
-      position: lp.option,
-      associatedUnderlying: lp.underlying,
-    });
-  }
-
-  // Leap Calls
-  for (const lc of categories.leapCalls) {
-    legs.push({
-      sourceId: stripVirtualSuffix(lc.option.id),
-      category: 'leap_call',
-      position: lc.option,
-      associatedUnderlying: lc.underlying,
-    });
-  }
-
-  // Put Spread / Diagonal Put Spread / Other (configOtherGroups)
-  for (const group of categories.groupedOtherStrategies) {
-    let cat: StrategySectionCategory = 'other';
-    if (group.configStrategyType === 'put_spread') cat = 'put_spread';
-    else if (group.configStrategyType === 'diagonal_put_spread') cat = 'diagonal_put_spread';
-
-    for (const opt of group.options) {
-      legs.push({
-        sourceId: stripVirtualSuffix(opt.option.id),
+        sourceId: stripVirtualSuffix(matched.id),
         category: cat,
-        position: opt.option,
-        associatedUnderlying: opt.underlying,
+        position: matched,
+        associatedUnderlying: rc.linkedStock || null,
       });
     }
   }
@@ -401,7 +325,7 @@ export function useDerivativeNetting(
   summary: PortfolioSummary | null,
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
-  isGlobalAggregate: boolean = false,
+  isAggregatedView: boolean = false,
   strategyConfigs: StrategyConfiguration[] = []
 ): NettingResult {
   return useMemo(() => {
@@ -414,7 +338,12 @@ export function useDerivativeNetting(
 
     if (!summary || positions.length === 0) return emptyResult;
 
-    if (isGlobalAggregate) {
+    // Split per portfolio in QUALSIASI vista aggregata (admin globale o utente).
+    // Rilevamento robusto: se le positions abbracciano più portfolio_id, è aggregata.
+    const distinctPortfolios = new Set(positions.map(p => p.portfolio_id));
+    const needsSplit = isAggregatedView || distinctPortfolios.size > 1;
+
+    if (needsSplit) {
       const byPortfolio = new Map<string, Position[]>();
       positions.forEach(p => {
         if (!byPortfolio.has(p.portfolio_id)) byPortfolio.set(p.portfolio_id, []);
@@ -475,7 +404,7 @@ export function useDerivativeNetting(
       nettingExCCAndNP: summary.totalValue + result.nettingExCCAndNP,
       breakdown: result.breakdown,
     };
-  }, [positions, summary, overrides, underlyingPrices, isGlobalAggregate, strategyConfigs]);
+  }, [positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs]);
 }
 
 /**
