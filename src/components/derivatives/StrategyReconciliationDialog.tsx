@@ -627,6 +627,11 @@ export function StrategyReconciliationDialog({
               const missingCount = state.missingLegs.length;
               const newCount = available.filter(p => p.asset_type === 'derivative').length;
 
+              // Identifica config obsolete/degradate per questo underlying
+              const itemsForKey = items.filter(it => normalizeUnderlying(it.underlying) === key);
+              const obsoleteItems = itemsForKey.filter(it => it.isObsolete);
+              const degradedItems = itemsForKey.filter(it => it.isDegraded);
+
               const handleSplitPosition = (posId: string) => {
                 setSplitPositionIds(prev => new Set(prev).add(posId));
               };
@@ -654,7 +659,7 @@ export function StrategyReconciliationDialog({
 
               return (
                 <Collapsible key={key} defaultOpen>
-                  <Card className="border-yellow-500/30">
+                  <Card className={`${obsoleteItems.length > 0 ? 'border-destructive/50' : 'border-yellow-500/30'}`}>
                     <CollapsibleTrigger className="w-full">
                       <CardHeader className="pb-2 pt-3 px-4">
                         <div className="flex items-center justify-between">
@@ -663,6 +668,16 @@ export function StrategyReconciliationDialog({
                             <span className="text-sm font-bold uppercase">{state.underlying}</span>
                           </div>
                           <div className="flex items-center gap-1.5">
+                            {obsoleteItems.length > 0 && (
+                              <Badge variant="outline" className="text-[10px] border-destructive/60 text-destructive bg-destructive/5">
+                                {obsoleteItems.length} obsolet{obsoleteItems.length === 1 ? 'a' : 'e'}
+                              </Badge>
+                            )}
+                            {degradedItems.length > 0 && (
+                              <Badge variant="outline" className="text-[10px] border-orange-500/60 text-orange-500 bg-orange-500/5">
+                                {degradedItems.length} degradat{degradedItems.length === 1 ? 'a' : 'e'}
+                              </Badge>
+                            )}
                             {missingCount > 0 && (
                               <Badge variant="outline" className="text-[10px] border-destructive/50 text-destructive">
                                 {missingCount} rimoss{missingCount === 1 ? 'a' : 'e'}
@@ -680,6 +695,16 @@ export function StrategyReconciliationDialog({
                             )}
                           </div>
                         </div>
+                        {(obsoleteItems.length > 0 || degradedItems.length > 0) && (
+                          <div className="text-[10px] text-muted-foreground text-left mt-1">
+                            {obsoleteItems.length > 0 && (
+                              <span>Configurazione non più valida: tutte le gambe originali mancano. </span>
+                            )}
+                            {degradedItems.length > 0 && (
+                              <span>Strategia incompleta rispetto al tipo configurato. Riconfigura o rimuovi.</span>
+                            )}
+                          </div>
+                        )}
                       </CardHeader>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
