@@ -50,6 +50,7 @@ const SECTION_COLORS: Record<string, string> = {
   leap_call: 'hsl(160, 60%, 45%)',
   long_put: 'hsl(142, 71%, 45%)',
   other: 'hsl(45, 80%, 55%)',
+  orphans: 'hsl(0, 0%, 55%)',
 };
 
 // ─── Simple Bars Chart ────────────────────────────────────────
