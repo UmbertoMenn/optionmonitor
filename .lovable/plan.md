@@ -1,43 +1,68 @@
 
 
-## Fix: De-Risking Covered Call trattate come Covered Call nel Risk Analyzer
+## Fix Netting Dashboard: usa esattamente le posizioni di Strategie Derivati + colonna "Posizioni orfane"
 
-### Causa radice del 659K
+### Causa del mismatch attuale
 
-Il config `derisking_covered_call` di SilviaS ha `quantity_abs` implicito = 1 per ogni firma. Ma molte posizioni hanno qty > 1 (es. NVIDIA CALL 185 qty=-2). Il config consuma 1 contratto, l'altro resta **orfano** → step 6.5 lo mette in `groupedOtherStrategies` → `calculateStrategyRisk` calcola il max loss → 659K.
+`useDerivativeNetting` chiama `categorizeDerivatives` **senza** `configOnly`, quindi esegue auto-classificazione euristica (STEP 1-6) + STEP 6.5 (orfani su underlying configurati → "Altre Strategie"). La pagina Derivati invece usa `configOnly: true` e mostra solo ciò che matcha le config salvate.
 
-Inoltre, la protezione put delle de-risking CC deve essere utilizzata come protezione stock, identicamente alle covered call normali.
+Risultato: una covered call sintetica GOOGLE (configurata correttamente) nella dashboard può finire spezzata tra la categoria corretta + un orfano in "Altre Strategie", oppure WDC/ORACLE classificati in modo diverso tra le due pagine.
 
-### Logica corretta
+### Fix in 3 punti come richiesto
 
-Per il Risk Analyzer, le de-risking covered calls = covered calls:
-- **Stock risk**: il rischio è `qty × price`, ridotto dalla protezione put (il bought put della de-risking CC). Già funziona tramite scan di `allBoughtPuts` in `calculateStockRisk`.
-- **Strategy risk**: ZERO da de-risking CC. Le sold call sono coperture (cap al rialzo), non rischio aggiuntivo.
-- **Orphan sold calls**: se un underlying ha già una covered call O de-risking CC, le sold call orfane sullo stesso underlying sono semplicemente covered call aggiuntive → rischio ZERO.
+**1) Stessa fonte dati di Strategie Derivati**
 
-### Fix (1 file)
+In `src/hooks/useDerivativeNetting.ts` (sia `computeSinglePortfolioNetting` riga ~85 sia `getBreakdownForViewMode` riga ~425):
 
-**`src/lib/riskCalculator.ts`** — funzione `calculateStrategyRisk`:
-
-1. Riceve `categories` completo (già lo riceve)
-2. Costruisce un `Set<string>` di underlying coperti: quelli presenti in `coveredCalls` o `deRiskingCoveredCalls`
-3. Filtra `groupedOtherStrategies`: se TUTTE le opzioni del gruppo sono sold calls su un underlying coperto, skip (rischio = 0, è una covered call extra)
-4. Per i gruppi misti, rimuove solo le sold calls coperte prima di calcolare il max loss
-
-```text
-coveredUnderlyings = Set of normalized underlyings from:
-  - categories.coveredCalls[].option.underlying
-  - categories.deRiskingCoveredCalls[].coveredCall.option.underlying
-
-Per ogni groupedOtherStrategy:
-  Se underlying è in coveredUnderlyings:
-    → filtra le sold calls (sono covered)
-    → se restano altre gambe, calcola max loss solo su quelle
-    → se non restano gambe, skip intero gruppo
+```ts
+const categories = categorizeDerivatives(
+  derivatives, positions, overrides, strategyConfigs,
+  { configOnly: true }
+);
 ```
 
-### Risultato atteso
-- SilviaS: strategy risk = ~0 (tutte le sue strategie sono de-risking CC, le orphan calls sono covered)
-- Stock risk: invariato (protezione put già trovata tramite scan allPositions)
-- Nessun impatto su utenti senza de-risking CC
+Sempre `configOnly: true`, identico alla pagina Derivati. Niente fallback condizionale: se l'utente non ha config, le 9 categorie strategiche sono vuote e tutto finisce in "Posizioni orfane" (vedi punto 3). Questo è coerente con la richiesta "PRENDI ESATTAMENTE LE POSIZIONI DI STRATEGIE DERIVATI, SENZA STORIE".
+
+**2) Calcoli per sezione (regola netting ex CC e NP invariata)**
+
+La logica di calcolo per ciascuna delle 9 sezioni resta quella già documentata in `tech/risk-management/netting-logic`:
+- `Netting Totale`: market value pieno per tutte le sezioni
+- `Netting ex CC e NP`: per Covered Call, De-Risking CC, Naked Put → solo perdita intrinseca se ITM (capped); per le altre 6 sezioni → market value pieno
+
+Nessuna modifica a questa parte: già corretta, continua a funzionare sui dati di `categories` (ora identici a Derivati).
+
+**3) Nuova categoria "Posizioni orfane"**
+
+Le posizioni orfane sono i derivati presenti nel portafoglio ma NON inclusi in nessuna delle 9 categorie restituite da `categorizeDerivatives({ configOnly: true })`.
+
+Implementazione:
+
+a) **In `useDerivativeNetting.ts`**: dopo aver ottenuto `categories`, calcolare l'insieme degli ID dei derivati classificati raccogliendoli da tutte le 9 sezioni. Gli orfani sono `derivatives.filter(d => !classifiedIds.has(d.id))`.
+
+b) Aggiungere al breakdown una 10ª voce `orphans` con:
+   - `nettingTotal`: somma `market_value` di tutti gli orfani
+   - `nettingExCCNP`: stesso valore (sono "altre strategie" → market value pieno per entrambe le viste)
+   - `byUnderlying`: raggruppamento per ticker risolto (per i tooltip), come già fatto per le altre sezioni
+
+c) **Nel tipo del breakdown** (probabilmente in `useDerivativeNetting.ts` o in un file di tipi adiacente): aggiungere campo `orphans` accanto a `coveredCalls`, `deRiskingCC`, `ironCondors`, ecc.
+
+d) **In `HistoricalChartsCarousel.tsx` / `DynamicPortfolioChart.tsx`** (la card che renderizza il grafico a barre verticali): aggiungere "Posizioni orfane" come 10ª colonna dopo "Altre Strategie", con stesso pattern (nascosta se valore = 0, tooltip per ticker, colore distinto — es. grigio/ambra per segnalare visivamente che sono non configurate).
+
+### File da modificare
+
+1. **`src/hooks/useDerivativeNetting.ts`**:
+   - Forzare `{ configOnly: true }` in entrambe le chiamate a `categorizeDerivatives`
+   - Calcolare lista orfani (derivati non presenti in nessuna delle 9 categorie)
+   - Aggiungere campo `orphans` al breakdown ritornato (con `nettingTotal`, `nettingExCCNP`, `byUnderlying`)
+   - Includere `orphans.nettingTotal` / `orphans.nettingExCCNP` nei totali aggregati
+
+2. **Componente grafico netting carousel** (da identificare tra `HistoricalChartsCarousel` e `DynamicPortfolioChart`): aggiungere la 10ª colonna "Posizioni orfane" con stesso template delle altre.
+
+### Effetto atteso per Mauro G
+
+- "Altre Strategie" mostra SOLO la short call SMCI 38 maggio (l'unica configurata in quella sezione)
+- GOOGLE deep ITM correttamente nella colonna "De-Risking CC" o "Covered Call" (dove configurato), niente duplicazione
+- WDC, ORACLE, META, IonQ nelle rispettive sezioni configurate (LEAP Call, Naked Put, ecc.)
+- Eventuali derivati realmente non configurati appaiono nella nuova colonna "Posizioni orfane" con dettaglio ticker nel tooltip
+- Coerenza 1:1 tra dashboard netting e pagina Strategie Derivati (stesso dataset di partenza)
 
