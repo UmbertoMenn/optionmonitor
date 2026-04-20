@@ -236,12 +236,24 @@ export function reconcileConfigs(
 
       const hasChanges = legs.some(l => l.status === 'missing' || l.status === 'new');
       if (hasChanges) {
+        const missingLegs = legs.filter(l => l.status === 'missing');
+        const presentLegs = legs.filter(l => l.status === 'present');
+        const totalSignatures = signatures.length;
+        const missingCount = missingLegs.length;
+        const expected = EXPECTED_LEG_COUNTS[config.strategy_type] ?? totalSignatures;
+        const isObsolete = presentLegs.length === 0 && missingCount > 0;
+        const isDegraded = !isObsolete && presentLegs.length < expected && missingCount > 0;
+
         items.push({
           config,
           underlying: config.underlying,
           strategyType: config.strategy_type,
           legs,
           hasChanges,
+          isObsolete,
+          isDegraded,
+          missingCount,
+          totalSignatures,
         });
       }
     }
