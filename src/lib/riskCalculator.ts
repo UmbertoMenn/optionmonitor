@@ -18,6 +18,7 @@ import {
 
 export interface StockRiskDetail {
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation (e.g. "NVDA")
   stockValue: number;           // Valore azioni in valuta originale
   stockQuantity: number;        // Numero azioni
   stockPrice: number;           // Prezzo azione
@@ -36,6 +37,7 @@ export interface StockRiskDetail {
 
 export interface NakedPutRiskDetail {
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation
   strike: number;
   contracts: number;
   expiry: string;
@@ -47,6 +49,7 @@ export interface NakedPutRiskDetail {
 
 export interface LeapCallRiskDetail {
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation
   strike: number;
   contracts: number;
   avgCost: number;
@@ -61,6 +64,7 @@ export interface LeapCallRiskDetail {
 export interface StrategyRiskDetail {
   strategyName: string;
   underlying: string;
+  tickerKey: string;            // Canonical ticker key for consolidation
   maxLoss: number;              // In valuta originale
   maxLossEUR: number;
   currency: string;
