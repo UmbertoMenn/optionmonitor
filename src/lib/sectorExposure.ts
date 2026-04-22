@@ -936,14 +936,12 @@ export function calculateConsolidatedTopHoldings(
   limit: number = 100, // Show all holdings by default
   gpStockHoldings: GPHoldingRow[] = [],
 ): ConsolidatedHoldingWithDetails[] {
-  // Key-based map for stable aggregation
-  const holdingsByKey = new Map<string, ConsolidatedHoldingWithDetails>();
-  // Fallback map for names without distinctive keys (exact match only)
-  const holdingsByExactName = new Map<string, ConsolidatedHoldingWithDetails>();
-  
-  // Pattern per riconoscere ETF
+  // Single canonical map keyed by tickerKey (e.g. "NVDA", "BABA", or "NAME:..." fallback)
+  const holdingsByTicker = new Map<string, ConsolidatedHoldingWithDetails>();
+
+  // Pattern to recognize ETF descriptions
   const ETF_PATTERN = /ETF|UCITS|ISHARES|ISHSIII|ISHSIV|ISHSV|ISHSVII|VANGUARD|VNG|SPDR|SSG|LYXOR|AMUNDI|XTRACKERS|XTRK|INVESCO|VANECK|WISDOMTREE|WTR|UBS ETF|HSBC ETF|FRANKLIN/i;
-  
+
   const formatExpiry = (expiry: string) => {
     if (!expiry) return '-';
     const date = new Date(expiry);
@@ -951,9 +949,11 @@ export function calculateConsolidatedTopHoldings(
     const year = date.getFullYear().toString().slice(-2);
     return `${month}/${year}`;
   };
-  
-  const createHolding = (name: string): ConsolidatedHoldingWithDetails => ({
+
+  const createHolding = (name: string, tickerKey: string): ConsolidatedHoldingWithDetails => ({
     name: name.trim(),
+    ticker: getDisplayTicker(tickerKey),
+    tickerKey,
     stockRisk: 0,
     stockRiskWithProtection: 0,
     nakedPutRisk: 0,
@@ -967,77 +967,70 @@ export function calculateConsolidatedTopHoldings(
     stockDetails: [],
     strategyDetails: [],
   });
-  
-  const getOrCreateHolding = (name: string): ConsolidatedHoldingWithDetails => {
-    const key = getHoldingKey(name);
-    const cleanName = name.trim();
-    
-    if (key) {
-      // Use key-based lookup
-      if (holdingsByKey.has(key)) {
-        const existing = holdingsByKey.get(key)!;
-        // Prefer shorter/cleaner name or direct stock name (without AZ. prefix)
-        const existingHasAZ = existing.name.startsWith('AZ.');
-        const newHasAZ = cleanName.startsWith('AZ.');
-        if (existingHasAZ && !newHasAZ) {
-          existing.name = cleanName;
-        } else if (cleanName.length < existing.name.length && !newHasAZ) {
-          existing.name = cleanName;
-        }
-        return existing;
-      }
-      
-      const holding = createHolding(cleanName);
-      holdingsByKey.set(key, holding);
-      return holding;
-    } else {
-      // No distinctive key - use exact normalized name
-      const normalizedName = normalizeHoldingName(name);
-      if (holdingsByExactName.has(normalizedName)) {
-        return holdingsByExactName.get(normalizedName)!;
-      }
-      
-      const holding = createHolding(cleanName);
-      holdingsByExactName.set(normalizedName, holding);
-      return holding;
-    }
+
+  // Pick the most descriptive name across sources for the same tickerKey.
+  const pickBestName = (current: string, candidate: string): string => {
+    const curClean = current.trim();
+    const candClean = candidate.trim();
+    if (!curClean) return candClean;
+    if (!candClean) return curClean;
+    const curHasAZ = curClean.startsWith('AZ.');
+    const candHasAZ = candClean.startsWith('AZ.');
+    if (curHasAZ && !candHasAZ) return candClean;
+    if (!curHasAZ && candHasAZ) return curClean;
+    const curHasSpace = /\s/.test(curClean);
+    const candHasSpace = /\s/.test(candClean);
+    if (curHasSpace && !candHasSpace) return curClean;
+    if (!curHasSpace && candHasSpace) return candClean;
+    return candClean.length > curClean.length ? candClean : curClean;
   };
-  
-  // 1. Add direct stock risk (skip ETFs)
-  for (const stock of analysis.stockDetails) {
-    const isETF = ETF_PATTERN.test(stock.underlying);
-    
-    if (!isETF) {
-      const holding = getOrCreateHolding(stock.underlying);
-      
-      // stockValue is full value, riskEUR is value with protections
-      const stockValueEUR = stock.stockValue / stock.exchangeRate;
-      holding.stockRisk += stockValueEUR;
-      holding.stockRiskWithProtection += stock.riskEUR;
-      
-      holding.sources.push({
-        type: 'stock',
-        name: 'Diretto',
-        exposure: options.includeProtections ? stock.riskEUR : stockValueEUR,
-      });
-      holding.stockDetails.push({
-        quantity: stock.stockQuantity,
-        price: stock.stockPrice,
-        currency: stock.currency,
-        value: stockValueEUR,
-        valueWithProtection: stock.riskEUR,
-        // Protection info from StockRiskDetail
-        protectionContracts: stock.protectionContracts || 0,
-        protectionStrike: stock.protectionStrike ?? null,
-        hasProtection: stock.hasProtection || false,
-      });
+
+  const getOrCreateHolding = (
+    rawName: string,
+    tickerKey: string
+  ): ConsolidatedHoldingWithDetails => {
+    const cleanName = (rawName || '').trim() || tickerKey;
+    const existing = holdingsByTicker.get(tickerKey);
+    if (existing) {
+      existing.name = pickBestName(existing.name, cleanName);
+      return existing;
     }
+    const holding = createHolding(cleanName, tickerKey);
+    holdingsByTicker.set(tickerKey, holding);
+    return holding;
+  };
+
+  // 1. Direct stock risk (skip ETFs)
+  for (const stock of analysis.stockDetails) {
+    const isETF = stock.isETF || ETF_PATTERN.test(stock.underlying);
+    if (isETF) continue;
+
+    const holding = getOrCreateHolding(stock.underlying, stock.tickerKey);
+
+    const stockValueEUR = stock.stockValue / stock.exchangeRate;
+    holding.stockRisk += stockValueEUR;
+    holding.stockRiskWithProtection += stock.riskEUR;
+
+    holding.sources.push({
+      type: 'stock',
+      name: 'Diretto',
+      exposure: options.includeProtections ? stock.riskEUR : stockValueEUR,
+    });
+    holding.stockDetails.push({
+      quantity: stock.stockQuantity,
+      price: stock.stockPrice,
+      currency: stock.currency,
+      value: stockValueEUR,
+      valueWithProtection: stock.riskEUR,
+      protectionContracts: stock.protectionContracts || 0,
+      protectionStrike: stock.protectionStrike ?? null,
+      hasProtection: stock.hasProtection || false,
+    });
   }
-  
-  // 3. Add Naked PUT risk
+
+  // 2. Naked PUT risk
   for (const np of analysis.nakedPutDetails) {
-    const holding = getOrCreateHolding(np.underlying);
-    
+    const holding = getOrCreateHolding(np.underlying, np.tickerKey);
     holding.nakedPutRisk += np.riskEUR;
     holding.sources.push({
       type: 'nakedPut',
@@ -1051,11 +1044,10 @@ export function calculateConsolidatedTopHoldings(
       expiry: np.expiry,
     });
   }
-  
-  // 4. Add Leap Call risk (market value)
+
+  // 3. Leap Call risk (market value)
   for (const lc of analysis.leapCallDetails) {
-    const holding = getOrCreateHolding(lc.underlying);
-    
+    const holding = getOrCreateHolding(lc.underlying, lc.tickerKey);
     holding.leapCallRisk += lc.riskEUR;
     holding.sources.push({
       type: 'leapCall',
@@ -1071,11 +1063,10 @@ export function calculateConsolidatedTopHoldings(
       expiry: lc.expiry,
     });
   }
-  
-  // 5. Add Strategy Max Loss
+
+  // 4. Strategy Max Loss
   for (const strat of analysis.strategyDetails) {
-    const holding = getOrCreateHolding(strat.underlying);
-    
+    const holding = getOrCreateHolding(strat.underlying, strat.tickerKey);
     holding.strategyRisk += strat.maxLossEUR;
     holding.sources.push({
       type: 'strategy',
@@ -1088,12 +1079,13 @@ export function calculateConsolidatedTopHoldings(
       hasUnlimitedRisk: strat.hasUnlimitedRisk,
     });
   }
-  
-  // 6. Add GP stock holdings as individual entries
+
+  // 5. GP stock holdings — resolve via the same canonical ticker key
   for (const gp of gpStockHoldings) {
     if (gp.market_value <= 0) continue;
     const name = gp.description || gp.ticker_code || 'Unknown';
-    const holding = getOrCreateHolding(name);
+    const tickerKey = resolveTickerKey(name, gp.ticker_code);
+    const holding = getOrCreateHolding(name, tickerKey);
     holding.gpRisk += gp.market_value;
     holding.sources.push({
       type: 'gp',
@@ -1102,36 +1094,32 @@ export function calculateConsolidatedTopHoldings(
     });
   }
 
-  // Combine both maps
-  const allHoldings = [...holdingsByKey.values(), ...holdingsByExactName.values()];
-  
   // Calculate total exposure based on toggles
-  const { 
-    includeNakedPut = true, 
-    includeStrategies = true, 
-    includeLeapCall = true 
+  const {
+    includeNakedPut = true,
+    includeStrategies = true,
+    includeLeapCall = true,
   } = options;
-  
+
+  const allHoldings = Array.from(holdingsByTicker.values());
+
   for (const holding of allHoldings) {
-    const stockPart = options.includeProtections 
-      ? holding.stockRiskWithProtection 
+    const stockPart = options.includeProtections
+      ? holding.stockRiskWithProtection
       : holding.stockRisk;
-    
-    holding.totalExposure = stockPart + 
-      (includeNakedPut ? holding.nakedPutRisk : 0) + 
-      (includeLeapCall ? holding.leapCallRisk : 0) + 
+
+    holding.totalExposure =
+      stockPart +
+      (includeNakedPut ? holding.nakedPutRisk : 0) +
+      (includeLeapCall ? holding.leapCallRisk : 0) +
       (includeStrategies ? holding.strategyRisk : 0) +
       holding.gpRisk;
-    
-    // Sort sources by exposure
+
     holding.sources.sort((a, b) => b.exposure - a.exposure);
   }
-  
-  // Sort by total exposure and take top N
-  const result = allHoldings
+
+  return allHoldings
     .filter(h => h.totalExposure > 0)
     .sort((a, b) => b.totalExposure - a.totalExposure)
     .slice(0, limit);
-  
-  return result;
 }
