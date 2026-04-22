@@ -274,6 +274,7 @@ export function calculateStockRisk(
     
     result.push({
       underlying: stock.ticker || stock.description,
+      tickerKey: resolveTickerKey(stock.description, stock.ticker),
       stockValue,
       stockQuantity,
       stockPrice,
@@ -306,9 +307,11 @@ export function calculateNakedPutRisk(
     const contracts = np.contracts;
     const exchangeRate = getEffectiveExchangeRate(np.option);
     const riskOriginal = strike * contracts * 100;
+    const underlying = np.option.underlying || np.option.description;
     
     return {
-      underlying: np.option.underlying || np.option.description,
+      underlying,
+      tickerKey: resolveTickerKey(underlying, np.option.ticker),
       strike,
       contracts,
       expiry: np.option.expiry_date || '',
