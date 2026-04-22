@@ -336,9 +336,11 @@ export function calculateLeapCallRisk(
     const marketPrice = lc.option.current_price || avgCost; // Fallback to avgCost if no market price
     const exchangeRate = getEffectiveExchangeRate(lc.option);
     const marketValue = contracts * marketPrice * 100;
+    const underlying = lc.option.underlying || lc.option.description;
     
     return {
-      underlying: lc.option.underlying || lc.option.description,
+      underlying,
+      tickerKey: resolveTickerKey(underlying, lc.option.ticker),
       strike: lc.option.strike_price || 0,
       contracts,
       avgCost,
