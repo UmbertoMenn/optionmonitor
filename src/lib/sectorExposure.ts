@@ -32,6 +32,78 @@ export function getSectorColor(sector: string): string {
   return SECTOR_COLORS[sector] || SECTOR_COLORS['Other'];
 }
 
+/**
+ * Normalizes a raw ticker by removing common exchange suffixes and prefixes.
+ * Examples: "SAP.DE" → "SAP", "9PDA.SG" → "9PDA", "AAPL:US" → "AAPL", "AZ.NVDA" → "NVDA"
+ */
+function normalizeTickerSymbol(raw: string): string {
+  if (!raw) return '';
+  let t = raw.trim().toUpperCase();
+  // Remove italian broker prefix
+  t = t.replace(/^AZ\./, '');
+  // Remove exchange suffixes after . or :
+  t = t.split(/[.:]/)[0];
+  return t.trim();
+}
+
+/**
+ * Canonical TICKER resolver — single source of truth for holdings consolidation.
+ * Strategy:
+ *   1. If a `ticker` is provided and looks like a real ticker symbol → normalize & return
+ *   2. Try matching company name (or words in it) against COMPANY_NAME_TO_TICKER
+ *   3. Try first uppercase token of name as a ticker pattern
+ *   4. Fallback: return uppercase normalized full name (so aggregation stays consistent)
+ */
+export function resolveTickerKey(name: string | null | undefined, ticker?: string | null): string {
+  // 1. Use explicit ticker when present and clean
+  if (ticker && ticker.trim()) {
+    const normTicker = normalizeTickerSymbol(ticker);
+    if (normTicker && /^[A-Z0-9.\-]{1,8}$/.test(normTicker)) {
+      // Also map company-name aliases stored as tickers (e.g. resolve via mapping)
+      if (COMPANY_NAME_TO_TICKER[normTicker]) return COMPANY_NAME_TO_TICKER[normTicker];
+      return normTicker;
+    }
+  }
+
+  if (!name) return ticker ? normalizeTickerSymbol(ticker) : 'UNKNOWN';
+
+  // Normalize: remove AZ. prefix and uppercase
+  const cleaned = name.replace(/^AZ\./i, '').trim().toUpperCase();
+  if (!cleaned) return 'UNKNOWN';
+
+  // 2. Direct match in COMPANY_NAME_TO_TICKER (full name)
+  if (COMPANY_NAME_TO_TICKER[cleaned]) return COMPANY_NAME_TO_TICKER[cleaned];
+
+  // 3. Substring match (longest match wins to avoid e.g. "MARA" matching inside "MARATHON")
+  const sortedKeys = Object.keys(COMPANY_NAME_TO_TICKER).sort((a, b) => b.length - a.length);
+  for (const key of sortedKeys) {
+    // Use word-boundary-like check: key must appear as separate word(s)
+    const re = new RegExp(`(^|\\s)${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|\\.|,)`);
+    if (re.test(cleaned)) return COMPANY_NAME_TO_TICKER[key];
+  }
+
+  // 4. Try first uppercase token (likely ticker)
+  const firstTokenMatch = cleaned.match(/^([A-Z0-9]{1,6})(?:\s|$)/);
+  if (firstTokenMatch) {
+    const candidate = firstTokenMatch[1];
+    if (COMPANY_NAME_TO_TICKER[candidate]) return COMPANY_NAME_TO_TICKER[candidate];
+    // Accept it as a ticker if it's short and isolated
+    if (candidate.length <= 5 && cleaned === candidate) return candidate;
+  }
+
+  // 5. Fallback: full normalized name as key (preserves aggregation determinism)
+  return `NAME:${cleaned}`;
+}
+
+/**
+ * Display-friendly ticker (strips the NAME: prefix used as fallback).
+ */
+export function getDisplayTicker(tickerKey: string): string | null {
+  if (!tickerKey || tickerKey === 'UNKNOWN') return null;
+  if (tickerKey.startsWith('NAME:')) return null;
+  return tickerKey;
+}
+
 // Mapping of known stock tickers to sectors (GICS sectors)
 const STOCK_SECTORS: Record<string, string> = {
   // Technology
