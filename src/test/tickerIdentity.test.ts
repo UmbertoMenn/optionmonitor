@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveUnderlyingIdentity } from '@/lib/tickerIdentity';
+import { resolveUnderlyingIdentity, buildDynamicAliasMap } from '@/lib/tickerIdentity';
 
 describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
   it('LULU stock and LULULEMON ATHLETICA derivative converge to LULU', () => {
@@ -82,5 +82,29 @@ describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
     expect(resolveUnderlyingIdentity({ rawName: 'STELLANTIS' }).tickerKey).toBe('STLA');
     expect(resolveUnderlyingIdentity({ rawName: 'DEUTSCHE POST AG' }).tickerKey).toBe('DPW');
     expect(resolveUnderlyingIdentity({ rawName: 'DIR-TELECOM ITALIA SPA' }).tickerKey).toBe('TIT');
+  });
+
+  it('Dynamic backend mapping resolves Celestica/CEG/APP/RDDT', () => {
+    
+    const dyn = buildDynamicAliasMap([
+      { underlying: 'Celestica Inc', ticker: 'CLS' },
+      { underlying: 'Constellation Energy Corporation', ticker: 'CEG' },
+      { underlying: 'AppLovin Corp', ticker: 'APP' },
+      { underlying: 'Redditi INC', ticker: 'RDDT' },
+    ]);
+    expect(resolveUnderlyingIdentity({ rawName: 'Celestica Inc' }, { dynamicAliases: dyn }).tickerKey).toBe('CLS');
+    expect(resolveUnderlyingIdentity({ underlyingName: 'Constellation Energy Corporation' }, { dynamicAliases: dyn }).tickerKey).toBe('CEG');
+    expect(resolveUnderlyingIdentity({ rawName: 'AppLovin Corp' }, { dynamicAliases: dyn }).tickerKey).toBe('APP');
+    expect(resolveUnderlyingIdentity({ rawName: 'Redditi INC' }, { dynamicAliases: dyn }).tickerKey).toBe('RDDT');
+  });
+
+  it('Dynamic mapping wins over fallback even when name is unknown to static map', () => {
+    
+    const dyn = buildDynamicAliasMap([
+      { underlying: 'Some Brand New Company', ticker: 'SBNC' },
+    ]);
+    const r = resolveUnderlyingIdentity({ rawName: 'Some Brand New Company' }, { dynamicAliases: dyn });
+    expect(r.tickerKey).toBe('SBNC');
+    expect(r.source).toBe('alias_map');
   });
 });

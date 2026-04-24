@@ -33,6 +33,8 @@ import { ETFAllocation } from '@/hooks/useETFAllocations';
 import { calculateConsolidatedTopHoldings, ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
 import { HoldingBreakdownDialog } from './HoldingBreakdownDialog';
 import { GPHoldingRow } from '@/hooks/useGPHoldings';
+import { useUnderlyingMappings } from '@/hooks/useUnderlyingMappings';
+import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
@@ -77,6 +79,13 @@ export function EquityExposureView({
     strategyDetails
   } = analysis;
   
+  // Backend underlying_mappings → dynamic alias map (CEG, APP, RDDT, CLS, ...)
+  const { allMappings } = useUnderlyingMappings();
+  const dynamicAliases = useMemo(
+    () => buildDynamicAliasMap(allMappings.data || []),
+    [allMappings.data],
+  );
+
   // Calculate all consolidated holdings (no limit) - include GP stocks
   const consolidatedHoldings = useMemo(() => {
     return calculateConsolidatedTopHoldings(analysis, etfAllocations, { 
@@ -84,8 +93,8 @@ export function EquityExposureView({
       includeNakedPut,
       includeStrategies,
       includeLeapCall
-    }, 100, includeGP ? gpStockHoldings : []);
-  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeGP, gpStockHoldings]);
+    }, 100, includeGP ? gpStockHoldings : [], dynamicAliases);
+  }, [analysis, etfAllocations, includeProtections, includeNakedPut, includeStrategies, includeLeapCall, includeGP, gpStockHoldings, dynamicAliases]);
 
   // Calculate gross stock risk and protection savings
   const { grossPureStockRisk, protectionSavings } = useMemo(() => {
