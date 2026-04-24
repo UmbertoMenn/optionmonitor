@@ -47,52 +47,19 @@ function normalizeTickerSymbol(raw: string): string {
 }
 
 /**
- * Canonical TICKER resolver — single source of truth for holdings consolidation.
- * Strategy:
- *   1. If a `ticker` is provided and looks like a real ticker symbol → normalize & return
- *   2. Try matching company name (or words in it) against COMPANY_NAME_TO_TICKER
- *   3. Try first uppercase token of name as a ticker pattern
- *   4. Fallback: return uppercase normalized full name (so aggregation stays consistent)
+ * @deprecated Use `resolveUnderlyingIdentity` from `tickerIdentity.ts`.
+ * Kept as a thin wrapper for backwards compatibility (legacy callers and tests).
+ * Always delegates to the canonical resolver to keep aggregation consistent.
  */
 export function resolveTickerKey(name: string | null | undefined, ticker?: string | null): string {
-  // 1. Use explicit ticker when present and clean
-  if (ticker && ticker.trim()) {
-    const normTicker = normalizeTickerSymbol(ticker);
-    if (normTicker && /^[A-Z0-9.\-]{1,8}$/.test(normTicker)) {
-      // Also map company-name aliases stored as tickers (e.g. resolve via mapping)
-      if (COMPANY_NAME_TO_TICKER[normTicker]) return COMPANY_NAME_TO_TICKER[normTicker];
-      return normTicker;
-    }
-  }
-
-  if (!name) return ticker ? normalizeTickerSymbol(ticker) : 'UNKNOWN';
-
-  // Normalize: remove AZ. prefix and uppercase
-  const cleaned = name.replace(/^AZ\./i, '').trim().toUpperCase();
-  if (!cleaned) return 'UNKNOWN';
-
-  // 2. Direct match in COMPANY_NAME_TO_TICKER (full name)
-  if (COMPANY_NAME_TO_TICKER[cleaned]) return COMPANY_NAME_TO_TICKER[cleaned];
-
-  // 3. Substring match (longest match wins to avoid e.g. "MARA" matching inside "MARATHON")
-  const sortedKeys = Object.keys(COMPANY_NAME_TO_TICKER).sort((a, b) => b.length - a.length);
-  for (const key of sortedKeys) {
-    // Use word-boundary-like check: key must appear as separate word(s)
-    const re = new RegExp(`(^|\\s)${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|\\.|,)`);
-    if (re.test(cleaned)) return COMPANY_NAME_TO_TICKER[key];
-  }
-
-  // 4. Try first uppercase token (likely ticker)
-  const firstTokenMatch = cleaned.match(/^([A-Z0-9]{1,6})(?:\s|$)/);
-  if (firstTokenMatch) {
-    const candidate = firstTokenMatch[1];
-    if (COMPANY_NAME_TO_TICKER[candidate]) return COMPANY_NAME_TO_TICKER[candidate];
-    // Accept it as a ticker if it's short and isolated
-    if (candidate.length <= 5 && cleaned === candidate) return candidate;
-  }
-
-  // 5. Fallback: full normalized name as key (preserves aggregation determinism)
-  return `NAME:${cleaned}`;
+  // Lazy import to avoid circular dependency at module load
+  const { resolveUnderlyingIdentity } = require('./tickerIdentity') as typeof import('./tickerIdentity');
+  return resolveUnderlyingIdentity({
+    rawTicker: ticker,
+    rawName: name,
+    description: name,
+    underlyingName: name,
+  }).tickerKey;
 }
 
 /**
@@ -1080,12 +1047,18 @@ export function calculateConsolidatedTopHoldings(
     });
   }
 
-  // 5. GP stock holdings — resolve via the same canonical ticker key
+  // 5. GP stock holdings — resolve via the same canonical resolver
   for (const gp of gpStockHoldings) {
     if (gp.market_value <= 0) continue;
     const name = gp.description || gp.ticker_code || 'Unknown';
-    const tickerKey = resolveTickerKey(name, gp.ticker_code);
-    const holding = getOrCreateHolding(name, tickerKey);
+    // Lazy require to keep module load order safe
+    const { resolveUnderlyingIdentity } = require('./tickerIdentity') as typeof import('./tickerIdentity');
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: gp.ticker_code,
+      rawName: name,
+      description: name,
+    });
+    const holding = getOrCreateHolding(name, identity.tickerKey);
     holding.gpRisk += gp.market_value;
     holding.sources.push({
       type: 'gp',
