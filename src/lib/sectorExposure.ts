@@ -902,6 +902,7 @@ export function calculateConsolidatedTopHoldings(
   options: ConsolidatedTopHoldingsOptions,
   limit: number = 100, // Show all holdings by default
   gpStockHoldings: GPHoldingRow[] = [],
+  dynamicAliases?: Map<string, string>,
 ): ConsolidatedHoldingWithDetails[] {
   // Single canonical map keyed by tickerKey (e.g. "NVDA", "BABA", or "NAME:..." fallback)
   const holdingsByTicker = new Map<string, ConsolidatedHoldingWithDetails>();
