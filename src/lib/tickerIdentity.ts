@@ -313,6 +313,22 @@ function pickCanonicalName(input: IdentityInput, ticker: string): string {
  *   5. Fallback: NAME:... key (deterministic)
  */
 export function resolveUnderlyingIdentity(input: IdentityInput): UnderlyingIdentity {
+  // 0. Exchange-suffixed raw ticker → canonical (highest priority for non-US tickers)
+  const rawTickerExchangeKey = (input.rawTicker || input.linkedStock?.ticker || '')
+    .trim()
+    .toUpperCase()
+    .replace(/^AZ\./, '');
+  if (rawTickerExchangeKey && EXCHANGE_TICKER_TO_CANONICAL[rawTickerExchangeKey]) {
+    const canonical = EXCHANGE_TICKER_TO_CANONICAL[rawTickerExchangeKey];
+    return {
+      tickerKey: canonical,
+      displayTicker: canonical,
+      canonicalName: pickCanonicalName(input, canonical),
+      source: 'alias_map',
+      confidence: 'high',
+    };
+  }
+
   // 1. linkedStock wins
   if (input.linkedStock) {
     const stk = input.linkedStock;
