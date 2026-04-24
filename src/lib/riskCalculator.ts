@@ -458,17 +458,41 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): {
  */
 export function calculateStrategyRisk(categories: DerivativeCategories): StrategyRiskDetail[] {
   const result: StrategyRiskDetail[] = [];
-  
+
+  // Build a quick index: normalized underlying -> linkedStock from resolved configs.
+  // This lets IC/DD/Other strategies inherit the canonical identity discovered by
+  // the strategy engine (most reliable source).
+  const linkedStockByUnderlying = new Map<string, Position>();
+  for (const cfg of categories.resolvedConfigs) {
+    if (cfg.linkedStock) {
+      const key = normalizeForMatching(cfg.underlying);
+      if (key && !linkedStockByUnderlying.has(key)) {
+        linkedStockByUnderlying.set(key, cfg.linkedStock);
+      }
+    }
+  }
+  const findLinkedStock = (underlying: string): Position | null => {
+    const key = normalizeForMatching(underlying);
+    return linkedStockByUnderlying.get(key) || null;
+  };
+
   // Iron Condors
   for (const ic of categories.ironCondors) {
     const exchangeRate = getEffectiveExchangeRate(ic.soldPut);
     const currency = ic.soldPut.currency || 'USD';
     const { maxLoss, calculation } = calculateIronCondorMaxLoss(ic);
-    
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: ic.soldPut.ticker,
+      rawName: ic.underlying,
+      underlyingName: ic.underlying,
+      description: ic.soldPut.description,
+      linkedStock: findLinkedStock(ic.underlying),
+    });
+
     result.push({
       strategyName: 'Iron Condor',
       underlying: ic.underlying,
-      tickerKey: resolveTickerKey(ic.underlying, ic.soldPut.ticker),
+      tickerKey: identity.tickerKey,
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
@@ -483,11 +507,18 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     const exchangeRate = getEffectiveExchangeRate(dd.soldPut);
     const currency = dd.soldPut.currency || 'USD';
     const { maxLoss, calculation } = calculateDoubleDiagonalMaxLoss(dd);
-    
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: dd.soldPut.ticker,
+      rawName: dd.underlying,
+      underlyingName: dd.underlying,
+      description: dd.soldPut.description,
+      linkedStock: findLinkedStock(dd.underlying),
+    });
+
     result.push({
       strategyName: 'Double Diagonal',
       underlying: dd.underlying,
-      tickerKey: resolveTickerKey(dd.underlying, dd.soldPut.ticker),
+      tickerKey: identity.tickerKey,
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
@@ -533,11 +564,19 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     const exchangeRate = getEffectiveExchangeRate(firstOption);
     const currency = firstOption.currency || 'USD';
     const { maxLoss, calculation, isUnlimited } = calculateGroupedStrategyMaxLoss(effectiveGroup);
-    
+    const linkedFromOption = effectiveGroup.options.find(o => o.underlying)?.underlying || null;
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: firstOption.ticker,
+      rawName: effectiveGroup.underlying,
+      underlyingName: effectiveGroup.underlying,
+      description: firstOption.description,
+      linkedStock: findLinkedStock(effectiveGroup.underlying) || linkedFromOption,
+    });
+
     result.push({
       strategyName: effectiveGroup.strategyName || 'Strategia Complessa',
       underlying: effectiveGroup.underlying,
-      tickerKey: resolveTickerKey(effectiveGroup.underlying, firstOption.ticker),
+      tickerKey: identity.tickerKey,
       maxLoss,
       maxLossEUR: maxLoss / exchangeRate,
       currency,
