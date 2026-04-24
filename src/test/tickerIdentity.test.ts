@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveUnderlyingIdentity } from '@/lib/tickerIdentity';
+import { resolveUnderlyingIdentity, buildDynamicAliasMap } from '@/lib/tickerIdentity';
 
 describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
   it('LULU stock and LULULEMON ATHLETICA derivative converge to LULU', () => {
