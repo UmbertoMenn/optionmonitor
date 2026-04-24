@@ -323,7 +323,20 @@ function pickCanonicalName(input: IdentityInput, ticker: string): string {
  *   4. Alias / name match on description / underlyingName / rawName
  *   5. Fallback: NAME:... key (deterministic)
  */
-export function resolveUnderlyingIdentity(input: IdentityInput): UnderlyingIdentity {
+export function resolveUnderlyingIdentity(
+  input: IdentityInput,
+  options?: ResolveOptions,
+): UnderlyingIdentity {
+  const dynLookup = (text: string | null | undefined): string | null => {
+    if (!options?.dynamicAliases || !text) return null;
+    const norm = normalizeText(text);
+    if (!norm) return null;
+    const map = options.dynamicAliases instanceof Map
+      ? options.dynamicAliases
+      : new Map(Object.entries(options.dynamicAliases));
+    return map.get(norm) || null;
+  };
+
   // 0. Exchange-suffixed raw ticker → canonical (highest priority for non-US tickers)
   const rawTickerExchangeKey = (input.rawTicker || input.linkedStock?.ticker || '')
     .trim()
@@ -390,9 +403,24 @@ export function resolveUnderlyingIdentity(input: IdentityInput): UnderlyingIdent
     };
   }
 
-  // 4. Alias / name match across all textual hints
-  const textCandidates = [input.underlyingName, input.rawName, input.description]
+  // 3.5 Dynamic backend mapping (underlying_mappings) — wins over static alias map.
+  const textCandidatesEarly = [input.underlyingName, input.rawName, input.description, input.linkedStock?.description]
     .filter((c): c is string => !!c && c.trim().length > 0);
+  for (const txt of textCandidatesEarly) {
+    const dynHit = dynLookup(txt);
+    if (dynHit) {
+      return {
+        tickerKey: dynHit.toUpperCase(),
+        displayTicker: dynHit.toUpperCase(),
+        canonicalName: pickCanonicalName(input, dynHit),
+        source: 'alias_map',
+        confidence: 'high',
+      };
+    }
+  }
+
+  // 4. Alias / name match across all textual hints (static map)
+  const textCandidates = textCandidatesEarly;
   for (const txt of textCandidates) {
     const hit = lookupAlias(txt);
     if (hit) {
@@ -437,8 +465,8 @@ export function resolveUnderlyingIdentity(input: IdentityInput): UnderlyingIdent
 }
 
 /** Convenience: just the canonical ticker key. */
-export function getCanonicalTickerKey(input: IdentityInput): string {
-  return resolveUnderlyingIdentity(input).tickerKey;
+export function getCanonicalTickerKey(input: IdentityInput, options?: ResolveOptions): string {
+  return resolveUnderlyingIdentity(input, options).tickerKey;
 }
 
 /** Display ticker (null when fallback). */
@@ -446,4 +474,23 @@ export function getDisplayTickerForKey(tickerKey: string): string | null {
   if (!tickerKey || tickerKey === 'UNKNOWN') return null;
   if (tickerKey.startsWith('NAME:')) return null;
   return tickerKey;
+}
+
+/**
+ * Build a normalized lookup map from `underlying_mappings` rows.
+ * Keys are normalized via `normalizeText` so they match anything the resolver
+ * sees from descriptions/underlying names.
+ */
+export function buildDynamicAliasMap(
+  rows: Array<{ underlying: string; ticker: string }>,
+): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const r of rows) {
+    if (!r.underlying || !r.ticker) continue;
+    const norm = normalizeText(r.underlying);
+    if (!norm) continue;
+    // First write wins to keep things deterministic
+    if (!m.has(norm)) m.set(norm, r.ticker.toUpperCase());
+  }
+  return m;
 }
