@@ -1047,12 +1047,18 @@ export function calculateConsolidatedTopHoldings(
     });
   }
 
-  // 5. GP stock holdings — resolve via the same canonical ticker key
+  // 5. GP stock holdings — resolve via the same canonical resolver
   for (const gp of gpStockHoldings) {
     if (gp.market_value <= 0) continue;
     const name = gp.description || gp.ticker_code || 'Unknown';
-    const tickerKey = resolveTickerKey(name, gp.ticker_code);
-    const holding = getOrCreateHolding(name, tickerKey);
+    // Lazy require to keep module load order safe
+    const { resolveUnderlyingIdentity } = require('./tickerIdentity') as typeof import('./tickerIdentity');
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: gp.ticker_code,
+      rawName: name,
+      description: name,
+    });
+    const holding = getOrCreateHolding(name, identity.tickerKey);
     holding.gpRisk += gp.market_value;
     holding.sources.push({
       type: 'gp',
