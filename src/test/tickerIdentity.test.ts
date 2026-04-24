@@ -1,0 +1,70 @@
+import { describe, it, expect } from 'vitest';
+import { resolveUnderlyingIdentity } from '@/lib/tickerIdentity';
+
+describe('resolveUnderlyingIdentity — canonical ticker resolution', () => {
+  it('LULU stock and LULULEMON ATHLETICA derivative converge to LULU', () => {
+    const stock = resolveUnderlyingIdentity({
+      rawTicker: 'LULU',
+      rawName: 'LULULEMON ATHLETICA INC',
+      description: 'LULULEMON ATHLETICA INC',
+    });
+    const deriv = resolveUnderlyingIdentity({
+      rawTicker: null,
+      underlyingName: 'LULULEMON ATHLETICA',
+      description: 'LULU PUT 250 DEC25',
+    });
+    expect(stock.tickerKey).toBe('LULU');
+    expect(deriv.tickerKey).toBe('LULU');
+  });
+
+  it('GOOGLE / ALPHABET / GOOGL all map to GOOGL', () => {
+    expect(resolveUnderlyingIdentity({ rawName: 'ALPHABET INC CLASS A' }).tickerKey).toBe('GOOGL');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'GOOG' }).tickerKey).toBe('GOOGL');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'GOOGL' }).tickerKey).toBe('GOOGL');
+    expect(resolveUnderlyingIdentity({ underlyingName: 'GOOGLE' }).tickerKey).toBe('GOOGL');
+  });
+
+  it('ORACLE / ORCL converge to ORCL', () => {
+    expect(resolveUnderlyingIdentity({ rawName: 'ORACLE CORP' }).tickerKey).toBe('ORCL');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'ORCL' }).tickerKey).toBe('ORCL');
+  });
+
+  it('WESTERN DIGITAL / WDC converge to WDC', () => {
+    expect(resolveUnderlyingIdentity({ rawName: 'WESTERN DIGITAL CORP' }).tickerKey).toBe('WDC');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'WDC' }).tickerKey).toBe('WDC');
+  });
+
+  it('ALIBABA / BABA converge to BABA', () => {
+    expect(resolveUnderlyingIdentity({ rawName: 'ALIBABA GROUP HOLDING' }).tickerKey).toBe('BABA');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'BABA' }).tickerKey).toBe('BABA');
+  });
+
+  it('strips broker prefix and exchange suffixes', () => {
+    expect(resolveUnderlyingIdentity({ rawTicker: 'AZ.LULU' }).tickerKey).toBe('LULU');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'LULU:US' }).tickerKey).toBe('LULU');
+    expect(resolveUnderlyingIdentity({ rawTicker: 'LULU.US' }).tickerKey).toBe('LULU');
+  });
+
+  it('falls back deterministically when ticker is unknown', () => {
+    const r = resolveUnderlyingIdentity({ rawName: 'SOME UNKNOWN COMPANY XYZ' });
+    expect(r.tickerKey.startsWith('NAME:')).toBe(true);
+    expect(r.source).toBe('fallback_name');
+    // Same input → same key
+    const r2 = resolveUnderlyingIdentity({ rawName: 'SOME UNKNOWN COMPANY XYZ' });
+    expect(r2.tickerKey).toBe(r.tickerKey);
+  });
+
+  it('linkedStock identity wins over noisy option ticker', () => {
+    const fakeStock = {
+      ticker: 'LULU',
+      description: 'LULULEMON ATHLETICA INC',
+    } as any;
+    const r = resolveUnderlyingIdentity({
+      rawTicker: 'LULU240119P00250000', // noisy option contract
+      underlyingName: 'LULULEMON ATHLETICA',
+      linkedStock: fakeStock,
+    });
+    expect(r.tickerKey).toBe('LULU');
+    expect(r.source).toBe('linked_stock');
+  });
+});

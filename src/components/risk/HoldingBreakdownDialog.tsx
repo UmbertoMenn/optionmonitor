@@ -42,9 +42,14 @@ export function HoldingBreakdownDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 flex-wrap">
             <BarChart3 className="w-5 h-5 text-primary" />
-            Breakdown: {holding.ticker ? `${holding.ticker} — ${holding.name}` : holding.name}
+            <span>Breakdown: {holding.ticker ? `${holding.ticker} — ${holding.name}` : holding.name}</span>
+            {holding.tickerKey?.startsWith('NAME:') && (
+              <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-500 border-amber-500/30">
+                fallback name
+              </Badge>
+            )}
           </DialogTitle>
         </DialogHeader>
 
