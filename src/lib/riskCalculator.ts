@@ -273,9 +273,16 @@ export function calculateStockRisk(
     // For UI compatibility, protectedValue represents the floor value
     const protectedValue = protectedShares * avgStrike;
     
+    const stockIdentity = resolveUnderlyingIdentity({
+      rawTicker: stock.ticker,
+      rawName: stock.description,
+      description: stock.description,
+      isin: stock.isin,
+      linkedStock: stock,
+    });
     result.push({
       underlying: stock.ticker || stock.description,
-      tickerKey: resolveTickerKey(stock.description, stock.ticker),
+      tickerKey: stockIdentity.tickerKey,
       stockValue,
       stockQuantity,
       stockPrice,
@@ -309,10 +316,17 @@ export function calculateNakedPutRisk(
     const exchangeRate = getEffectiveExchangeRate(np.option);
     const riskOriginal = strike * contracts * 100;
     const underlying = np.option.underlying || np.option.description;
-    
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: np.option.ticker,
+      rawName: underlying,
+      underlyingName: np.option.underlying,
+      description: np.option.description,
+      linkedStock: np.underlying,
+    });
+
     return {
       underlying,
-      tickerKey: resolveTickerKey(underlying, np.option.ticker),
+      tickerKey: identity.tickerKey,
       strike,
       contracts,
       expiry: np.option.expiry_date || '',
@@ -338,10 +352,17 @@ export function calculateLeapCallRisk(
     const exchangeRate = getEffectiveExchangeRate(lc.option);
     const marketValue = contracts * marketPrice * 100;
     const underlying = lc.option.underlying || lc.option.description;
-    
+    const identity = resolveUnderlyingIdentity({
+      rawTicker: lc.option.ticker,
+      rawName: underlying,
+      underlyingName: lc.option.underlying,
+      description: lc.option.description,
+      linkedStock: lc.underlying,
+    });
+
     return {
       underlying,
-      tickerKey: resolveTickerKey(underlying, lc.option.ticker),
+      tickerKey: identity.tickerKey,
       strike: lc.option.strike_price || 0,
       contracts,
       avgCost,
