@@ -388,8 +388,8 @@ export function PerformanceEvolutionChart({
     );
   }, [historicalData, timeRange]);
   
-  // For benchmark: only pass currentDate if it's actually the newest
-  const effectiveCurrentDateForBenchmark = canAppendCurrent ? currentDate : null;
+  // For benchmark: pass currentDate when we have a live point to anchor it
+  const effectiveCurrentDateForBenchmark = hasLiveCurrent ? currentDate : null;
   
   // Fetch benchmark data with real equity exposure and currency adjustment
   const { benchmarkReturns, hasBenchmarkData, dataGaps, staleSummary, refreshBenchmark } = useBenchmarkData(
