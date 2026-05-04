@@ -422,6 +422,7 @@ export function Dashboard() {
               </div>
               <div className="space-y-3">
                 <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
+                <GpSnapshotMissingBanner />
                 <FileUploader />
                 <Button
                   variant="outline"
