@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import { StatsCards } from '@/components/dashboard/StatsCards';
 import { PositionsTable } from '@/components/dashboard/PositionsTable';
 import { FileUploader } from '@/components/dashboard/FileUploader';
+import { GpSnapshotMissingBanner } from '@/components/dashboard/GpSnapshotMissingBanner';
 import { HistoricalDataForm } from '@/components/dashboard/HistoricalDataForm';
 import { DepositsSection } from '@/components/dashboard/DepositsSection';
 import { ViewModeSelector, ViewMode } from '@/components/dashboard/ViewModeSelector';
