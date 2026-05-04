@@ -3,19 +3,18 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, X } from 'lucide-react';
 import { useGPHoldings } from '@/hooks/useGPHoldings';
-import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { usePortfolio } from '@/hooks/usePortfolio';
 
 /**
- * Mostra un avviso quando l'utente ha una GP caricata più recente dello
- * snapshot del portafoglio principale: in quel caso lo snapshot storico
- * (in historical_data) non è stato aggiornato e i grafici risulteranno
- * disallineati rispetto alle card live.
+ * Avvisa l'utente quando esiste una GP per il portafoglio corrente la cui
+ * data di aggiornamento è più recente della snapshot_date del portafoglio
+ * principale: in quel caso lo snapshot storico (historical_data) non è
+ * stato rigenerato e i grafici risulteranno disallineati rispetto alle
+ * card live.
  */
 export function GpSnapshotMissingBanner() {
   const { portfolio } = usePortfolio();
   const { gpHoldings } = useGPHoldings();
-  const { historicalData } = useHistoricalData();
   const [dismissed, setDismissed] = useState(false);
 
   const shouldShow = useMemo(() => {
@@ -23,11 +22,9 @@ export function GpSnapshotMissingBanner() {
     if (!portfolio?.id) return false;
     if (!gpHoldings || gpHoldings.length === 0) return false;
 
-    // Filtra GP del portfolio corrente
     const ownGp = gpHoldings.filter(h => h.portfolio_id === portfolio.id);
     if (ownGp.length === 0) return false;
 
-    // Data più recente di aggiornamento GP
     const latestGpUpdate = ownGp.reduce<string | null>((max, h) => {
       const d = h.updated_at || h.created_at;
       if (!d) return max;
@@ -36,20 +33,11 @@ export function GpSnapshotMissingBanner() {
     if (!latestGpUpdate) return false;
 
     const portfolioSnapshotDate = portfolio.snapshot_date;
-    if (!portfolioSnapshotDate) return true; // GP presente ma nessun portafoglio caricato
+    if (!portfolioSnapshotDate) return true;
 
-    // Esiste uno snapshot storico per la data del portafoglio?
-    const hasMatchingHistorical = (historicalData || []).some(
-      h => h.portfolio_id === portfolio.id && h.snapshot_date === portfolioSnapshotDate
-    );
-    if (!hasMatchingHistorical) return true;
-
-    // GP aggiornata dopo la data dello snapshot del portafoglio?
-    // Confronto: portfolio.snapshot_date è una date (YYYY-MM-DD), latestGpUpdate è ISO timestamp.
-    const snapshotDateOnly = portfolioSnapshotDate;
     const gpDateOnly = latestGpUpdate.slice(0, 10);
-    return gpDateOnly > snapshotDateOnly;
-  }, [dismissed, portfolio?.id, portfolio?.snapshot_date, gpHoldings, historicalData]);
+    return gpDateOnly > portfolioSnapshotDate;
+  }, [dismissed, portfolio?.id, portfolio?.snapshot_date, gpHoldings]);
 
   if (!shouldShow) return null;
 
