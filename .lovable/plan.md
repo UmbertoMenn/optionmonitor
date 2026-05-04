@@ -1,55 +1,37 @@
-## Problema
+Ho controllato il codice e i dati di SilviaS. Il grafico non si aggiorna perché ci sono ancora due problemi distinti:
 
-Per SilviaS la card "Netting ex CC e NP" e il punto odierno sul grafico mostrano valori diversi perché lo snapshot in `historical_data` viene salvato anche quando si carica solo la **Gestione Patrimoniale (GP)**, mentre il portafoglio "vero" (file Excel principale) non è stato ricaricato. Il risultato:
+1. Nei componenti dei grafici (`PortfolioEvolutionChart` e `PerformanceEvolutionChart`) il punto corrente viene aggiunto solo se la data corrente è successiva all'ultimo snapshot storico. Se esiste già uno snapshot nello stesso giorno, il grafico continua a usare il valore congelato in `historical_data`, quindi non prende il valore live delle card.
+2. Lo snapshot del 2026-05-04 di SilviaS contiene già la GP: `historical_data.total_value = 5.217.687,84`, mentre il portafoglio principale è `4.785.946,89` e la GP è `431.740,95`. Quindi la rimozione del salvataggio snapshot durante upload GP previene nuovi casi, ma non corregge il punto storico già salvato e non protegge da GP caricata prima del portfolio.
 
-- la card ricalcola live sui dati attuali del portafoglio,
-- il grafico legge lo snapshot salvato dall'upload GP, che è disallineato rispetto al portafoglio principale.
+Piano di intervento:
 
-## Regola desiderata
+1. Correggere i grafici storici
+   - In `PortfolioEvolutionChart.tsx`, quando `currentDate` coincide con una data già presente in `historicalData`, sostituire quel punto con `currentValue` e marcarlo come punto corrente.
+   - Se `currentDate` è più recente dell'ultimo snapshot, continuare ad aggiungerlo come oggi.
+   - Non lasciare duplicati per la stessa data.
+   - Applicare la stessa logica a `PerformanceEvolutionChart.tsx`, ricalcolando rendimento e P/L sul valore live sostitutivo.
 
-1. Lo snapshot in `historical_data` deve essere salvato **solo** quando viene caricato un nuovo file Portafoglio (non GP).
-2. Quando si carica solo la GP, lo snapshot **non** deve essere creato/aggiornato.
-3. Se l'utente carica per prima la GP (e non c'è un portafoglio principale recente per quella data), mostrare un banner/alert che avvisa: "Lo snapshot storico non verrà aggiornato finché non carichi un nuovo file Portafoglio".
+2. Separare correttamente snapshot portfolio e GP
+   - In `uploadSnapshot.ts`, fare in modo che lo snapshot salvato da upload portfolio includa la GP solo se la GP risulta già allineata o precedente alla data del file portfolio.
+   - Se la GP è stata caricata dopo il portfolio, non deve entrare nello snapshot storico di quella data.
+   - Questo evita che un caricamento GP successivo modifichi indirettamente il valore storico del portafoglio.
 
-## Modifiche
+3. Correggere il caso “GP caricata per prima”
+   - Rafforzare `GpSnapshotMissingBanner` perché non si basi solo sul confronto tra `gp.updated_at` e `portfolio.snapshot_date`, che può fallire quando sono nello stesso giorno.
+   - Il banner deve verificare anche se lo snapshot esistente per quella data manca oppure contiene valori non coerenti con il live corrente.
+   - Messaggio: lo snapshot storico non verrà aggiornato finché non viene caricato un nuovo file Portafoglio non-GP.
 
-### 1. `src/components/dashboard/FileUploader.tsx`
+4. Aggiornare lo snapshot esistente dopo upload portfolio
+   - Dopo un upload portfolio, invalidare/refetchare in modo più robusto `historical-data`, `positions`, `portfolios`, `gp-holdings` e query correlate, così il grafico non resta su cache vecchia.
+   - Il grafico deve comunque essere corretto subito grazie al punto corrente live, anche prima del refetch.
 
-**Rimuovere** la chiamata a `upsertUploadSnapshot` dal blocco `onDropGP`:
+5. Nota importante sui dati già salvati
+   - Il codice correggerà la visualizzazione usando il valore live per il punto corrente.
+   - Lo snapshot storico già salvato per SilviaS resta in database finché non viene rigenerato da un nuovo upload portfolio o corretto manualmente. Posso anche aggiungere una piccola azione/admin utility per rigenerare lo snapshot corrente, ma per questa correzione mi concentro sul bug UI/logico e sulla prevenzione dei nuovi casi.
 
-- Eliminare le righe che invocano `upsertUploadSnapshot` dopo il caricamento GP (incluso il refetch di `historical-data`).
-- Mantenere invece l'aggiornamento di `gp_total_value` / `gp_cash_value` e l'invalidate di `gp-holdings`/`portfolios`.
-
-Il caricamento Portafoglio (`onDropPortfolio`) continua a chiamare `upsertUploadSnapshot` come oggi: lo snapshot resta legato esclusivamente all'upload del portafoglio principale.
-
-### 2. Banner di avviso post-upload GP
-
-Dopo un caricamento GP riuscito, valutare se mostrare un banner persistente:
-
-- Condizione: esiste almeno un record GP per il portafoglio ma **non** esiste un record `historical_data` con `snapshot_date == portfolios.snapshot_date`, **oppure** il `portfolios.snapshot_date` è più vecchio della data più recente di aggiornamento GP.
-- Aggiungere un nuovo componente `GpSnapshotMissingBanner` (in `src/components/dashboard/`) che:
-  - mostri un `Alert` (variant warning) sopra la sezione "Carica Portfolio" nella `Dashboard`,
-  - testo: "Hai caricato una Gestione Patrimoniale, ma lo snapshot storico verrà aggiornato solo dopo aver caricato un nuovo file Portafoglio."
-  - sia chiudibile per sessione (state locale, niente persistenza DB).
-- Integrare il banner in `src/components/dashboard/Dashboard.tsx` nella colonna destra della grid principale, sopra `FileUploader`.
-
-In aggiunta, mostrare un `toast.warning` immediato dopo l'upload GP riuscito con lo stesso messaggio breve, così l'utente non lo manca.
-
-### 3. Nessuna modifica a `uploadSnapshot.ts`
-
-La funzione resta invariata. Cambia solo chi la chiama.
-
-### 4. Verifica manuale
-
-Per SilviaS, dopo il deploy:
-
-1. Ricaricare il portafoglio principale → la card e il punto odierno del grafico devono coincidere (lo snapshot viene riallineato).
-2. Caricare solo la GP → nessuna scrittura su `historical_data`, banner visibile, card e grafico restano coerenti tra loro (entrambi basati sul vecchio snapshot del portafoglio principale, finché non se ne carica uno nuovo).
-
-## File toccati
-
-- `src/components/dashboard/FileUploader.tsx` (rimozione chiamata snapshot in GP, toast warning)
-- `src/components/dashboard/Dashboard.tsx` (inserimento banner)
-- `src/components/dashboard/GpSnapshotMissingBanner.tsx` (nuovo)
-
-Nessuna modifica a DB/RLS.
+File previsti:
+- `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`
+- `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
+- `src/lib/uploadSnapshot.ts`
+- `src/components/dashboard/GpSnapshotMissingBanner.tsx`
+- `src/components/dashboard/FileUploader.tsx`

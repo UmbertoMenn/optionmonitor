@@ -355,19 +355,16 @@ export function PerformanceEvolutionChart({
   });
   const hasUsdData = !isUsdLoading && usdTotalExposure > 0;
   
-  // Calculate the latest snapshot date from ALL historical data (not filtered)
-  // This is used to determine if currentDate is really the newest
+  // Latest saved snapshot date — used only to decide whether to append vs override
   const latestSnapshotDate = useMemo(() => {
     if (historicalData.length === 0) return null;
     return new Date(Math.max(...historicalData.map(d => new Date(d.snapshot_date).getTime())));
   }, [historicalData]);
 
-  // Determine if we can append the current point (only if it's newer than the latest saved snapshot)
-  const canAppendCurrent = useMemo(() => {
-    if (!currentDate || currentValue <= 0) return false;
-    if (!latestSnapshotDate) return true; // No historical data, so current is newest
-    return new Date(currentDate) > latestSnapshotDate;
-  }, [currentDate, currentValue, latestSnapshotDate]);
+  // The current live point should ALWAYS be reflected on the chart when available.
+  // Snapshot saved for the same date may be stale (e.g. saved before GP upload or
+  // before underlying prices refresh): the live value is the source of truth for "today".
+  const hasLiveCurrent = !!currentDate && currentValue > 0;
 
   // Filter historical data based on time range
   const filteredHistoricalData = useMemo(() => {
