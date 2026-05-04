@@ -6,11 +6,11 @@ import { useGPHoldings } from '@/hooks/useGPHoldings';
 import { usePortfolio } from '@/hooks/usePortfolio';
 
 /**
- * Avvisa l'utente quando esiste una GP per il portafoglio corrente la cui
- * data di aggiornamento è più recente della snapshot_date del portafoglio
- * principale: in quel caso lo snapshot storico (historical_data) non è
- * stato rigenerato e i grafici risulteranno disallineati rispetto alle
- * card live.
+ * Avvisa l'utente quando la GP è stata caricata DOPO il file Portafoglio
+ * (o senza un Portafoglio successivo che la integri): in quel caso lo
+ * snapshot storico per la data del Portafoglio NON include la GP, e i
+ * grafici per quel giorno saranno disallineati rispetto alle card finché
+ * non viene caricato un nuovo file Portafoglio.
  */
 export function GpSnapshotMissingBanner() {
   const { portfolio } = usePortfolio();
@@ -25,18 +25,18 @@ export function GpSnapshotMissingBanner() {
     const ownGp = gpHoldings.filter(h => h.portfolio_id === portfolio.id);
     if (ownGp.length === 0) return false;
 
-    const latestGpUpdate = ownGp.reduce<string | null>((max, h) => {
-      const d = h.updated_at || h.created_at;
-      if (!d) return max;
-      return !max || d > max ? d : max;
-    }, null);
+    const latestGpUpdate = ownGp.reduce<number>((max, h) => {
+      const d = new Date(h.updated_at || h.created_at || 0).getTime();
+      return d > max ? d : max;
+    }, 0);
     if (!latestGpUpdate) return false;
 
     const portfolioSnapshotDate = portfolio.snapshot_date;
     if (!portfolioSnapshotDate) return true;
 
-    const gpDateOnly = latestGpUpdate.slice(0, 10);
-    return gpDateOnly > portfolioSnapshotDate;
+    // GP caricata dopo la fine del giorno dello snapshot del Portafoglio
+    const snapshotDayEnd = new Date(`${portfolioSnapshotDate}T23:59:59Z`).getTime();
+    return latestGpUpdate > snapshotDayEnd;
   }, [dismissed, portfolio?.id, portfolio?.snapshot_date, gpHoldings]);
 
   if (!shouldShow) return null;
@@ -48,9 +48,10 @@ export function GpSnapshotMissingBanner() {
         <div className="flex-1">
           <AlertTitle className="text-sm">Snapshot storico non aggiornato</AlertTitle>
           <AlertDescription className="text-xs mt-1">
-            Hai caricato una Gestione Patrimoniale, ma lo snapshot storico verrà
-            aggiornato solo dopo aver caricato un nuovo file Portafoglio. Finché
-            non lo carichi, i grafici storici potrebbero non coincidere con le card.
+            Hai caricato una Gestione Patrimoniale dopo il file Portafoglio.
+            Lo snapshot storico per quella data non include la GP e verrà
+            riallineato solo dopo aver caricato un nuovo file Portafoglio.
+            Le card in alto mostrano comunque il valore live corretto.
           </AlertDescription>
         </div>
         <Button

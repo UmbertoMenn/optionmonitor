@@ -111,22 +111,14 @@ export function PortfolioEvolutionChart({
   currentValue,
   currentDate,
 }: PortfolioEvolutionChartProps) {
-  // Calculate the latest snapshot date from ALL historical data
-  // This is used to determine if currentDate is really the newest
+  // Latest saved snapshot date (used only to decide whether to append a new point)
   const latestSnapshotDate = useMemo(() => {
     if (historicalData.length === 0) return null;
     return new Date(Math.max(...historicalData.map(d => new Date(d.snapshot_date).getTime())));
   }, [historicalData]);
 
-  // Determine if we can append the current point (only if it's newer than the latest saved snapshot)
-  const canAppendCurrent = useMemo(() => {
-    if (!currentDate || currentValue <= 0) return false;
-    if (!latestSnapshotDate) return true; // No historical data, so current is newest
-    return new Date(currentDate) > latestSnapshotDate;
-  }, [currentDate, currentValue, latestSnapshotDate]);
-
   const chartData = useMemo(() => {
-    if (historicalData.length === 0) return [];
+    if (historicalData.length === 0 && !(currentDate && currentValue > 0)) return [];
 
     // Sort by date ascending
     const sorted = [...historicalData].sort(
@@ -140,15 +132,25 @@ export function PortfolioEvolutionChart({
       value: getValueForViewMode(entry, viewMode),
     }));
 
-    // Add current point ONLY if it's newer than the latest saved snapshot and not a duplicate
-    if (canAppendCurrent && currentDate && !data.some(d => d.date === currentDate)) {
-      data.push({
-        date: currentDate,
-        timestamp: new Date(currentDate).getTime(),
-        formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
-        value: currentValue,
-        isCurrent: true,
-      });
+    // Always reflect the current live value on the chart when available:
+    // - if there's already a snapshot for today, OVERRIDE its value with the live one
+    // - otherwise, append a new "current" point
+    if (currentDate && currentValue > 0) {
+      const existingIdx = data.findIndex(d => d.date === currentDate);
+      if (existingIdx >= 0) {
+        data[existingIdx] = { ...data[existingIdx], value: currentValue, isCurrent: true };
+      } else {
+        const isNewest = !latestSnapshotDate || new Date(currentDate) >= latestSnapshotDate;
+        if (isNewest) {
+          data.push({
+            date: currentDate,
+            timestamp: new Date(currentDate).getTime(),
+            formattedDate: format(parseISO(currentDate), "dd MMM ''yy", { locale: it }),
+            value: currentValue,
+            isCurrent: true,
+          });
+        }
+      }
     }
 
     // Ensure chronological order as a safety measure
@@ -158,7 +160,7 @@ export function PortfolioEvolutionChart({
     const currentIdx = data.findIndex(d => d.isCurrent);
     const preserve = currentIdx >= 0 ? new Set([currentIdx]) : undefined;
     return downsampleData(data, 30, preserve);
-  }, [historicalData, viewMode, currentValue, currentDate, canAppendCurrent]);
+  }, [historicalData, viewMode, currentValue, currentDate, latestSnapshotDate]);
 
   if (chartData.length === 0) {
     return (

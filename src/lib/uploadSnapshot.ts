@@ -37,14 +37,31 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       .filter(p => p.asset_type !== 'derivative')
       .reduce((sum, p) => sum + (p.snapshot_market_value ?? p.market_value ?? 0), 0);
     
-    // Fetch GP total value
+    // Fetch GP total value — but include it in the snapshot ONLY if the GP
+    // has not been updated AFTER the portfolio snapshot date. Otherwise the
+    // GP belongs to a different (later) point in time and would corrupt the
+    // historical value of the portfolio for snapshotDate.
     const { data: portfolioData } = await supabase
       .from('portfolios')
       .select('gp_total_value')
       .eq('id', portfolioId)
       .single();
-    const gpTotalValue = portfolioData?.gp_total_value || 0;
-    
+
+    const { data: gpRows } = await supabase
+      .from('gp_holdings')
+      .select('updated_at, created_at')
+      .eq('portfolio_id', portfolioId);
+
+    const latestGpTs = (gpRows || []).reduce<number>((max, r: any) => {
+      const ts = new Date(r.updated_at || r.created_at || 0).getTime();
+      return ts > max ? ts : max;
+    }, 0);
+    // End-of-day in UTC for the snapshot date
+    const snapshotDayEnd = new Date(`${snapshotDate}T23:59:59Z`).getTime();
+    const gpAlignedWithSnapshot = latestGpTs > 0 && latestGpTs <= snapshotDayEnd;
+
+    const gpTotalValue = gpAlignedWithSnapshot ? (portfolioData?.gp_total_value || 0) : 0;
+
     const totalValue = positionsValue + cashValue + gpTotalValue;
 
     // 3. Fetch derivative overrides
