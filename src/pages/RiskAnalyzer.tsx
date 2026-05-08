@@ -64,6 +64,15 @@ export function RiskAnalyzer() {
     [gpHoldings]
   );
   const { summary } = usePortfolio();
+
+  if (typeof window !== 'undefined') {
+    console.log('[RiskAnalyzer] render', {
+      isLoading,
+      gpHoldingsCount: gpHoldings?.length ?? 0,
+      stockDetailsCount: analysis?.stockDetails?.length ?? 0,
+      hasSummary: !!summary,
+    });
+  }
   
   const { mappings: sectorMappings, fetchMappings: fetchSectorMappings, isLoading: sectorMappingsLoading, resolvingCount, reset: resetSectorMappings } = useSectorMappings();
   
