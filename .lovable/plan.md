@@ -1,37 +1,38 @@
-Ho controllato il codice e i dati di SilviaS. Il grafico non si aggiorna perché ci sono ancora due problemi distinti:
+## Problema
 
-1. Nei componenti dei grafici (`PortfolioEvolutionChart` e `PerformanceEvolutionChart`) il punto corrente viene aggiunto solo se la data corrente è successiva all'ultimo snapshot storico. Se esiste già uno snapshot nello stesso giorno, il grafico continua a usare il valore congelato in `historical_data`, quindi non prende il valore live delle card.
-2. Lo snapshot del 2026-05-04 di SilviaS contiene già la GP: `historical_data.total_value = 5.217.687,84`, mentre il portafoglio principale è `4.785.946,89` e la GP è `431.740,95`. Quindi la rimozione del salvataggio snapshot durante upload GP previene nuovi casi, ma non corregge il punto storico già salvato e non protegge da GP caricata prima del portfolio.
+La pagina `/risk-analyzer` esce completamente vuota (nera in dark mode). Nessun errore in console o nei runtime errors viene riportato a Lovable.
 
-Piano di intervento:
+## Causa probabile
 
-1. Correggere i grafici storici
-   - In `PortfolioEvolutionChart.tsx`, quando `currentDate` coincide con una data già presente in `historicalData`, sostituire quel punto con `currentValue` e marcarlo come punto corrente.
-   - Se `currentDate` è più recente dell'ultimo snapshot, continuare ad aggiungerlo come oggi.
-   - Non lasciare duplicati per la stessa data.
-   - Applicare la stessa logica a `PerformanceEvolutionChart.tsx`, ricalcolando rendimento e P/L sul valore live sostitutivo.
+In `src/App.tsx` solo `Dashboard` e `AdminPanel` sono protetti da `ErrorBoundary`. `RiskAnalyzer` e `Derivatives` no. Se un hook (es. `useRiskAnalysis`, `useCurrencyExposure`, `useGPHoldings`, `useSectorMappings`) o una funzione di calcolo (`categorizeDerivatives`, `analyzePortfolioRisk`, `calculateSectorExposure`) lancia un'eccezione durante il render, React smonta tutto il sotto-albero senza fallback → schermo vuoto. Non vedendo l'errore, è impossibile sapere chi lancia.
 
-2. Separare correttamente snapshot portfolio e GP
-   - In `uploadSnapshot.ts`, fare in modo che lo snapshot salvato da upload portfolio includa la GP solo se la GP risulta già allineata o precedente alla data del file portfolio.
-   - Se la GP è stata caricata dopo il portfolio, non deve entrare nello snapshot storico di quella data.
-   - Questo evita che un caricamento GP successivo modifichi indirettamente il valore storico del portafoglio.
+Probabili sorgenti del throw, da fix recenti su snapshot/GP:
+- `usePortfolio()` quando `selectedPortfolio` è `null` ma viene letto `portfolio.snapshot_date` (vedi `GpSnapshotMissingBanner`, ma anche logica derivata).
+- `analysis.stockDetails` undefined se `useRiskAnalysis` ritorna prima del calcolo (race con i nuovi `invalidateQueries` dopo upload).
+- `gpHoldings` non array in qualche edge case (utenti senza GP).
 
-3. Correggere il caso “GP caricata per prima”
-   - Rafforzare `GpSnapshotMissingBanner` perché non si basi solo sul confronto tra `gp.updated_at` e `portfolio.snapshot_date`, che può fallire quando sono nello stesso giorno.
-   - Il banner deve verificare anche se lo snapshot esistente per quella data manca oppure contiene valori non coerenti con il live corrente.
-   - Messaggio: lo snapshot storico non verrà aggiornato finché non viene caricato un nuovo file Portafoglio non-GP.
+## Piano
 
-4. Aggiornare lo snapshot esistente dopo upload portfolio
-   - Dopo un upload portfolio, invalidare/refetchare in modo più robusto `historical-data`, `positions`, `portfolios`, `gp-holdings` e query correlate, così il grafico non resta su cache vecchia.
-   - Il grafico deve comunque essere corretto subito grazie al punto corrente live, anche prima del refetch.
+### 1. `src/App.tsx`
+Avvolgere anche `RiskAnalyzer` e `Derivatives` (e `Simulator`) in `ErrorBoundary`, come già fatto per Dashboard. Così l'utente vede sempre il messaggio d'errore invece dello schermo bianco/nero, e in console viene loggato lo stack.
 
-5. Nota importante sui dati già salvati
-   - Il codice correggerà la visualizzazione usando il valore live per il punto corrente.
-   - Lo snapshot storico già salvato per SilviaS resta in database finché non viene rigenerato da un nuovo upload portfolio o corretto manualmente. Posso anche aggiungere una piccola azione/admin utility per rigenerare lo snapshot corrente, ma per questa correzione mi concentro sul bug UI/logico e sulla prevenzione dei nuovi casi.
+### 2. `src/pages/RiskAnalyzer.tsx`
+Aggiungere guardie difensive per non crollare se i dati arrivano parziali:
+- `analysis.stockDetails ?? []`, `nakedPutDetails ?? []`, ecc., dentro il `useMemo` `stocksForSectorMapping`.
+- `gpStockHoldings` già filtrato da array, ma confermare che `gpHoldings` sia `[]` di default (già OK in hook).
+- Verificare che `summary` possa essere `null` senza far crashare i sotto-componenti (`EquityExposureView`, `CurrencyExposureView`, `SectorAllocationView`).
 
-File previsti:
-- `src/components/dashboard/charts/PortfolioEvolutionChart.tsx`
-- `src/components/dashboard/charts/PerformanceEvolutionChart.tsx`
-- `src/lib/uploadSnapshot.ts`
-- `src/components/dashboard/GpSnapshotMissingBanner.tsx`
-- `src/components/dashboard/FileUploader.tsx`
+### 3. Diagnostica mirata
+Aggiungere `console.error` su catch nell'`ErrorBoundary` (già presente) e un `console.log('[RiskAnalyzer] mount', { hasPortfolio, isLoading, isCurrencyLoading })` all'inizio della pagina, così se persiste la blank screen, al prossimo reload abbiamo lo stack reale.
+
+### 4. Verifica
+Dopo il fix, l'utente ricarica `/risk-analyzer`:
+- caso A: la pagina si carica → era un throw transitorio risolto dalle guardie.
+- caso B: appare la card di errore dell'`ErrorBoundary` con stack → lo stack ci dice esattamente dove è il bug e procediamo con un fix mirato.
+
+## File toccati
+
+- `src/App.tsx` (wrap routes in ErrorBoundary)
+- `src/pages/RiskAnalyzer.tsx` (guardie difensive + log diagnostico)
+
+Nessuna modifica DB / RLS / business logic.
