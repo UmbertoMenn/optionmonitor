@@ -36,6 +36,7 @@ export interface CoveredCallPosition {
   isFullyCovered: boolean;
   isSynthetic?: boolean;
   syntheticPut?: Position;
+  syntheticCall?: Position; // Deep ITM bought CALL acting as stock
 }
 
 export interface LongPutPosition {
