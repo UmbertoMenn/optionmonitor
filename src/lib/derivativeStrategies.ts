@@ -96,7 +96,7 @@ export interface OtherStrategyPosition {
 
 export interface DeRiskingCoveredCallPosition {
   coveredCall: CoveredCallPosition;
-  protectionPut: Position;
+  protectionPut?: Position; // Optional: synthetic DR-CC with bought CALL ITM may have no protection put
   isSynthetic: boolean;
   syntheticPut?: Position; // Deep ITM sold PUT acting as stock
   syntheticCall?: Position; // Deep ITM bought CALL acting as stock
