@@ -1335,7 +1335,11 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 <p className="text-muted-foreground text-xs">Sottostante</p>
                 <p className="font-medium">{underlying.description}</p>
                 {coveredCall.isSynthetic ? (
-                  <p className="text-xs text-orange-400">Sintetico (PUT venduta deep ITM)</p>
+                  <p className="text-xs text-orange-400">
+                    {coveredCall.syntheticCall
+                      ? 'Sintetico (CALL acquistata deep ITM)'
+                      : 'Sintetico (PUT venduta deep ITM)'}
+                  </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">{underlying.quantity} azioni</p>
                 )}
