@@ -99,6 +99,7 @@ export interface DeRiskingCoveredCallPosition {
   protectionPut: Position;
   isSynthetic: boolean;
   syntheticPut?: Position; // Deep ITM sold PUT acting as stock
+  syntheticCall?: Position; // Deep ITM bought CALL acting as stock
 }
 
 // SyntheticCoveredCallPosition removed - synthetic CCs are now in coveredCalls with isSynthetic flag
