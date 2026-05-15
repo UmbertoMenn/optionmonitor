@@ -1693,29 +1693,35 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             </div>
             
             {/* Synthetic PUT if present */}
-            {syntheticPut && (
-              <div className="pt-2 border-t border-border/30">
-                <p className="text-xs text-orange-400 font-medium mb-2">📌 PUT Sintetica (venduta deep ITM)</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Strike</p>
-                    <p className="font-medium">{syntheticPut.strike_price}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Scadenza</p>
-                    <p className="font-medium">{formatExpiryMMY(syntheticPut.expiry_date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">PMC</p>
-                    <p className="font-medium">{formatCurrency(syntheticPut.avg_cost || 0, getOptionCurrency(syntheticPut))}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Prezzo</p>
-                    <p className="font-medium">{formatCurrency(syntheticPut.current_price || 0, getOptionCurrency(syntheticPut))}</p>
+            {(syntheticCall || syntheticPut) && (() => {
+              const sp = (syntheticCall || syntheticPut)!;
+              const isCall = !!syntheticCall;
+              return (
+                <div className="pt-2 border-t border-border/30">
+                  <p className="text-xs text-orange-400 font-medium mb-2">
+                    📌 {isCall ? 'CALL Sintetica (acquistata deep ITM)' : 'PUT Sintetica (venduta deep ITM)'}
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground text-xs">Strike</p>
+                      <p className="font-medium">{sp.strike_price}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Scadenza</p>
+                      <p className="font-medium">{formatExpiryMMY(sp.expiry_date)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">PMC</p>
+                      <p className="font-medium">{formatCurrency(sp.avg_cost || 0, getOptionCurrency(sp))}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground text-xs">Prezzo</p>
+                      <p className="font-medium">{formatCurrency(sp.current_price || 0, getOptionCurrency(sp))}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </CollapsibleContent>
       </Collapsible>
