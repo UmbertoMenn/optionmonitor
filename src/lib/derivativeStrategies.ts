@@ -510,6 +510,7 @@ export function categorizeDerivatives(
           const cc: CoveredCallPosition = {
             option: call, underlying: stock, contractsCovered: contracts,
             sharesCovered: contracts * 100, isFullyCovered: true,
+            isSynthetic: config.is_synthetic, syntheticPut, syntheticCall,
           };
           const protPut = boughtPuts.shift();
           if (protPut) {
@@ -518,9 +519,10 @@ export function categorizeDerivatives(
               isSynthetic: config.is_synthetic, syntheticPut, syntheticCall,
             });
           } else if (config.is_synthetic && (syntheticPut || syntheticCall)) {
-            coveredCalls.push({
-              option: call, underlying: stock, contractsCovered: contracts,
-              sharesCovered: contracts * 100, isFullyCovered: true,
+            // Synthetic DR-CC without protection put (e.g., +CALL ITM / -CALL):
+            // keep classified as DR-CC sintetica with protectionPut undefined.
+            deRiskingCoveredCalls.push({
+              coveredCall: cc, protectionPut: undefined,
               isSynthetic: true, syntheticPut, syntheticCall,
             });
           } else {
