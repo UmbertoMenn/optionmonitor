@@ -467,8 +467,10 @@ export function calculateSectorExposure(
     
     // Use the isETF flag from StockRiskDetail (set in riskCalculator based on asset_type)
     const isETF = stock.isETF;
-    // Use gross value (stockValue / exchangeRate) instead of riskEUR (which is net of protections)
-    const grossValueEUR = stock.stockValue / stock.exchangeRate;
+    // Synthetic CC/DR-CC entries have stockValue=0; use riskEUR directly.
+    const grossValueEUR = stock.isSynthetic
+      ? stock.riskEUR
+      : stock.stockValue / stock.exchangeRate;
     
     if (isETF && stock.isin && etfAllocations[stock.isin]) {
       // ETF with sector allocation data - decompose by sector
@@ -880,6 +882,7 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     protectionContracts: number;
     protectionStrike: number | null;
     hasProtection: boolean;
+    isSynthetic?: boolean;
   }>;
   strategyDetails: Array<{
     strategyName: string;
@@ -975,13 +978,18 @@ export function calculateConsolidatedTopHoldings(
 
     const holding = getOrCreateHolding(stock.underlying, stock.tickerKey);
 
-    const stockValueEUR = stock.stockValue / stock.exchangeRate;
+    // Synthetic CC/DR-CC: stockValue=0, but riskEUR is the actual exposure.
+    // Treat as non-reducible by protections (both stockRisk and stockRiskWithProtection = riskEUR).
+    const isSynth = !!stock.isSynthetic;
+    const stockValueEUR = isSynth
+      ? stock.riskEUR
+      : stock.stockValue / stock.exchangeRate;
     holding.stockRisk += stockValueEUR;
     holding.stockRiskWithProtection += stock.riskEUR;
 
     holding.sources.push({
       type: 'stock',
-      name: 'Diretto',
+      name: isSynth ? 'Sintetica CC/DR-CC' : 'Diretto',
       exposure: options.includeProtections ? stock.riskEUR : stockValueEUR,
     });
     holding.stockDetails.push({
@@ -993,6 +1001,7 @@ export function calculateConsolidatedTopHoldings(
       protectionContracts: stock.protectionContracts || 0,
       protectionStrike: stock.protectionStrike ?? null,
       hasProtection: stock.hasProtection || false,
+      isSynthetic: isSynth,
     });
   }
 
