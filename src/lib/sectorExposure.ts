@@ -977,13 +977,18 @@ export function calculateConsolidatedTopHoldings(
 
     const holding = getOrCreateHolding(stock.underlying, stock.tickerKey);
 
-    const stockValueEUR = stock.stockValue / stock.exchangeRate;
+    // Synthetic CC/DR-CC: stockValue=0, but riskEUR is the actual exposure.
+    // Treat as non-reducible by protections (both stockRisk and stockRiskWithProtection = riskEUR).
+    const isSynth = !!stock.isSynthetic;
+    const stockValueEUR = isSynth
+      ? stock.riskEUR
+      : stock.stockValue / stock.exchangeRate;
     holding.stockRisk += stockValueEUR;
     holding.stockRiskWithProtection += stock.riskEUR;
 
     holding.sources.push({
       type: 'stock',
-      name: 'Diretto',
+      name: isSynth ? 'Sintetica CC/DR-CC' : 'Diretto',
       exposure: options.includeProtections ? stock.riskEUR : stockValueEUR,
     });
     holding.stockDetails.push({
@@ -995,6 +1000,7 @@ export function calculateConsolidatedTopHoldings(
       protectionContracts: stock.protectionContracts || 0,
       protectionStrike: stock.protectionStrike ?? null,
       hasProtection: stock.hasProtection || false,
+      isSynthetic: isSynth,
     });
   }
 
