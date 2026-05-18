@@ -75,9 +75,15 @@ export function HoldingBreakdownDialog({
                 {holding.stockDetails.map((stock, i) => (
                   <div key={i} className="p-3 flex justify-between items-center">
                     <div>
-                      <div className="text-sm">
-                        {formatNumber(stock.quantity)} azioni @ {stock.currency} {formatNumber(stock.price, 2)}
-                      </div>
+                      {stock.isSynthetic ? (
+                        <div className="text-sm font-medium text-amber-500">
+                          Posizione Sintetica CC/DR-CC
+                        </div>
+                      ) : (
+                        <div className="text-sm">
+                          {formatNumber(stock.quantity)} azioni @ {stock.currency} {formatNumber(stock.price, 2)}
+                        </div>
+                      )}
                       {/* Show protection info if present */}
                       {stock.hasProtection && stock.protectionContracts > 0 && (
                         <div className="text-xs text-green-600 mt-1">
