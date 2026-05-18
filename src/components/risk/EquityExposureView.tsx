@@ -168,9 +168,13 @@ export function EquityExposureView({
     [etfDetails]
   );
 
-  // Sort by gross value (stockValue/exchangeRate) to keep order stable regardless of toggle
+  // Sort by gross value; for synthetics (stockValue=0) fall back to riskEUR so they don't sink to the bottom.
   const sortedPureStockDetails = useMemo(() => 
-    [...pureStockDetails].sort((a, b) => (b.stockValue / b.exchangeRate) - (a.stockValue / a.exchangeRate)),
+    [...pureStockDetails].sort((a, b) => {
+      const va = a.isSynthetic ? a.riskEUR : a.stockValue / a.exchangeRate;
+      const vb = b.isSynthetic ? b.riskEUR : b.stockValue / b.exchangeRate;
+      return vb - va;
+    }),
     [pureStockDetails]
   );
 
