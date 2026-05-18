@@ -882,6 +882,7 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     protectionContracts: number;
     protectionStrike: number | null;
     hasProtection: boolean;
+    isSynthetic?: boolean;
   }>;
   strategyDetails: Array<{
     strategyName: string;
