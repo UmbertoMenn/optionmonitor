@@ -467,8 +467,10 @@ export function calculateSectorExposure(
     
     // Use the isETF flag from StockRiskDetail (set in riskCalculator based on asset_type)
     const isETF = stock.isETF;
-    // Use gross value (stockValue / exchangeRate) instead of riskEUR (which is net of protections)
-    const grossValueEUR = stock.stockValue / stock.exchangeRate;
+    // Synthetic CC/DR-CC entries have stockValue=0; use riskEUR directly.
+    const grossValueEUR = stock.isSynthetic
+      ? stock.riskEUR
+      : stock.stockValue / stock.exchangeRate;
     
     if (isETF && stock.isin && etfAllocations[stock.isin]) {
       // ETF with sector allocation data - decompose by sector
