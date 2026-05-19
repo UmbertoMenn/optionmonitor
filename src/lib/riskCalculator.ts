@@ -810,50 +810,55 @@ export function calculateSyntheticCcDrccRisk(
  */
 export function analyzePortfolioRisk(
   positions: Position[],
-  categories: DerivativeCategories
+  categories: DerivativeCategories,
+  spotResolver?: SpotResolver
 ): RiskAnalysis {
   // Get stock/ETF positions (excluding commodities and bonds)
   const stockAssetTypes = ['stock', 'etf'];
   const stocks = positions.filter(p => stockAssetTypes.includes(p.asset_type));
-  
-  // Get commodity positions separately
   const commodities = positions.filter(p => p.asset_type === 'commodity');
-  
-  // Get bond positions separately
   const bonds = positions.filter(p => p.asset_type === 'bond');
-  
-  // Calculate each risk category
-  // Pass allPositions to calculateStockRisk for direct PUT lookup
-  const baseStockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
-  const syntheticDetails = calculateSyntheticCcDrccRisk(categories.coveredCalls, categories.deRiskingCoveredCalls);
-  const stockDetails = [...baseStockDetails, ...syntheticDetails];
+
+  // Default spot resolver: lookup matching stock/ETF by name in positions
+  const resolver: SpotResolver = spotResolver || ((underlyingName: string) => {
+    const target = (underlyingName || '').toUpperCase();
+    const match = stocks.find(s => {
+      const t = (s.ticker || '').toUpperCase();
+      const d = (s.description || '').toUpperCase();
+      return (t && target.includes(t)) || (d && (target.includes(d) || d.includes(target)));
+    });
+    if (!match) return null;
+    const px = (match as any).snapshot_price ?? match.current_price ?? null;
+    return typeof px === 'number' && px > 0 ? px : null;
+  });
+
+  const stockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
+  const syntheticCcDrccDetails = calculateSyntheticCcDrccRisk(categories.coveredCalls, categories.deRiskingCoveredCalls, resolver);
   const commodityDetails = calculateCommodityRisk(commodities);
   const bondDetails = calculateBondRisk(bonds);
-  
-  // Filter EUROFOREX from Naked Puts and Leap Calls
+
   const filteredNakedPuts = categories.nakedPuts.filter(
     np => !isEuroforexInstrument(np.option.underlying || np.option.description)
   );
   const nakedPutDetails = calculateNakedPutRisk(filteredNakedPuts);
-  
   const filteredLeapCalls = categories.leapCalls.filter(
     lc => !isEuroforexInstrument(lc.option.underlying || lc.option.description)
   );
   const leapCallDetails = calculateLeapCallRisk(filteredLeapCalls);
-  
   const strategyDetails = calculateStrategyRisk(categories);
-  
-  // Sum up totals in EUR
-  const totalStockRisk = stockDetails.reduce((sum, s) => sum + s.riskEUR, 0);
+
+  // Totali: stockDetails contiene SOLO stock/ETF reali. Sintetiche separate.
   const totalETFRisk = stockDetails.filter(s => s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
   const totalPureStockRisk = stockDetails.filter(s => !s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
+  const totalStockRisk = totalETFRisk + totalPureStockRisk;
   const totalCommodityRisk = commodityDetails.reduce((sum, c) => sum + c.riskEUR, 0);
   const totalBondRisk = bondDetails.reduce((sum, b) => sum + b.riskEUR, 0);
   const totalNakedPutRisk = nakedPutDetails.reduce((sum, n) => sum + n.riskEUR, 0);
   const totalLeapCallRisk = leapCallDetails.reduce((sum, l) => sum + l.riskEUR, 0);
   const totalStrategyRisk = strategyDetails.reduce((sum, s) => sum + s.maxLossEUR, 0);
-  const grandTotal = totalStockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
-  
+  const totalSyntheticCcDrccRisk = syntheticCcDrccDetails.reduce((sum, s) => sum + s.riskEUR, 0);
+  const grandTotal = totalStockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk + totalSyntheticCcDrccRisk;
+
   return {
     totalStockRisk,
     totalETFRisk,
@@ -863,8 +868,10 @@ export function analyzePortfolioRisk(
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
+    totalSyntheticCcDrccRisk,
     grandTotal,
     stockDetails,
+    syntheticCcDrccDetails,
     commodityDetails,
     bondDetails,
     nakedPutDetails,
