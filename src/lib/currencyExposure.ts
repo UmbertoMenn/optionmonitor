@@ -153,6 +153,28 @@ export function calculateCurrencyExposure(
       });
     }
   }
+
+  // Synthetic CC/DR-CC entries — separate array, always included
+  for (const s of analysis.syntheticCcDrccDetails || []) {
+    const curr = s.currency || 'OTHER';
+    const exposure = getOrCreateCurrency(byCurrency, curr);
+    const grossValueEUR = s.riskEUR;
+    const grossValueOriginal = s.riskOriginal;
+    exposure.breakdown.stocks += grossValueEUR;
+    exposure.totalRisk += grossValueEUR;
+    exposure.totalRiskOriginal += grossValueOriginal;
+    exposure.instruments.push({
+      name: s.underlying,
+      riskEUR: grossValueEUR,
+      riskOriginal: grossValueOriginal,
+      category: 'stocks',
+      details: 'Sintetica CC/DR-CC',
+      isin: s.isin,
+      isETF: false,
+    });
+  }
+  
+
   
   // Aggregate bondDetails by currency (if includeBonds is true)
   if (includeBonds) {
