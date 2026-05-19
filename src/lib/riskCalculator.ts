@@ -673,17 +673,26 @@ function isEuroforexInstrument(name: string | undefined | null): boolean {
 }
 
 /**
+ * Resolver for spot price of a synthetic position's underlying.
+ * Returns null if no spot can be resolved.
+ */
+export type SpotResolver = (underlyingName: string, optionTicker?: string | null) => number | null;
+
+/**
  * Calculate risk for synthetic CC and DR-CC positions (no real underlying stock).
  *
  * Formulas (in option currency, then /exchangeRate):
- * - CC sintetica with syntheticPut: strike_put × |qty_put| × 100
- * - CC sintetica with syntheticCall: current_price_call × qty_call × 100 (market value)
- * - DR-CC sintetica with syntheticPut + protectionPut: (strike_synPut − strike_protPut) × contracts × 100
- * - DR-CC sintetica with syntheticCall: current_price_synCall × qty_synCall × 100
+ * - CC sintetica con syntheticPut:                          strike_PUT × |qty_PUT| × 100
+ * - CC sintetica con syntheticCall:
+ *     spot ≥ strike_callVenduta → (strike_callVenduta - strike_callComprata) × qty × 100
+ *     spot <  strike_callVenduta → price_callComprata × qty × 100  (fallback se spot ignoto)
+ * - DR-CC sintetica con syntheticPut + protectionPut: (strike_synPut − strike_protPut) × contracts × 100
+ * - DR-CC sintetica con syntheticCall:                price_callComprata × qty × 100
  */
 export function calculateSyntheticCcDrccRisk(
   coveredCalls: CoveredCallPosition[],
-  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[]
+  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[],
+  spotResolver?: SpotResolver
 ): StockRiskDetail[] {
   const result: StockRiskDetail[] = [];
 
@@ -694,7 +703,8 @@ export function calculateSyntheticCcDrccRisk(
     refPosition: Position,
     underlyingName: string,
     riskOriginal: number,
-    syntheticType: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call'
+    syntheticType: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call',
+    composition: string
   ): StockRiskDetail => {
     const exchangeRate = getEffectiveExchangeRate(refPosition);
     const currency = refPosition.currency || 'USD';
@@ -722,6 +732,7 @@ export function calculateSyntheticCcDrccRisk(
       isETF: false,
       isSynthetic: true,
       syntheticType,
+      composition,
     };
   };
 
@@ -730,19 +741,37 @@ export function calculateSyntheticCcDrccRisk(
     if (!cc.isSynthetic) continue;
     if (drccCcOptionIds.has(cc.option.id)) continue; // Will be counted in DR-CC
 
-    const contracts = cc.contractsCovered || 0;
-    const underlyingName = cc.option.underlying || cc.option.description || '';
+    const shortCall = cc.option;
+    const shortStrike = shortCall.strike_price || 0;
+    const underlyingName = shortCall.underlying || shortCall.description || '';
 
     if (cc.syntheticCall) {
-      const qty = cc.syntheticCall.quantity || 0;
-      const px = cc.syntheticCall.current_price ?? cc.syntheticCall.avg_cost ?? 0;
-      const riskOriginal = px * qty * 100;
-      result.push(buildEntry(cc.syntheticCall, underlyingName, riskOriginal, 'cc_call'));
+      const longCall = cc.syntheticCall;
+      const qty = longCall.quantity || 0;
+      const longStrike = longCall.strike_price || 0;
+      const longPx = longCall.current_price ?? longCall.avg_cost ?? 0;
+      const spot = spotResolver
+        ? spotResolver(underlyingName, longCall.ticker ?? shortCall.ticker ?? null)
+        : null;
+
+      let riskOriginal: number;
+      let composition: string;
+      if (spot != null && spot >= shortStrike) {
+        riskOriginal = Math.max(0, shortStrike - longStrike) * qty * 100;
+        composition = `Long CALL ${longStrike} ITM + Short CALL ${shortStrike} (spot ${spot.toFixed(2)})`;
+      } else {
+        riskOriginal = longPx * qty * 100;
+        composition = spot != null
+          ? `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike} (spot ${spot.toFixed(2)})`
+          : `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike}`;
+      }
+      result.push(buildEntry(longCall, underlyingName, riskOriginal, 'cc_call', composition));
     } else if (cc.syntheticPut) {
       const qty = Math.abs(cc.syntheticPut.quantity || 0);
       const strike = cc.syntheticPut.strike_price || 0;
       const riskOriginal = strike * qty * 100;
-      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put'));
+      const composition = `Short PUT ${strike} ITM + Short CALL ${shortStrike}`;
+      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put', composition));
     }
   }
 
@@ -750,20 +779,26 @@ export function calculateSyntheticCcDrccRisk(
   for (const dr of deRiskingCoveredCalls) {
     if (!dr.isSynthetic) continue;
 
+    const shortCall = dr.coveredCall.option;
+    const shortStrike = shortCall.strike_price || 0;
     const contracts = dr.coveredCall.contractsCovered || 0;
-    const underlyingName = dr.coveredCall.option.underlying || dr.coveredCall.option.description || '';
+    const underlyingName = shortCall.underlying || shortCall.description || '';
+    const protStrike = dr.protectionPut?.strike_price || 0;
 
     if (dr.syntheticCall) {
-      const qty = dr.syntheticCall.quantity || 0;
-      const px = dr.syntheticCall.current_price ?? dr.syntheticCall.avg_cost ?? 0;
-      const riskOriginal = px * qty * 100;
-      result.push(buildEntry(dr.syntheticCall, underlyingName, riskOriginal, 'drcc_call'));
+      const longCall = dr.syntheticCall;
+      const qty = longCall.quantity || 0;
+      const longStrike = longCall.strike_price || 0;
+      const longPx = longCall.current_price ?? longCall.avg_cost ?? 0;
+      const riskOriginal = longPx * qty * 100;
+      const composition = `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
+      result.push(buildEntry(longCall, underlyingName, riskOriginal, 'drcc_call', composition));
     } else if (dr.syntheticPut) {
       const synStrike = dr.syntheticPut.strike_price || 0;
-      const protStrike = dr.protectionPut?.strike_price || 0;
       const perShare = Math.max(0, synStrike - protStrike);
       const riskOriginal = perShare * contracts * 100;
-      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put'));
+      const composition = `Short PUT ${synStrike} ITM + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
+      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition));
     }
   }
 
