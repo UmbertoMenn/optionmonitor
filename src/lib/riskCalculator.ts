@@ -45,6 +45,7 @@ export interface StockRiskDetail {
   // Synthetic CC/DR-CC entry (no real underlying stock)
   isSynthetic?: boolean;
   syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
+  composition?: string;         // Composizione strategia sintetica (UI)
 }
 
 export interface NakedPutRiskDetail {
@@ -111,16 +112,18 @@ export interface RiskAnalysis {
   // Totali EUR
   totalStockRisk: number;       // Rischio totale Azioni + ETF (per retrocompatibilità)
   totalETFRisk: number;         // Rischio solo ETF
-  totalPureStockRisk: number;   // Rischio solo Azioni (no ETF)
+  totalPureStockRisk: number;   // Rischio solo Azioni (no ETF, no sintetiche)
   totalCommodityRisk: number;
   totalBondRisk: number;
   totalNakedPutRisk: number;
   totalLeapCallRisk: number;
   totalStrategyRisk: number;
+  totalSyntheticCcDrccRisk: number; // Rischio CC e DR-CC sintetiche
   grandTotal: number;
   
   // Dettagli
-  stockDetails: StockRiskDetail[];
+  stockDetails: StockRiskDetail[];           // SOLO stock/ETF reali
+  syntheticCcDrccDetails: StockRiskDetail[]; // SOLO sintetiche CC/DR-CC
   commodityDetails: CommodityRiskDetail[];
   bondDetails: BondRiskDetail[];
   nakedPutDetails: NakedPutRiskDetail[];
@@ -231,35 +234,93 @@ export function calculateStockRisk(
     const stockValue = stockQuantity * stockPrice;
     const exchangeRate = getEffectiveExchangeRate(stock);
     const currency = stock.currency || 'USD';
-    
-    // Find ALL bought PUTs for this stock from positions (bypasses classification)
-    const boughtPutsFromPositions = allBoughtPuts.filter(put => matchesUnderlying(put, stock));
-    
-    // Also check classified longPuts (and avoid duplicates)
-    const classifiedPuts = longPuts.filter(lp => matchesUnderlying(lp.option, stock));
+
+    // Match DR-CCs and CCs for this stock (only "real" ones — synthetics are handled separately)
+    const drccMatched = deRiskingCoveredCalls.filter(dr =>
+      !dr.isSynthetic && matchesUnderlying(dr.coveredCall.option, stock)
+    );
+    const ccMatched = coveredCalls.filter(cc =>
+      !cc.isSynthetic && matchesUnderlying(cc.option, stock)
+    );
+    const drccCcIds = new Set(drccMatched.map(dr => dr.coveredCall.option.id));
+    const ccOnly = ccMatched.filter(cc => !drccCcIds.has(cc.option.id));
+
+    // ===== Step 1: DR-CC shares & risk (priority over plain CC and protection PUTs) =====
+    // Per share:
+    //   - spot ≥ strikeCall → max(0, strikeCall - strikeProtPut) × shares
+    //   - spot <  strikeCall → max(0, spot      - strikeProtPut) × shares
+    let drccSharesRequested = 0;
+    let drccRiskRequested = 0;
+    let drccPerShareWeightedSum = 0;
+    for (const dr of drccMatched) {
+      const callStrike = dr.coveredCall.option.strike_price || 0;
+      const putStrike = dr.protectionPut?.strike_price || 0;
+      const sh = (dr.coveredCall.contractsCovered || 0) * 100;
+      const perShare = stockPrice >= callStrike
+        ? Math.max(0, callStrike - putStrike)
+        : Math.max(0, stockPrice - putStrike);
+      drccSharesRequested += sh;
+      drccRiskRequested += perShare * sh;
+      drccPerShareWeightedSum += perShare * sh;
+    }
+    const drccShares = Math.min(drccSharesRequested, stockQuantity);
+    const drccRisk = drccSharesRequested > 0
+      ? drccRiskRequested * (drccShares / drccSharesRequested)
+      : 0;
+    const drccPerShare = drccSharesRequested > 0
+      ? drccPerShareWeightedSum / drccSharesRequested
+      : 0;
+    let remainingShares = stockQuantity - drccShares;
+
+    // ===== Step 2: CC ITM cap (only OTM falls through to unprotected at spot × shares) =====
+    let ccSharesRequested = 0;
+    let ccRiskRequested = 0;
+    let ccStrikeWeightedSum = 0;
+    for (const cc of ccOnly) {
+      const callStrike = cc.option.strike_price || 0;
+      if (callStrike > 0 && callStrike < stockPrice) {
+        const sh = (cc.contractsCovered || 0) * 100;
+        ccSharesRequested += sh;
+        ccRiskRequested += callStrike * sh;
+        ccStrikeWeightedSum += callStrike * sh;
+      }
+    }
+    const ccShares = Math.min(ccSharesRequested, remainingShares);
+    const ccCapRisk = ccSharesRequested > 0
+      ? ccRiskRequested * (ccShares / ccSharesRequested)
+      : 0;
+    const ccCapStrike = ccSharesRequested > 0
+      ? ccStrikeWeightedSum / ccSharesRequested
+      : 0;
+    remainingShares -= ccShares;
+
+    // ===== Step 3: Long PUT protections (exclude DR-CC's own protection PUTs) =====
+    const drccProtPutIds = new Set(
+      drccMatched.map(dr => dr.protectionPut?.id).filter((id): id is string => !!id)
+    );
+    const classifiedPuts = longPuts.filter(lp =>
+      matchesUnderlying(lp.option, stock) && !drccProtPutIds.has(lp.option.id)
+    );
     const classifiedPutIds = new Set(classifiedPuts.map(lp => lp.option.id));
-    
-    // Merge: use classified + additional from positions not already counted
-    const additionalPuts = boughtPutsFromPositions.filter(p => !classifiedPutIds.has(p.id));
-    
-    // Calculate total protection contracts
+    const additionalPuts = allBoughtPuts.filter(p =>
+      matchesUnderlying(p, stock) && !drccProtPutIds.has(p.id) && !classifiedPutIds.has(p.id)
+    );
+
     const contractsFromClassified = classifiedPuts.reduce((sum, lp) => sum + lp.contracts, 0);
     const contractsFromPositions = additionalPuts.reduce((sum, p) => sum + (p.quantity || 0), 0);
     const protectionContracts = contractsFromClassified + contractsFromPositions;
-    
-    // Calculate weighted average strike and option price (market if available)
+
     let avgStrike = 0;
     let avgOptionPrice = 0;
     if (protectionContracts > 0) {
-      const classifiedWeightedSum = classifiedPuts.reduce((sum, lp) => 
+      const classifiedWeightedSum = classifiedPuts.reduce((sum, lp) =>
         sum + (lp.option.strike_price || 0) * lp.contracts, 0
       );
-      const positionsWeightedSum = additionalPuts.reduce((sum, p) => 
+      const positionsWeightedSum = additionalPuts.reduce((sum, p) =>
         sum + (p.strike_price || 0) * (p.quantity || 0), 0
       );
       avgStrike = (classifiedWeightedSum + positionsWeightedSum) / protectionContracts;
-      
-      // Weighted average option price: prefer current_price, fallback avg_cost
+
       const classifiedPriceWeightedSum = classifiedPuts.reduce((sum, lp) => {
         const px = (lp.option.current_price ?? lp.option.avg_cost ?? 0);
         return sum + px * lp.contracts;
@@ -270,67 +331,20 @@ export function calculateStockRisk(
       }, 0);
       avgOptionPrice = (classifiedPriceWeightedSum + positionsPriceWeightedSum) / protectionContracts;
     }
-    
-    // Calculate protected vs unprotected shares
-    const protectedShares = Math.min(protectionContracts * 100, stockQuantity);
-    let unprotectedShares = stockQuantity - protectedShares;
-    
-    // ===== CC / DR-CC ITM cap on unprotected shares =====
-    // DR-CC has priority over plain CC for the same shares.
-    const drccItm = deRiskingCoveredCalls.filter(dr => {
-      const callStrike = dr.coveredCall.option.strike_price || 0;
-      return matchesUnderlying(dr.coveredCall.option, stock) && callStrike > 0 && callStrike < stockPrice;
-    });
-    const ccItm = coveredCalls.filter(cc => {
-      const callStrike = cc.option.strike_price || 0;
-      return matchesUnderlying(cc.option, stock) && callStrike > 0 && callStrike < stockPrice;
-    });
-    // Exclude CCs already part of a DR-CC to avoid double-counting
-    const drccCcIds = new Set(drccItm.map(dr => dr.coveredCall.option.id));
-    const ccItmOnly = ccItm.filter(cc => !drccCcIds.has(cc.option.id));
-    
-    let drccShares = 0;
-    let drccPerShareWeighted = 0;
-    for (const dr of drccItm) {
-      const sh = (dr.coveredCall.contractsCovered || 0) * 100;
-      const callStrike = dr.coveredCall.option.strike_price || 0;
-      const putStrike = dr.protectionPut.strike_price || 0;
-      const perShare = Math.max(0, callStrike - putStrike);
-      drccShares += sh;
-      drccPerShareWeighted += perShare * sh;
-    }
-    
-    let ccShares = 0;
-    let ccStrikeWeighted = 0;
-    for (const cc of ccItmOnly) {
-      const sh = (cc.contractsCovered || 0) * 100;
-      const strike = cc.option.strike_price || 0;
-      ccShares += sh;
-      ccStrikeWeighted += strike * sh;
-    }
-    
-    // Cap to available unprotected shares (DR-CC priority)
-    drccShares = Math.min(drccShares, unprotectedShares);
-    const remainingAfterDrcc = unprotectedShares - drccShares;
-    ccShares = Math.min(ccShares, remainingAfterDrcc);
-    const fullyUnprotectedShares = unprotectedShares - drccShares - ccShares;
-    
-    const drccPerShare = drccShares > 0 ? drccPerShareWeighted / Math.max(1, drccItm.reduce((s, dr) => s + (dr.coveredCall.contractsCovered || 0) * 100, 0)) : 0;
-    const ccCapStrike = ccShares > 0 ? ccStrikeWeighted / Math.max(1, ccItmOnly.reduce((s, cc) => s + (cc.contractsCovered || 0) * 100, 0)) : 0;
-    
-    // Formula corretta per protezione parziale:
-    // Risk = (Azioni_non_protette × Prezzo) + (Azioni_protette × max(0, Prezzo - Strike))
-    //      + cap CC ITM (strike × shares) + cap DR-CC ITM ((call-put) × shares)
-    const unprotectedRisk = fullyUnprotectedShares * stockPrice;
+
+    const protectedShares = Math.min(protectionContracts * 100, remainingShares);
     const protectedRisk = protectedShares * Math.max(0, stockPrice - avgStrike);
-    const ccCapRisk = ccShares * ccCapStrike;
-    const drccCapRisk = drccShares * drccPerShare;
-    const riskOriginal = unprotectedRisk + protectedRisk + ccCapRisk + drccCapRisk;
+    remainingShares -= protectedShares;
+
+    // ===== Step 4: Fully unprotected shares =====
+    const unprotectedRisk = remainingShares * stockPrice;
+
+    const riskOriginal = drccRisk + ccCapRisk + protectedRisk + unprotectedRisk;
     const riskEUR = riskOriginal / exchangeRate;
-    
-    // For UI compatibility, protectedValue represents the floor value
+
+    // protectedValue still represents the long-PUT floor (used by some UI badges)
     const protectedValue = protectedShares * avgStrike;
-    
+
     const stockIdentity = resolveUnderlyingIdentity({
       rawTicker: stock.ticker,
       rawName: stock.description,
@@ -659,17 +673,26 @@ function isEuroforexInstrument(name: string | undefined | null): boolean {
 }
 
 /**
+ * Resolver for spot price of a synthetic position's underlying.
+ * Returns null if no spot can be resolved.
+ */
+export type SpotResolver = (underlyingName: string, optionTicker?: string | null) => number | null;
+
+/**
  * Calculate risk for synthetic CC and DR-CC positions (no real underlying stock).
  *
  * Formulas (in option currency, then /exchangeRate):
- * - CC sintetica with syntheticPut: strike_put × |qty_put| × 100
- * - CC sintetica with syntheticCall: current_price_call × qty_call × 100 (market value)
- * - DR-CC sintetica with syntheticPut + protectionPut: (strike_synPut − strike_protPut) × contracts × 100
- * - DR-CC sintetica with syntheticCall: current_price_synCall × qty_synCall × 100
+ * - CC sintetica con syntheticPut:                          strike_PUT × |qty_PUT| × 100
+ * - CC sintetica con syntheticCall:
+ *     spot ≥ strike_callVenduta → (strike_callVenduta - strike_callComprata) × qty × 100
+ *     spot <  strike_callVenduta → price_callComprata × qty × 100  (fallback se spot ignoto)
+ * - DR-CC sintetica con syntheticPut + protectionPut: (strike_synPut − strike_protPut) × contracts × 100
+ * - DR-CC sintetica con syntheticCall:                price_callComprata × qty × 100
  */
 export function calculateSyntheticCcDrccRisk(
   coveredCalls: CoveredCallPosition[],
-  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[]
+  deRiskingCoveredCalls: DeRiskingCoveredCallPosition[],
+  spotResolver?: SpotResolver
 ): StockRiskDetail[] {
   const result: StockRiskDetail[] = [];
 
@@ -680,7 +703,8 @@ export function calculateSyntheticCcDrccRisk(
     refPosition: Position,
     underlyingName: string,
     riskOriginal: number,
-    syntheticType: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call'
+    syntheticType: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call',
+    composition: string
   ): StockRiskDetail => {
     const exchangeRate = getEffectiveExchangeRate(refPosition);
     const currency = refPosition.currency || 'USD';
@@ -708,6 +732,7 @@ export function calculateSyntheticCcDrccRisk(
       isETF: false,
       isSynthetic: true,
       syntheticType,
+      composition,
     };
   };
 
@@ -716,19 +741,37 @@ export function calculateSyntheticCcDrccRisk(
     if (!cc.isSynthetic) continue;
     if (drccCcOptionIds.has(cc.option.id)) continue; // Will be counted in DR-CC
 
-    const contracts = cc.contractsCovered || 0;
-    const underlyingName = cc.option.underlying || cc.option.description || '';
+    const shortCall = cc.option;
+    const shortStrike = shortCall.strike_price || 0;
+    const underlyingName = shortCall.underlying || shortCall.description || '';
 
     if (cc.syntheticCall) {
-      const qty = cc.syntheticCall.quantity || 0;
-      const px = cc.syntheticCall.current_price ?? cc.syntheticCall.avg_cost ?? 0;
-      const riskOriginal = px * qty * 100;
-      result.push(buildEntry(cc.syntheticCall, underlyingName, riskOriginal, 'cc_call'));
+      const longCall = cc.syntheticCall;
+      const qty = longCall.quantity || 0;
+      const longStrike = longCall.strike_price || 0;
+      const longPx = longCall.current_price ?? longCall.avg_cost ?? 0;
+      const spot = spotResolver
+        ? spotResolver(underlyingName, longCall.ticker ?? shortCall.ticker ?? null)
+        : null;
+
+      let riskOriginal: number;
+      let composition: string;
+      if (spot != null && spot >= shortStrike) {
+        riskOriginal = Math.max(0, shortStrike - longStrike) * qty * 100;
+        composition = `Long CALL ${longStrike} ITM + Short CALL ${shortStrike} (spot ${spot.toFixed(2)})`;
+      } else {
+        riskOriginal = longPx * qty * 100;
+        composition = spot != null
+          ? `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike} (spot ${spot.toFixed(2)})`
+          : `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike}`;
+      }
+      result.push(buildEntry(longCall, underlyingName, riskOriginal, 'cc_call', composition));
     } else if (cc.syntheticPut) {
       const qty = Math.abs(cc.syntheticPut.quantity || 0);
       const strike = cc.syntheticPut.strike_price || 0;
       const riskOriginal = strike * qty * 100;
-      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put'));
+      const composition = `Short PUT ${strike} ITM + Short CALL ${shortStrike}`;
+      result.push(buildEntry(cc.syntheticPut, underlyingName, riskOriginal, 'cc_put', composition));
     }
   }
 
@@ -736,20 +779,26 @@ export function calculateSyntheticCcDrccRisk(
   for (const dr of deRiskingCoveredCalls) {
     if (!dr.isSynthetic) continue;
 
+    const shortCall = dr.coveredCall.option;
+    const shortStrike = shortCall.strike_price || 0;
     const contracts = dr.coveredCall.contractsCovered || 0;
-    const underlyingName = dr.coveredCall.option.underlying || dr.coveredCall.option.description || '';
+    const underlyingName = shortCall.underlying || shortCall.description || '';
+    const protStrike = dr.protectionPut?.strike_price || 0;
 
     if (dr.syntheticCall) {
-      const qty = dr.syntheticCall.quantity || 0;
-      const px = dr.syntheticCall.current_price ?? dr.syntheticCall.avg_cost ?? 0;
-      const riskOriginal = px * qty * 100;
-      result.push(buildEntry(dr.syntheticCall, underlyingName, riskOriginal, 'drcc_call'));
+      const longCall = dr.syntheticCall;
+      const qty = longCall.quantity || 0;
+      const longStrike = longCall.strike_price || 0;
+      const longPx = longCall.current_price ?? longCall.avg_cost ?? 0;
+      const riskOriginal = longPx * qty * 100;
+      const composition = `Long CALL ${longStrike} ITM (mkt ${longPx.toFixed(2)}) + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
+      result.push(buildEntry(longCall, underlyingName, riskOriginal, 'drcc_call', composition));
     } else if (dr.syntheticPut) {
       const synStrike = dr.syntheticPut.strike_price || 0;
-      const protStrike = dr.protectionPut?.strike_price || 0;
       const perShare = Math.max(0, synStrike - protStrike);
       const riskOriginal = perShare * contracts * 100;
-      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put'));
+      const composition = `Short PUT ${synStrike} ITM + Short CALL ${shortStrike} + Protezione PUT ${protStrike}`;
+      result.push(buildEntry(dr.syntheticPut, underlyingName, riskOriginal, 'drcc_put', composition));
     }
   }
 
@@ -761,50 +810,55 @@ export function calculateSyntheticCcDrccRisk(
  */
 export function analyzePortfolioRisk(
   positions: Position[],
-  categories: DerivativeCategories
+  categories: DerivativeCategories,
+  spotResolver?: SpotResolver
 ): RiskAnalysis {
   // Get stock/ETF positions (excluding commodities and bonds)
   const stockAssetTypes = ['stock', 'etf'];
   const stocks = positions.filter(p => stockAssetTypes.includes(p.asset_type));
-  
-  // Get commodity positions separately
   const commodities = positions.filter(p => p.asset_type === 'commodity');
-  
-  // Get bond positions separately
   const bonds = positions.filter(p => p.asset_type === 'bond');
-  
-  // Calculate each risk category
-  // Pass allPositions to calculateStockRisk for direct PUT lookup
-  const baseStockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
-  const syntheticDetails = calculateSyntheticCcDrccRisk(categories.coveredCalls, categories.deRiskingCoveredCalls);
-  const stockDetails = [...baseStockDetails, ...syntheticDetails];
+
+  // Default spot resolver: lookup matching stock/ETF by name in positions
+  const resolver: SpotResolver = spotResolver || ((underlyingName: string) => {
+    const target = (underlyingName || '').toUpperCase();
+    const match = stocks.find(s => {
+      const t = (s.ticker || '').toUpperCase();
+      const d = (s.description || '').toUpperCase();
+      return (t && target.includes(t)) || (d && (target.includes(d) || d.includes(target)));
+    });
+    if (!match) return null;
+    const px = (match as any).snapshot_price ?? match.current_price ?? null;
+    return typeof px === 'number' && px > 0 ? px : null;
+  });
+
+  const stockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
+  const syntheticCcDrccDetails = calculateSyntheticCcDrccRisk(categories.coveredCalls, categories.deRiskingCoveredCalls, resolver);
   const commodityDetails = calculateCommodityRisk(commodities);
   const bondDetails = calculateBondRisk(bonds);
-  
-  // Filter EUROFOREX from Naked Puts and Leap Calls
+
   const filteredNakedPuts = categories.nakedPuts.filter(
     np => !isEuroforexInstrument(np.option.underlying || np.option.description)
   );
   const nakedPutDetails = calculateNakedPutRisk(filteredNakedPuts);
-  
   const filteredLeapCalls = categories.leapCalls.filter(
     lc => !isEuroforexInstrument(lc.option.underlying || lc.option.description)
   );
   const leapCallDetails = calculateLeapCallRisk(filteredLeapCalls);
-  
   const strategyDetails = calculateStrategyRisk(categories);
-  
-  // Sum up totals in EUR
-  const totalStockRisk = stockDetails.reduce((sum, s) => sum + s.riskEUR, 0);
+
+  // Totali: stockDetails contiene SOLO stock/ETF reali. Sintetiche separate.
   const totalETFRisk = stockDetails.filter(s => s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
   const totalPureStockRisk = stockDetails.filter(s => !s.isETF).reduce((sum, s) => sum + s.riskEUR, 0);
+  const totalStockRisk = totalETFRisk + totalPureStockRisk;
   const totalCommodityRisk = commodityDetails.reduce((sum, c) => sum + c.riskEUR, 0);
   const totalBondRisk = bondDetails.reduce((sum, b) => sum + b.riskEUR, 0);
   const totalNakedPutRisk = nakedPutDetails.reduce((sum, n) => sum + n.riskEUR, 0);
   const totalLeapCallRisk = leapCallDetails.reduce((sum, l) => sum + l.riskEUR, 0);
   const totalStrategyRisk = strategyDetails.reduce((sum, s) => sum + s.maxLossEUR, 0);
-  const grandTotal = totalStockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk;
-  
+  const totalSyntheticCcDrccRisk = syntheticCcDrccDetails.reduce((sum, s) => sum + s.riskEUR, 0);
+  const grandTotal = totalStockRisk + totalCommodityRisk + totalNakedPutRisk + totalLeapCallRisk + totalStrategyRisk + totalSyntheticCcDrccRisk;
+
   return {
     totalStockRisk,
     totalETFRisk,
@@ -814,8 +868,10 @@ export function analyzePortfolioRisk(
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
+    totalSyntheticCcDrccRisk,
     grandTotal,
     stockDetails,
+    syntheticCcDrccDetails,
     commodityDetails,
     bondDetails,
     nakedPutDetails,
