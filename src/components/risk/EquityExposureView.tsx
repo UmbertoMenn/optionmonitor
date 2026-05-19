@@ -59,6 +59,7 @@ export function EquityExposureView({
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
   const [includeStrategies, setIncludeStrategies] = useState(true);
   const [includeLeapCall, setIncludeLeapCall] = useState(true);
+  const [includeSynthCcDrcc, setIncludeSynthCcDrcc] = useState(true);
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   
@@ -71,8 +72,10 @@ export function EquityExposureView({
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
+    totalSyntheticCcDrccRisk,
     grandTotal,
     stockDetails,
+    syntheticCcDrccDetails,
     commodityDetails,
     nakedPutDetails,
     leapCallDetails,
@@ -130,6 +133,7 @@ export function EquityExposureView({
       (includeNakedPut ? totalNakedPutRisk : 0) + 
       (includeLeapCall ? totalLeapCallRisk : 0) + 
       (includeStrategies ? totalStrategyRisk : 0) +
+      (includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0) +
       (includeGP ? gpStockTotalValue : 0)
     );
   }, [
@@ -137,6 +141,7 @@ export function EquityExposureView({
     includeNakedPut, 
     includeLeapCall, 
     includeStrategies,
+    includeSynthCcDrcc,
     includeGP,
     totalETFRisk, 
     totalPureStockRisk, 
@@ -145,6 +150,7 @@ export function EquityExposureView({
     totalNakedPutRisk, 
     totalLeapCallRisk, 
     totalStrategyRisk,
+    totalSyntheticCcDrccRisk,
     gpStockTotalValue,
   ]);
 
@@ -196,6 +202,11 @@ export function EquityExposureView({
   const sortedStrategyDetails = useMemo(() => 
     [...strategyDetails].sort((a, b) => b.maxLossEUR - a.maxLossEUR),
     [strategyDetails]
+  );
+
+  const sortedSyntheticCcDrccDetails = useMemo(() => 
+    [...syntheticCcDrccDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [syntheticCcDrccDetails]
   );
 
   // Sort by totalExposure (already accounts for active toggles) in descending order
@@ -272,6 +283,17 @@ export function EquityExposureView({
       color: 'bg-purple-500',
       icon: BarChart3,
       description: 'Max Loss delle strategie',
+      protectionSavings: 0,
+      showProtectionSavings: false
+    },
+    { 
+      label: 'Rischio CC e DR-CC sintetiche', 
+      value: includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0, 
+      sortValue: totalSyntheticCcDrccRisk,
+      percentage: getPercentage(includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0),
+      color: 'bg-fuchsia-500',
+      icon: Layers,
+      description: 'Sintetiche: long CALL + short CALL / short PUT ITM + short CALL [+ protezione]',
       protectionSavings: 0,
       showProtectionSavings: false
     },
@@ -382,6 +404,16 @@ export function EquityExposureView({
                     Leap Call
                   </Label>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="synth-cc-drcc-toggle"
+                    checked={includeSynthCcDrcc}
+                    onCheckedChange={setIncludeSynthCcDrcc}
+                  />
+                  <Label htmlFor="synth-cc-drcc-toggle" className="text-sm cursor-pointer">
+                    CC/DR-CC sint.
+                  </Label>
+                </div>
                 {gpStockHoldings.length > 0 && onIncludeGPChange && (
                   <div className="flex items-center gap-2">
                     <Switch 
@@ -427,6 +459,7 @@ export function EquityExposureView({
                                   entry.color === 'bg-red-500' ? '#ef4444' :
                                   entry.color === 'bg-amber-500' ? '#f59e0b' :
                                   entry.color === 'bg-emerald-500' ? '#10b981' :
+                                  entry.color === 'bg-fuchsia-500' ? '#d946ef' :
                                   '#a855f7'
                           }}
                         />
@@ -448,6 +481,7 @@ export function EquityExposureView({
                                            cat.color === 'bg-red-500' ? '#ef4444' :
                                            cat.color === 'bg-amber-500' ? '#f59e0b' :
                                            cat.color === 'bg-emerald-500' ? '#10b981' :
+                                           cat.color === 'bg-fuchsia-500' ? '#d946ef' :
                                            '#a855f7'
                         }}
                       />
@@ -759,6 +793,62 @@ export function EquityExposureView({
             </AccordionContent>
           </AccordionItem>
         )}
+
+        {/* Synthetic CC and DR-CC Details */}
+        {syntheticCcDrccDetails.length > 0 && (
+          <AccordionItem value="synth-cc-drcc" className="border rounded-lg bg-card">
+            <AccordionTrigger className="px-6 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 rounded bg-fuchsia-500/20">
+                  <Layers className="w-4 h-4 text-fuchsia-500" />
+                </div>
+                <div className="text-left">
+                  <div className="font-semibold">Dettaglio CC e DR-CC sintetiche</div>
+                  <div className="text-sm text-muted-foreground">
+                    {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(totalSyntheticCcDrccRisk)}
+                  </div>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-4">
+              <div className="space-y-2">
+                {sortedSyntheticCcDrccDetails.map((s, index) => {
+                  const isDrcc = s.syntheticType?.startsWith('drcc');
+                  const variant = s.syntheticType?.endsWith('call') ? 'CALL' : 'PUT';
+                  return (
+                    <div key={index} className="p-3 rounded-lg bg-muted/50 space-y-2">
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold flex items-center gap-2 flex-wrap">
+                            {s.underlying}
+                            <Badge variant="outline" className={isDrcc ? 'text-fuchsia-500 border-fuchsia-500' : 'text-amber-500 border-amber-500'}>
+                              {isDrcc ? 'DR-CC' : 'CC'} sintetica ({variant})
+                            </Badge>
+                          </div>
+                          {s.composition && (
+                            <div className="text-xs text-muted-foreground mt-1 break-words">
+                              {s.composition}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-semibold text-fuchsia-500">
+                            Rischio: {formatEUR(s.riskEUR)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {s.currency} {formatNumber(s.riskOriginal, 0)} / {s.exchangeRate.toFixed(4)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        )}
+
+
 
         {/* Commodity Details */}
         {commodityDetails.length > 0 && (
