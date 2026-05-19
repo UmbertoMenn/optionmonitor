@@ -404,6 +404,16 @@ export function EquityExposureView({
                     Leap Call
                   </Label>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="synth-cc-drcc-toggle"
+                    checked={includeSynthCcDrcc}
+                    onCheckedChange={setIncludeSynthCcDrcc}
+                  />
+                  <Label htmlFor="synth-cc-drcc-toggle" className="text-sm cursor-pointer">
+                    CC/DR-CC sint.
+                  </Label>
+                </div>
                 {gpStockHoldings.length > 0 && onIncludeGPChange && (
                   <div className="flex items-center gap-2">
                     <Switch 
