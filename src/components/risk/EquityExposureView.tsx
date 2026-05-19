@@ -794,6 +794,62 @@ export function EquityExposureView({
           </AccordionItem>
         )}
 
+        {/* Synthetic CC and DR-CC Details */}
+        {syntheticCcDrccDetails.length > 0 && (
+          <AccordionItem value="synth-cc-drcc" className="border rounded-lg bg-card">
+            <AccordionTrigger className="px-6 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 rounded bg-fuchsia-500/20">
+                  <Layers className="w-4 h-4 text-fuchsia-500" />
+                </div>
+                <div className="text-left">
+                  <div className="font-semibold">Dettaglio CC e DR-CC sintetiche</div>
+                  <div className="text-sm text-muted-foreground">
+                    {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(totalSyntheticCcDrccRisk)}
+                  </div>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-4">
+              <div className="space-y-2">
+                {sortedSyntheticCcDrccDetails.map((s, index) => {
+                  const isDrcc = s.syntheticType?.startsWith('drcc');
+                  const variant = s.syntheticType?.endsWith('call') ? 'CALL' : 'PUT';
+                  return (
+                    <div key={index} className="p-3 rounded-lg bg-muted/50 space-y-2">
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold flex items-center gap-2 flex-wrap">
+                            {s.underlying}
+                            <Badge variant="outline" className={isDrcc ? 'text-fuchsia-500 border-fuchsia-500' : 'text-amber-500 border-amber-500'}>
+                              {isDrcc ? 'DR-CC' : 'CC'} sintetica ({variant})
+                            </Badge>
+                          </div>
+                          {s.composition && (
+                            <div className="text-xs text-muted-foreground mt-1 break-words">
+                              {s.composition}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-semibold text-fuchsia-500">
+                            Rischio: {formatEUR(s.riskEUR)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {s.currency} {formatNumber(s.riskOriginal, 0)} / {s.exchangeRate.toFixed(4)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        )}
+
+
+
         {/* Commodity Details */}
         {commodityDetails.length > 0 && (
           <AccordionItem value="commodities" className="border rounded-lg bg-card">
