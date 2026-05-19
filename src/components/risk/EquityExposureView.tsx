@@ -59,6 +59,7 @@ export function EquityExposureView({
   const [includeNakedPut, setIncludeNakedPut] = useState(true);
   const [includeStrategies, setIncludeStrategies] = useState(true);
   const [includeLeapCall, setIncludeLeapCall] = useState(true);
+  const [includeSynthCcDrcc, setIncludeSynthCcDrcc] = useState(true);
   const [selectedHolding, setSelectedHolding] = useState<ConsolidatedHoldingWithDetails | null>(null);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   
@@ -71,8 +72,10 @@ export function EquityExposureView({
     totalNakedPutRisk,
     totalLeapCallRisk,
     totalStrategyRisk,
+    totalSyntheticCcDrccRisk,
     grandTotal,
     stockDetails,
+    syntheticCcDrccDetails,
     commodityDetails,
     nakedPutDetails,
     leapCallDetails,
