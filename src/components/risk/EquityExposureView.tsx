@@ -133,6 +133,7 @@ export function EquityExposureView({
       (includeNakedPut ? totalNakedPutRisk : 0) + 
       (includeLeapCall ? totalLeapCallRisk : 0) + 
       (includeStrategies ? totalStrategyRisk : 0) +
+      (includeSynthCcDrcc ? totalSyntheticCcDrccRisk : 0) +
       (includeGP ? gpStockTotalValue : 0)
     );
   }, [
@@ -140,6 +141,7 @@ export function EquityExposureView({
     includeNakedPut, 
     includeLeapCall, 
     includeStrategies,
+    includeSynthCcDrcc,
     includeGP,
     totalETFRisk, 
     totalPureStockRisk, 
@@ -148,6 +150,7 @@ export function EquityExposureView({
     totalNakedPutRisk, 
     totalLeapCallRisk, 
     totalStrategyRisk,
+    totalSyntheticCcDrccRisk,
     gpStockTotalValue,
   ]);
 
