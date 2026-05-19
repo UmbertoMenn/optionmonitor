@@ -204,6 +204,11 @@ export function EquityExposureView({
     [strategyDetails]
   );
 
+  const sortedSyntheticCcDrccDetails = useMemo(() => 
+    [...syntheticCcDrccDetails].sort((a, b) => b.riskEUR - a.riskEUR),
+    [syntheticCcDrccDetails]
+  );
+
   // Sort by totalExposure (already accounts for active toggles) in descending order
   const sortedConsolidatedHoldings = useMemo(() => 
     [...consolidatedHoldings].sort((a, b) => {
