@@ -45,6 +45,7 @@ export interface StockRiskDetail {
   // Synthetic CC/DR-CC entry (no real underlying stock)
   isSynthetic?: boolean;
   syntheticType?: 'cc_put' | 'cc_call' | 'drcc_put' | 'drcc_call';
+  composition?: string;         // Composizione strategia sintetica (UI)
 }
 
 export interface NakedPutRiskDetail {
