@@ -1,54 +1,37 @@
+# Tooltip (i) di spiegazione calcolo nel dettaglio del Risk Analyzer
+
 ## Obiettivo
+Nel dialog "Breakdown" del Risk Analyzer, aggiungere accanto a ogni riga (Stock, PUT, LEAP, Strategie, Sintetiche CC/DR-CC) un'icona informativa (i) che, al hover, mostra la formula esatta con cui è stato calcolato il rischio di quella posizione, usando i numeri reali (quantità, strike, contratti, prezzo, FX).
 
-Riallineare il calcolo del rischio per le posizioni sintetiche (CC e DR-CC) alle regole stabilite, eliminando l'ambiguità attuale che usa formule diverse in base alla disponibilità dello spot.
+## Cosa mostrare per tipo di riga
 
-## Regole finali
+- **Stock diretto**: `quantità × prezzo × FX = valore EUR`. Se protetto: aggiungere riga `− contratti × strike × 100 × FX = valore netto`.
+- **Sintetica CC/DR-CC**: mostrare la composizione già calcolata (es. `Long CALL 60 ITM + Short CALL 150`) e la formula applicata in base al tipo:
+  - `cc_call`: `PMC long × qty × 100 / FX` (spot > short strike) oppure `mkt long × qty × 100 / FX` (spot ≤ short strike)
+  - `cc_put`: `strike PUT × |qty| × 100 / FX`
+  - `drcc_call`: stessa formula di `cc_call`
+  - `drcc_put`: `(strike PUT venduta − strike PUT protezione) × contratti × 100 / FX`
+- **Naked PUT**: `contratti × strike × 100 × FX = rischio EUR`.
+- **LEAP Call**: `contratti × prezzo mercato × 100 × FX = valore mercato EUR` (rischio = premio pagato attuale).
+- **Strategia**: `Max Loss universale calcolato sul payoff a scadenza` + nota se `hasUnlimitedRisk` (lato call illimitato non incluso).
 
-### CC sintetica con Long CALL ITM + Short CALL
-- Se `spot > strike short call` (short ITM): `rischio = PMC long call × contratti × 100`
-- Se `spot < strike short call` (short OTM): `rischio = prezzo mercato long call × contratti × 100`
-- Se `spot` non disponibile: fallback al prezzo di mercato della long call (caso conservativo)
+## File da modificare
 
-### CC sintetica con short PUT ITM
-- `rischio = strike put venduta × |qty| × 100`
+### `src/lib/riskCalculator.ts`
+- Aggiungere campo `calcExplanation: string` (opzionale) alle interfacce dei detail già emessi: stock, nakedPut, leapCall, strategy, syntheticCcDrcc.
+- Popolarlo nelle funzioni di costruzione esistenti, usando i valori già disponibili. Per le sintetiche riutilizzare `composition` + formula scelta in `buildCallBasedEntry` / branch PUT.
 
-### DR-CC sintetica con Long CALL ITM + Short CALL
-- Casistica eliminata: viene trattata come CC sintetica (regola sopra), ignorando l'eventuale protection put.
+### `src/lib/sectorExposure.ts`
+- Propagare `calcExplanation` nei push verso `stockDetails`, `nakedPutDetails`, `leapCallDetails`, `strategyDetails` di `ConsolidatedHoldingWithDetails`.
+- Aggiornare le interfacce di questi array per includere il campo opzionale.
 
-### DR-CC sintetica con short PUT ITM + protection put
-- `rischio = (strike put venduta − strike put protezione) × contratti × 100`
+### `src/components/risk/HoldingBreakdownDialog.tsx`
+- Importare `Info` da lucide-react e `Tooltip, TooltipTrigger, TooltipContent` (già usati nel file).
+- A fianco di ogni valore in EUR di ciascuna riga (Stock, PUT, LEAP, Strategie), renderizzare `<Info className="w-3.5 h-3.5 text-muted-foreground" />` come trigger di tooltip che mostra `calcExplanation` con font monospace per la formula.
+- Fallback: se `calcExplanation` non è disponibile, non mostrare l'icona.
 
-Tutti i risultati sono divisi per `exchangeRate` per la conversione in EUR.
+## Note
 
-## Modifiche
-
-### `src/lib/riskCalculator.ts` — `calculateSyntheticCcDrccRisk`
-
-Ramo CC sintetica con `syntheticCall`:
-- Usare `avg_cost` (PMC) quando `spot >= shortStrike`
-- Usare `current_price` quando `spot < shortStrike`
-- Fallback `current_price ?? avg_cost` se spot non risolvibile
-- Aggiornare la stringa `composition` per riflettere quale prezzo è stato usato
-
-Ramo CC sintetica con `syntheticPut`: invariato.
-
-Ramo DR-CC sintetica con `syntheticCall`:
-- Spostare la posizione nel ramo CC (non più DR-CC) applicando le stesse formule del ramo CC syntheticCall
-- L'eventuale protection put viene ignorata ai fini del rischio; segnalata solo nella composition
-- `syntheticType` torna `cc_call` (anche se la strategia in DB era DR-CC sintetica)
-
-Ramo DR-CC sintetica con `syntheticPut`: invariato (`(synStrike − protStrike) × contracts × 100`).
-
-Aggiornare i commenti del docblock con le nuove formule.
-
-## Tecnica
-
-- Lo `SpotResolver` resta necessario per distinguere il caso "short ITM" da "short OTM" nel ramo call-based.
-- Nessuna modifica a `derivativeStrategies.ts`, UI, DB, currency/sector exposure: consumano solo `riskEUR` e `syntheticType`. Le DR-CC sintetiche call-based continueranno a esistere in `coveredCalls`/`deRiskingCoveredCalls` per la classificazione UI dei derivativi, ma il risk analyzer le tratterà come CC.
-- Risultato atteso NEBIUS (Long CALL 60, Short CALL 150, spot ≈ NEBIUS attuale): se spot > 150 → `PMC_long × qty × 100`; se spot < 150 → `mkt_long × qty × 100`.
-
-## File toccati
-
-- `src/lib/riskCalculator.ts`
-
-Nessuna modifica ad altri file.
+- Nessuna modifica a database, RLS, edge functions o logica di calcolo del rischio: si aggiunge solo una stringa descrittiva derivata dai valori già calcolati.
+- I valori mostrati nella formula useranno i formatter esistenti (`formatNumber`, `formatEUR`) per coerenza visiva.
+- Il tooltip è puramente esplicativo per l'utente; non altera totali né esposizioni.
