@@ -15,7 +15,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { HelpCircle, Loader2, ChevronRight } from 'lucide-react';
+import { HelpCircle, Loader2, ChevronRight, Info } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { 
   ShieldAlert, 
@@ -44,6 +44,28 @@ interface EquityExposureViewProps {
   gpStockHoldings?: GPHoldingRow[];
   includeGP?: boolean;
   onIncludeGPChange?: (value: boolean) => void;
+}
+
+function CalcInfo({ children, className = 'w-3.5 h-3.5' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center align-middle text-muted-foreground hover:text-foreground"
+            aria-label="Spiegazione calcolo"
+          >
+            <Info className={className} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-sm">
+          <div className="text-xs whitespace-pre-wrap leading-relaxed font-mono">{children}</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 export function EquityExposureView({ 
@@ -568,7 +590,7 @@ export function EquityExposureView({
                   <TrendingUp className="w-4 h-4 text-cyan-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio ETF Azionari</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio ETF Azionari <CalcInfo>ETF azionari: valore di mercato di ogni ETF (quote × prezzo) convertito in EUR. Se presente protezione PUT, il rischio mostrato è al netto (valore − contratti × strike × 100, in EUR).</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {etfDetails.length} ETF • Rischio totale: {formatEUR(totalETFRisk)}
                   </div>
@@ -601,8 +623,14 @@ export function EquityExposureView({
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="font-semibold text-cyan-500">
+                          <div className="font-semibold text-cyan-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(stock.riskEUR)}
+                            <CalcInfo>
+{`ETF ${stock.underlying}
+Valore lordo: ${stock.currency} ${formatNumber(stock.stockQuantity)} × ${formatNumber(stock.stockPrice, 2)} = ${stock.currency} ${formatNumber(stock.stockValue, 0)}
+${stock.hasProtection && stock.protectionStrike != null ? `Protezione: − ${stock.protectionContracts} × ${formatNumber(stock.protectionStrike, 0)} × 100\n` : ''}FX: 1 ${stock.currency} = 1/${stock.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`}
+                            </CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {stock.currency} {formatNumber(stock.riskOriginal, 0)} / {stock.exchangeRate.toFixed(4)}
@@ -682,7 +710,7 @@ export function EquityExposureView({
                   <TrendingUp className="w-4 h-4 text-blue-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Stocks</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Stocks <CalcInfo>Azioni individuali: valore di mercato (quantità × prezzo) convertito in EUR. Al netto delle protezioni PUT se il toggle è attivo. Le sintetiche CC/DR-CC mostrano il rischio della combinazione.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {pureStockDetails.length} azioni • Rischio totale: {formatEUR(totalPureStockRisk)}
                   </div>
@@ -722,8 +750,16 @@ export function EquityExposureView({
                           )}
                         </div>
                         <div className="text-right">
-                          <div className="font-semibold text-blue-500">
+                          <div className="font-semibold text-blue-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(stock.riskEUR)}
+                            <CalcInfo>
+{stock.isSynthetic
+  ? `Posizione sintetica ${stock.syntheticType?.startsWith('drcc') ? 'DR-CC' : 'CC'} su ${stock.underlying}\n${stock.composition ?? ''}\nRischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`
+  : `Azione ${stock.underlying}
+Valore lordo: ${stock.currency} ${formatNumber(stock.stockQuantity)} × ${formatNumber(stock.stockPrice, 2)} = ${stock.currency} ${formatNumber(stock.stockValue, 0)}
+${stock.hasProtection && stock.protectionStrike != null ? `Protezione: − ${stock.protectionContracts} × ${formatNumber(stock.protectionStrike, 0)} × 100\n` : ''}FX: 1 ${stock.currency} = 1/${stock.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`}
+                            </CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {stock.currency} {formatNumber(stock.riskOriginal, 0)} / {stock.exchangeRate.toFixed(4)}
@@ -803,7 +839,7 @@ export function EquityExposureView({
                   <Layers className="w-4 h-4 text-fuchsia-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio CC e DR-CC sintetiche</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio CC e DR-CC sintetiche <CalcInfo>CC/DR-CC sintetiche: rischio della combinazione di opzioni. CC sint. CALL = long CALL ITM + short CALL; CC sint. PUT = short PUT ITM + short CALL. DR-CC = stessa logica con protezione PUT lunga aggiuntiva. Il rischio segue le regole su spot vs strike call venduta / spread strike put.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(totalSyntheticCcDrccRisk)}
                   </div>
@@ -832,8 +868,15 @@ export function EquityExposureView({
                           )}
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="font-semibold text-fuchsia-500">
+                          <div className="font-semibold text-fuchsia-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(s.riskEUR)}
+                            <CalcInfo>
+{`${isDrcc ? 'DR-CC' : 'CC'} sintetica (${variant}) — ${s.underlying}
+${s.composition ?? ''}
+Rischio in valuta: ${s.currency} ${formatNumber(s.riskOriginal, 0)}
+FX: 1 ${s.currency} = 1/${s.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(s.riskEUR)}`}
+                            </CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {s.currency} {formatNumber(s.riskOriginal, 0)} / {s.exchangeRate.toFixed(4)}
@@ -859,7 +902,7 @@ export function EquityExposureView({
                   <BarChart3 className="w-4 h-4 text-orange-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Commodities</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Commodities <CalcInfo>Materie prime: valore di mercato (quantità × prezzo) convertito in EUR.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {commodityDetails.length} posizioni • Rischio totale: {formatEUR(totalCommodityRisk)}
                   </div>
@@ -877,8 +920,14 @@ export function EquityExposureView({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-orange-500">
+                      <div className="font-semibold text-orange-500 flex items-center justify-end gap-1.5">
                         {formatEUR(commodity.riskEUR)}
+                        <CalcInfo>
+{`Commodity ${commodity.underlying}
+${formatNumber(commodity.quantity)} × ${commodity.currency} ${formatNumber(commodity.price, 2)} = ${commodity.currency} ${formatNumber(commodity.riskOriginal, 0)}
+FX: 1 ${commodity.currency} = 1/${commodity.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(commodity.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {commodity.currency} {formatNumber(commodity.riskOriginal, 0)} / {commodity.exchangeRate.toFixed(4)}
@@ -900,7 +949,7 @@ export function EquityExposureView({
                   <TrendingDown className="w-4 h-4 text-red-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Naked PUT</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Naked PUT <CalcInfo>Naked PUT: rischio di assegnazione = contratti × strike × 100, convertito in EUR. Capitale potenzialmente impegnato se la PUT viene esercitata.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {nakedPutDetails.length} posizioni • Rischio totale: {formatEUR(totalNakedPutRisk)}
                   </div>
@@ -918,8 +967,14 @@ export function EquityExposureView({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-red-500">
+                      <div className="font-semibold text-red-500 flex items-center justify-end gap-1.5">
                         {formatEUR(np.riskEUR)}
+                        <CalcInfo>
+{`Naked PUT ${np.underlying}
+Rischio assegnazione = ${np.contracts} × ${formatNumber(np.strike)} × 100 = ${np.currency} ${formatNumber(np.riskOriginal, 0)}
+FX: 1 ${np.currency} = 1/${np.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(np.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {np.currency} {formatNumber(np.riskOriginal, 0)}
@@ -941,7 +996,7 @@ export function EquityExposureView({
                   <DollarSign className="w-4 h-4 text-amber-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Leap Call</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Leap Call <CalcInfo>Leap Call: valore di mercato corrente = contratti × prezzo di mercato × 100, convertito in EUR. Rappresenta il capitale a rischio sulla call lunga.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {leapCallDetails.length} posizioni • Rischio totale: {formatEUR(totalLeapCallRisk)}
                   </div>
@@ -959,8 +1014,14 @@ export function EquityExposureView({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-amber-500">
+                      <div className="font-semibold text-amber-500 flex items-center justify-end gap-1.5">
                         {formatEUR(lc.riskEUR)}
+                        <CalcInfo>
+{`Leap Call ${lc.underlying}
+Valore di mercato = ${lc.contracts} × mkt × 100 = ${lc.currency} ${formatNumber(lc.marketValue, 0)}
+FX: 1 ${lc.currency} = 1/${lc.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(lc.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         Mkt: {lc.currency} {formatNumber(lc.marketValue, 0)}
@@ -982,7 +1043,7 @@ export function EquityExposureView({
                   <BarChart3 className="w-4 h-4 text-purple-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Strategie</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Strategie <CalcInfo>Strategie: Max Loss calcolato sul payoff matematico a scadenza della combinazione (spread, condor, ecc.). Strategie con lato CALL nudo hanno rischio teoricamente illimitato (segnalato con icona di alert).</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {strategyDetails.length} strategie • Rischio totale: {formatEUR(totalStrategyRisk)}
                   </div>
@@ -1034,8 +1095,14 @@ export function EquityExposureView({
                         </span>
                       </div>
                     </div>
-                    <span className="font-medium text-sm text-purple-500 flex-shrink-0">
+                    <span className="font-medium text-sm text-purple-500 flex-shrink-0 flex items-center gap-1.5">
                       {formatEUR(strat.maxLossEUR)}
+                      <CalcInfo>
+{`Strategia: ${strat.strategyName} — ${strat.underlying}
+${strat.calculation ?? 'Max Loss sul payoff matematico a scadenza.'}
+Max Loss valuta: ${strat.currency} ${formatNumber(strat.maxLoss, 0)}
+Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠️ Rischio CALL teoricamente illimitato: il valore riflette solo il lato PUT definito.' : ''}`}
+                      </CalcInfo>
                     </span>
                   </div>
                 ))}
