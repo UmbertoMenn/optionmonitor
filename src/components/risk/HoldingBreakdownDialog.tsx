@@ -163,8 +163,11 @@ export function HoldingBreakdownDialog({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-red-500">
+                      <div className="font-medium text-red-500 flex items-center justify-end gap-1.5">
                         {formatEUR(put.riskEUR)}
+                        <CalcInfo>
+                          {`Naked PUT (rischio assegnazione):\n${put.contracts} × strike ${formatNumber(put.strike)} × 100\n→ convertito in EUR = ${formatEUR(put.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                     </div>
                   </div>
