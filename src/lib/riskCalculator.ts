@@ -775,9 +775,10 @@ export function calculateSyntheticCcDrccRisk(
     const longStrike = longCall.strike_price || 0;
     const pmc = longCall.avg_cost || 0;
     const mkt = longCall.current_price ?? pmc;
-    const spot = spotResolver
+    const resolution: SpotResolution = spotResolver
       ? spotResolver(underlyingName, longCall.ticker ?? shortCallTicker ?? null)
-      : null;
+      : { spot: null, source: 'none', tickerUsed: null };
+    const spot = resolution.spot;
 
     let pricePerShare: number;
     let priceLabel: string;
@@ -797,7 +798,7 @@ export function calculateSyntheticCcDrccRisk(
     }
 
     const riskOriginal = pricePerShare * qty * 100;
-    const spotPart = spot != null ? ` (spot ${spot.toFixed(2)})` : '';
+    const spotPart = spot != null ? ` (spot ${spot.toFixed(2)})` : ' (spot n/d)';
     const protPart = protectionPutStrike != null && protectionPutStrike > 0
       ? ` + Protezione PUT ${protectionPutStrike}`
       : '';
@@ -809,6 +810,8 @@ export function calculateSyntheticCcDrccRisk(
       pmc,
       mkt,
       spot,
+      spotSource: resolution.source,
+      spotTickerUsed: resolution.tickerUsed,
       pricePerShare,
       priceSource,
       protPutStrike: protectionPutStrike ?? undefined,
