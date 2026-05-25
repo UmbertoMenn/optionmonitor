@@ -927,7 +927,7 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                   <Layers className="w-4 h-4 text-fuchsia-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold flex items-center gap-1.5">Dettaglio CC e DR-CC sintetiche <CalcInfo>CC/DR-CC sintetiche: rischio della combinazione di opzioni. CC sint. CALL = long CALL ITM + short CALL; CC sint. PUT = short PUT ITM + short CALL. DR-CC = stessa logica con protezione PUT lunga aggiuntiva. Il rischio segue le regole su spot vs strike call venduta / spread strike put.</CalcInfo></div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio CC e DR-CC sintetiche <CalcInfo>{SYNTH_HEADER_TOOLTIP}</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(totalSyntheticCcDrccRisk)}
                   </div>
