@@ -53,6 +53,8 @@ export interface StockRiskDetail {
     pmc?: number;
     mkt?: number;
     spot?: number | null;
+    spotSource?: 'portfolio' | 'ticker_cache' | 'none';
+    spotTickerUsed?: string | null;
     pricePerShare?: number;
     priceSource?: 'PMC' | 'mkt';
     putStrike?: number;
@@ -690,9 +692,14 @@ function isEuroforexInstrument(name: string | undefined | null): boolean {
 
 /**
  * Resolver for spot price of a synthetic position's underlying.
- * Returns null if no spot can be resolved.
+ * Returns null spot if no spot can be resolved.
  */
-export type SpotResolver = (underlyingName: string, optionTicker?: string | null) => number | null;
+export interface SpotResolution {
+  spot: number | null;
+  source: 'portfolio' | 'ticker_cache' | 'none';
+  tickerUsed: string | null;
+}
+export type SpotResolver = (underlyingName: string, optionTicker?: string | null) => SpotResolution;
 
 /**
  * Calculate risk for synthetic CC and DR-CC positions (no real underlying stock).
@@ -768,9 +775,10 @@ export function calculateSyntheticCcDrccRisk(
     const longStrike = longCall.strike_price || 0;
     const pmc = longCall.avg_cost || 0;
     const mkt = longCall.current_price ?? pmc;
-    const spot = spotResolver
+    const resolution: SpotResolution = spotResolver
       ? spotResolver(underlyingName, longCall.ticker ?? shortCallTicker ?? null)
-      : null;
+      : { spot: null, source: 'none', tickerUsed: null };
+    const spot = resolution.spot;
 
     let pricePerShare: number;
     let priceLabel: string;
@@ -790,7 +798,7 @@ export function calculateSyntheticCcDrccRisk(
     }
 
     const riskOriginal = pricePerShare * qty * 100;
-    const spotPart = spot != null ? ` (spot ${spot.toFixed(2)})` : '';
+    const spotPart = spot != null ? ` (spot ${spot.toFixed(2)})` : ' (spot n/d)';
     const protPart = protectionPutStrike != null && protectionPutStrike > 0
       ? ` + Protezione PUT ${protectionPutStrike}`
       : '';
@@ -802,6 +810,8 @@ export function calculateSyntheticCcDrccRisk(
       pmc,
       mkt,
       spot,
+      spotSource: resolution.source,
+      spotTickerUsed: resolution.tickerUsed,
       pricePerShare,
       priceSource,
       protPutStrike: protectionPutStrike ?? undefined,
@@ -894,9 +904,10 @@ export function analyzePortfolioRisk(
       const d = (s.description || '').toUpperCase();
       return (t && target.includes(t)) || (d && (target.includes(d) || d.includes(target)));
     });
-    if (!match) return null;
+    if (!match) return { spot: null, source: 'none', tickerUsed: null };
     const px = (match as any).snapshot_price ?? match.current_price ?? null;
-    return typeof px === 'number' && px > 0 ? px : null;
+    if (typeof px !== 'number' || px <= 0) return { spot: null, source: 'none', tickerUsed: null };
+    return { spot: px, source: 'portfolio', tickerUsed: match.ticker ?? null };
   });
 
   const stockDetails = calculateStockRisk(stocks, categories.longPuts, categories.coveredCalls, categories.deRiskingCoveredCalls, positions);
