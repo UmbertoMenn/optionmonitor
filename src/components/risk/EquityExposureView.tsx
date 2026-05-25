@@ -15,7 +15,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { HelpCircle, Loader2, ChevronRight } from 'lucide-react';
+import { HelpCircle, Loader2, ChevronRight, Info } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { 
   ShieldAlert, 
