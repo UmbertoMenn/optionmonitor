@@ -984,6 +984,9 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                 {sortedSyntheticCcDrccDetails.map((s, index) => {
                   const isDrcc = s.syntheticType?.startsWith('drcc');
                   const variant = s.syntheticType?.endsWith('call') ? 'CALL' : 'PUT';
+                  const isCallVariant = s.syntheticType?.endsWith('call');
+                  const spotUnresolved = isCallVariant
+                    && (s.syntheticBreakdown?.spot == null || s.syntheticBreakdown?.spotSource === 'none');
                   return (
                     <div key={index} className="p-3 rounded-lg bg-muted/50 space-y-2">
                       <div className="flex justify-between items-start gap-3">
@@ -993,6 +996,25 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                             <Badge variant="outline" className={isDrcc ? 'text-fuchsia-500 border-fuchsia-500' : 'text-amber-500 border-amber-500'}>
                               {isDrcc ? 'DR-CC' : 'CC'} sintetica ({variant})
                             </Badge>
+                            {spotUnresolved && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-red-500/15 text-red-500 border-red-500 cursor-help"
+                                    >
+                                      ● Spot non risolto
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-xs text-xs">
+                                    Spot non trovato né nel portafoglio né nella cache prezzi per ticker
+                                    {s.syntheticBreakdown?.spotTickerUsed ? ` (${s.syntheticBreakdown.spotTickerUsed})` : ''}.
+                                    Uso fallback <b>mkt</b> della long CALL.
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
                           </div>
                           {s.composition && (
                             <div className="text-xs text-muted-foreground mt-1 break-words">
