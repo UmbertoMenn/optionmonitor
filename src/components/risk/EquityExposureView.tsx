@@ -958,13 +958,7 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                         <div className="text-right shrink-0">
                           <div className="font-semibold text-fuchsia-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(s.riskEUR)}
-                            <CalcInfo>
-{`${isDrcc ? 'DR-CC' : 'CC'} sintetica (${variant}) — ${s.underlying}
-${s.composition ?? ''}
-Rischio in valuta: ${s.currency} ${formatNumber(s.riskOriginal, 0)}
-FX: 1 ${s.currency} = 1/${s.exchangeRate.toFixed(4)} EUR
-Rischio EUR = ${formatEUR(s.riskEUR)}`}
-                            </CalcInfo>
+                            <CalcInfo>{buildSynthTooltip(s)}</CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {s.currency} {formatNumber(s.riskOriginal, 0)} / {s.exchangeRate.toFixed(4)}
