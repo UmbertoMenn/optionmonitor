@@ -109,8 +109,22 @@ export function HoldingBreakdownDialog({
                       )}
                     </div>
                     <div className="text-right">
-                      <div className="font-medium text-blue-500">
+                      <div className="font-medium text-blue-500 flex items-center justify-end gap-1.5">
                         {formatEUR(includeProtections ? stock.valueWithProtection : stock.value)}
+                        <CalcInfo>
+                          {stock.isSynthetic
+                            ? (stock.composition
+                                ? `Posizione sintetica\n${stock.composition}\nRischio EUR = ${formatEUR(stock.value)}`
+                                : `Posizione sintetica CC/DR-CC\nRischio EUR = ${formatEUR(stock.value)}`)
+                            : (() => {
+                                const gross = `${formatNumber(stock.quantity)} × ${stock.currency} ${formatNumber(stock.price, 2)} → ${formatEUR(stock.value)}`;
+                                if (includeProtections && stock.hasProtection && stock.protectionStrike != null) {
+                                  const protLine = `− ${stock.protectionContracts} PUT × strike ${formatNumber(stock.protectionStrike, 0)} × 100`;
+                                  return `Stock (lordo):\n${gross}\nProtezione:\n${protLine}\n= ${formatEUR(stock.valueWithProtection)}`;
+                                }
+                                return `Stock:\n${gross}`;
+                              })()}
+                        </CalcInfo>
                       </div>
                       {includeProtections && stock.hasProtection && stock.valueWithProtection < stock.value && (
                         <div className="text-xs text-green-500">
