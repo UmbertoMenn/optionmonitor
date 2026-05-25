@@ -623,8 +623,14 @@ export function EquityExposureView({
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="font-semibold text-cyan-500">
+                          <div className="font-semibold text-cyan-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(stock.riskEUR)}
+                            <CalcInfo>
+{`ETF ${stock.underlying}
+Valore lordo: ${stock.currency} ${formatNumber(stock.stockQuantity)} × ${formatNumber(stock.stockPrice, 2)} = ${stock.currency} ${formatNumber(stock.stockValue, 0)}
+${stock.hasProtection && stock.protectionStrike != null ? `Protezione: − ${stock.protectionContracts} × ${formatNumber(stock.protectionStrike, 0)} × 100\n` : ''}FX: 1 ${stock.currency} = 1/${stock.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`}
+                            </CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {stock.currency} {formatNumber(stock.riskOriginal, 0)} / {stock.exchangeRate.toFixed(4)}
@@ -744,8 +750,16 @@ export function EquityExposureView({
                           )}
                         </div>
                         <div className="text-right">
-                          <div className="font-semibold text-blue-500">
+                          <div className="font-semibold text-blue-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(stock.riskEUR)}
+                            <CalcInfo>
+{stock.isSynthetic
+  ? `Posizione sintetica ${stock.syntheticType?.startsWith('drcc') ? 'DR-CC' : 'CC'} su ${stock.underlying}\n${stock.composition ?? ''}\nRischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`
+  : `Azione ${stock.underlying}
+Valore lordo: ${stock.currency} ${formatNumber(stock.stockQuantity)} × ${formatNumber(stock.stockPrice, 2)} = ${stock.currency} ${formatNumber(stock.stockValue, 0)}
+${stock.hasProtection && stock.protectionStrike != null ? `Protezione: − ${stock.protectionContracts} × ${formatNumber(stock.protectionStrike, 0)} × 100\n` : ''}FX: 1 ${stock.currency} = 1/${stock.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock.exchangeRate.toFixed(4)} = ${formatEUR(stock.riskEUR)}`}
+                            </CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {stock.currency} {formatNumber(stock.riskOriginal, 0)} / {stock.exchangeRate.toFixed(4)}
@@ -854,8 +868,15 @@ export function EquityExposureView({
                           )}
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="font-semibold text-fuchsia-500">
+                          <div className="font-semibold text-fuchsia-500 flex items-center justify-end gap-1.5">
                             Rischio: {formatEUR(s.riskEUR)}
+                            <CalcInfo>
+{`${isDrcc ? 'DR-CC' : 'CC'} sintetica (${variant}) — ${s.underlying}
+${s.composition ?? ''}
+Rischio in valuta: ${s.currency} ${formatNumber(s.riskOriginal, 0)}
+FX: 1 ${s.currency} = 1/${s.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(s.riskEUR)}`}
+                            </CalcInfo>
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {s.currency} {formatNumber(s.riskOriginal, 0)} / {s.exchangeRate.toFixed(4)}
@@ -899,8 +920,14 @@ export function EquityExposureView({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-orange-500">
+                      <div className="font-semibold text-orange-500 flex items-center justify-end gap-1.5">
                         {formatEUR(commodity.riskEUR)}
+                        <CalcInfo>
+{`Commodity ${commodity.underlying}
+${formatNumber(commodity.quantity)} × ${commodity.currency} ${formatNumber(commodity.price, 2)} = ${commodity.currency} ${formatNumber(commodity.riskOriginal, 0)}
+FX: 1 ${commodity.currency} = 1/${commodity.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(commodity.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {commodity.currency} {formatNumber(commodity.riskOriginal, 0)} / {commodity.exchangeRate.toFixed(4)}
@@ -940,8 +967,14 @@ export function EquityExposureView({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-red-500">
+                      <div className="font-semibold text-red-500 flex items-center justify-end gap-1.5">
                         {formatEUR(np.riskEUR)}
+                        <CalcInfo>
+{`Naked PUT ${np.underlying}
+Rischio assegnazione = ${np.contracts} × ${formatNumber(np.strike)} × 100 = ${np.currency} ${formatNumber(np.riskOriginal, 0)}
+FX: 1 ${np.currency} = 1/${np.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(np.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {np.currency} {formatNumber(np.riskOriginal, 0)}
@@ -981,8 +1014,14 @@ export function EquityExposureView({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-amber-500">
+                      <div className="font-semibold text-amber-500 flex items-center justify-end gap-1.5">
                         {formatEUR(lc.riskEUR)}
+                        <CalcInfo>
+{`Leap Call ${lc.underlying}
+Valore di mercato = ${lc.contracts} × mkt × 100 = ${lc.currency} ${formatNumber(lc.marketValue, 0)}
+FX: 1 ${lc.currency} = 1/${lc.exchangeRate.toFixed(4)} EUR
+Rischio EUR = ${formatEUR(lc.riskEUR)}`}
+                        </CalcInfo>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         Mkt: {lc.currency} {formatNumber(lc.marketValue, 0)}
@@ -1056,8 +1095,14 @@ export function EquityExposureView({
                         </span>
                       </div>
                     </div>
-                    <span className="font-medium text-sm text-purple-500 flex-shrink-0">
+                    <span className="font-medium text-sm text-purple-500 flex-shrink-0 flex items-center gap-1.5">
                       {formatEUR(strat.maxLossEUR)}
+                      <CalcInfo>
+{`Strategia: ${strat.strategyName} — ${strat.underlying}
+${strat.calculation ?? 'Max Loss sul payoff matematico a scadenza.'}
+Max Loss valuta: ${strat.currency} ${formatNumber(strat.maxLoss, 0)}
+Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠️ Rischio CALL teoricamente illimitato: il valore riflette solo il lato PUT definito.' : ''}`}
+                      </CalcInfo>
                     </span>
                   </div>
                 ))}
