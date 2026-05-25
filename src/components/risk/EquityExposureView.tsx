@@ -590,7 +590,7 @@ export function EquityExposureView({
                   <TrendingUp className="w-4 h-4 text-cyan-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio ETF Azionari</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio ETF Azionari <CalcInfo>ETF azionari: valore di mercato di ogni ETF (quote × prezzo) convertito in EUR. Se presente protezione PUT, il rischio mostrato è al netto (valore − contratti × strike × 100, in EUR).</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {etfDetails.length} ETF • Rischio totale: {formatEUR(totalETFRisk)}
                   </div>
@@ -704,7 +704,7 @@ export function EquityExposureView({
                   <TrendingUp className="w-4 h-4 text-blue-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Stocks</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Stocks <CalcInfo>Azioni individuali: valore di mercato (quantità × prezzo) convertito in EUR. Al netto delle protezioni PUT se il toggle è attivo. Le sintetiche CC/DR-CC mostrano il rischio della combinazione.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {pureStockDetails.length} azioni • Rischio totale: {formatEUR(totalPureStockRisk)}
                   </div>
@@ -825,7 +825,7 @@ export function EquityExposureView({
                   <Layers className="w-4 h-4 text-fuchsia-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio CC e DR-CC sintetiche</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio CC e DR-CC sintetiche <CalcInfo>CC/DR-CC sintetiche: rischio della combinazione di opzioni. CC sint. CALL = long CALL ITM + short CALL; CC sint. PUT = short PUT ITM + short CALL. DR-CC = stessa logica con protezione PUT lunga aggiuntiva. Il rischio segue le regole su spot vs strike call venduta / spread strike put.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(totalSyntheticCcDrccRisk)}
                   </div>
@@ -881,7 +881,7 @@ export function EquityExposureView({
                   <BarChart3 className="w-4 h-4 text-orange-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Commodities</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Commodities <CalcInfo>Materie prime: valore di mercato (quantità × prezzo) convertito in EUR.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {commodityDetails.length} posizioni • Rischio totale: {formatEUR(totalCommodityRisk)}
                   </div>
@@ -922,7 +922,7 @@ export function EquityExposureView({
                   <TrendingDown className="w-4 h-4 text-red-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Naked PUT</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Naked PUT <CalcInfo>Naked PUT: rischio di assegnazione = contratti × strike × 100, convertito in EUR. Capitale potenzialmente impegnato se la PUT viene esercitata.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {nakedPutDetails.length} posizioni • Rischio totale: {formatEUR(totalNakedPutRisk)}
                   </div>
@@ -963,7 +963,7 @@ export function EquityExposureView({
                   <DollarSign className="w-4 h-4 text-amber-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Leap Call</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Leap Call <CalcInfo>Leap Call: valore di mercato corrente = contratti × prezzo di mercato × 100, convertito in EUR. Rappresenta il capitale a rischio sulla call lunga.</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {leapCallDetails.length} posizioni • Rischio totale: {formatEUR(totalLeapCallRisk)}
                   </div>
@@ -1004,7 +1004,7 @@ export function EquityExposureView({
                   <BarChart3 className="w-4 h-4 text-purple-500" />
                 </div>
                 <div className="text-left">
-                  <div className="font-semibold">Dettaglio Strategie</div>
+                  <div className="font-semibold flex items-center gap-1.5">Dettaglio Strategie <CalcInfo>Strategie: Max Loss calcolato sul payoff matematico a scadenza della combinazione (spread, condor, ecc.). Strategie con lato CALL nudo hanno rischio teoricamente illimitato (segnalato con icona di alert).</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
                     {strategyDetails.length} strategie • Rischio totale: {formatEUR(totalStrategyRisk)}
                   </div>
