@@ -692,9 +692,14 @@ function isEuroforexInstrument(name: string | undefined | null): boolean {
 
 /**
  * Resolver for spot price of a synthetic position's underlying.
- * Returns null if no spot can be resolved.
+ * Returns null spot if no spot can be resolved.
  */
-export type SpotResolver = (underlyingName: string, optionTicker?: string | null) => number | null;
+export interface SpotResolution {
+  spot: number | null;
+  source: 'portfolio' | 'ticker_cache' | 'none';
+  tickerUsed: string | null;
+}
+export type SpotResolver = (underlyingName: string, optionTicker?: string | null) => SpotResolution;
 
 /**
  * Calculate risk for synthetic CC and DR-CC positions (no real underlying stock).
