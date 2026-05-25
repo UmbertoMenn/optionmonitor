@@ -137,9 +137,14 @@ function buildSynthTooltip(s: {
   }
 
   if (t === 'cc_call' || t === 'drcc_call') {
-    const spotStr = b.spot != null ? formatNumber(b.spot, 2) : 'n/d';
+    const spotStr = b.spot != null ? formatNumber(b.spot, 2) : 'NON RISOLTO';
+    const srcLabel = b.spotSource === 'portfolio'
+      ? `portafoglio (${b.spotTickerUsed ?? '?'})`
+      : b.spotSource === 'ticker_cache'
+        ? `cache prezzi per ticker (${b.spotTickerUsed ?? '?'})`
+        : `nessuna fonte (ticker tentato: ${b.spotTickerUsed ?? '—'})`;
     const cond = b.spot == null
-      ? 'spot ignoto → fallback mkt'
+      ? 'spot non risolto → fallback mkt'
       : (b.spot > (b.shortStrike ?? 0) ? 'spot > strike_short → uso PMC' : 'spot ≤ strike_short → uso mkt');
     return [
       ...head,
@@ -150,6 +155,7 @@ function buildSynthTooltip(s: {
       `  PMC long         = ${b.pmc != null ? formatNumber(b.pmc, 2) : '?'}`,
       `  mkt long         = ${b.mkt != null ? formatNumber(b.mkt, 2) : '?'}`,
       `  spot underlying  = ${spotStr}`,
+      `  fonte spot       = ${srcLabel}`,
       `  → ${cond}`,
       '',
       'Calcolo:',
