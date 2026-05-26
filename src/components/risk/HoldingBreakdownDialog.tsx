@@ -7,7 +7,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { formatEUR, formatNumber } from '@/lib/formatters';
 import { ConsolidatedHoldingWithDetails } from '@/lib/sectorExposure';
-import { TrendingDown, TrendingUp, BarChart3, AlertTriangle, Info } from 'lucide-react';
+import { TrendingDown, TrendingUp, BarChart3, AlertTriangle, Info, Layers } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
