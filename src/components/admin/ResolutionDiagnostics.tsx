@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, AlertTriangle, Link2, DollarSign, PieChart, Globe } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useState } from 'react';
+import { normalizeUnderlying } from '@/hooks/useUnderlyingMappings';
 
 interface DiagnosticSection {
   title: string;
