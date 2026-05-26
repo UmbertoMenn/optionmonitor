@@ -879,6 +879,7 @@ export interface ConsolidatedTopHoldingsOptions {
   includeNakedPut?: boolean;
   includeStrategies?: boolean;
   includeLeapCall?: boolean;
+  includeSynthCcDrcc?: boolean;
 }
 
 // Extended interface to include source details for breakdown
@@ -914,6 +915,12 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     strategyName: string;
     maxLossEUR: number;
     hasUnlimitedRisk: boolean;
+  }>;
+  syntheticDetails: Array<{
+    syntheticType: string;
+    composition: string;
+    riskEUR: number;
+    currency: string;
   }>;
 }
 
