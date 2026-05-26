@@ -1147,12 +1147,14 @@ export function calculateConsolidatedTopHoldings(
         target.nakedPutRisk += holding.nakedPutRisk;
         target.leapCallRisk += holding.leapCallRisk;
         target.strategyRisk += holding.strategyRisk;
+        target.syntheticRisk += holding.syntheticRisk;
         target.gpRisk += holding.gpRisk;
         target.sources.push(...holding.sources);
         target.nakedPutDetails.push(...holding.nakedPutDetails);
         target.leapCallDetails.push(...holding.leapCallDetails);
         target.stockDetails.push(...holding.stockDetails);
         target.strategyDetails.push(...holding.strategyDetails);
+        target.syntheticDetails.push(...holding.syntheticDetails);
       } else {
         holding.tickerKey = reResolved.tickerKey;
         holding.ticker = getDisplayTicker(reResolved.tickerKey);
@@ -1167,6 +1169,7 @@ export function calculateConsolidatedTopHoldings(
     includeNakedPut = true,
     includeStrategies = true,
     includeLeapCall = true,
+    includeSynthCcDrcc = true,
   } = options;
 
   const allHoldings = Array.from(holdingsByTicker.values());
@@ -1181,6 +1184,7 @@ export function calculateConsolidatedTopHoldings(
       (includeNakedPut ? holding.nakedPutRisk : 0) +
       (includeLeapCall ? holding.leapCallRisk : 0) +
       (includeStrategies ? holding.strategyRisk : 0) +
+      (includeSynthCcDrcc ? holding.syntheticRisk : 0) +
       holding.gpRisk;
 
     holding.sources.sort((a, b) => b.exposure - a.exposure);
