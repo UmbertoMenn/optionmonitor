@@ -1394,6 +1394,11 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
                                 Strategie: {formatEUR(holding.strategyRisk)}
                               </Badge>
                             )}
+                            {holding.syntheticRisk > 0 && (
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-fuchsia-500/10 text-fuchsia-500 border-fuchsia-500/30">
+                                Sint. CC/DR-CC: {formatEUR(holding.syntheticRisk)}
+                              </Badge>
+                            )}
                             {hasGP && (
                               <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
                                 GP: {formatEUR(holding.gpRisk)}
