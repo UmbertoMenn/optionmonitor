@@ -978,7 +978,7 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                 <div className="text-left">
                   <div className="font-semibold flex items-center gap-1.5">Dettaglio CC e DR-CC sintetiche <CalcInfo>{SYNTH_HEADER_TOOLTIP}</CalcInfo></div>
                   <div className="text-sm text-muted-foreground">
-                    {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(totalSyntheticCcDrccRisk)}
+                    {syntheticCcDrccDetails.length} posizioni • Rischio totale: {formatEUR(displayedSyntheticCcDrccRisk)}
                   </div>
                 </div>
               </div>
@@ -1028,11 +1028,16 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                         </div>
                         <div className="text-right shrink-0">
                           <div className="font-semibold text-fuchsia-500 flex items-center justify-end gap-1.5">
-                            Rischio: {formatEUR(s.riskEUR)}
+                            Rischio: {formatEUR(includeProtections ? s.riskEUR : (s.riskEURWithoutProtection ?? s.riskEUR))}
                             <CalcInfo>{buildSynthTooltip(s)}</CalcInfo>
                           </div>
+                          {includeProtections && (s.riskEURWithoutProtection ?? s.riskEUR) > s.riskEUR && (
+                            <div className="text-xs text-green-500">
+                              Protezione: -{formatEUR((s.riskEURWithoutProtection ?? s.riskEUR) - s.riskEUR)}
+                            </div>
+                          )}
                           <div className="text-xs text-muted-foreground">
-                            {s.currency} {formatNumber(s.riskOriginal, 0)} / {s.exchangeRate.toFixed(4)}
+                            {s.currency} {formatNumber(includeProtections ? s.riskOriginal : (s.riskOriginalWithoutProtection ?? s.riskOriginal), 0)} / {s.exchangeRate.toFixed(4)}
                           </div>
                         </div>
                       </div>
