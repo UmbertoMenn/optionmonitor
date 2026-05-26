@@ -1014,20 +1014,35 @@ export function calculateConsolidatedTopHoldings(
     const holding = getOrCreateHolding(stock.underlying, stock.tickerKey);
 
     const stockValueEUR = stock.stockValue / stock.exchangeRate;
+
+    // Il toggle "Protezioni" deve agire SOLO sulle Long PUT, non sul cap di CC/DR-CC
+    // (che è già contabilizzato in altre categorie). Quindi NON usiamo stock.riskEUR
+    // — che include drccRisk + ccCapRisk — ma calcoliamo isolatamente il risparmio PUT.
+    let putSavingsEUR = 0;
+    if (stock.hasProtection && stock.protectionStrike && stock.protectionContracts > 0) {
+      const protectedShares = Math.min(
+        stock.protectionContracts * 100,
+        stock.stockQuantity
+      );
+      const putSavingsOriginal = protectedShares * Math.max(0, stock.stockPrice - stock.protectionStrike);
+      putSavingsEUR = putSavingsOriginal / stock.exchangeRate;
+    }
+    const stockValueWithPutProtectionEUR = stockValueEUR - putSavingsEUR;
+
     holding.stockRisk += stockValueEUR;
-    holding.stockRiskWithProtection += stock.riskEUR;
+    holding.stockRiskWithProtection += stockValueWithPutProtectionEUR;
 
     holding.sources.push({
       type: 'stock',
       name: 'Diretto',
-      exposure: options.includeProtections ? stock.riskEUR : stockValueEUR,
+      exposure: options.includeProtections ? stockValueWithPutProtectionEUR : stockValueEUR,
     });
     holding.stockDetails.push({
       quantity: stock.stockQuantity,
       price: stock.stockPrice,
       currency: stock.currency,
       value: stockValueEUR,
-      valueWithProtection: stock.riskEUR,
+      valueWithProtection: stockValueWithPutProtectionEUR,
       protectionContracts: stock.protectionContracts || 0,
       protectionStrike: stock.protectionStrike ?? null,
       hasProtection: stock.hasProtection || false,

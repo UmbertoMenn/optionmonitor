@@ -1,43 +1,32 @@
 ## Problema
 
-Le posizioni sintetiche CC/DR-CC vengono già aggregate nelle "Holdings Consolidate" (in `calculateConsolidatedTopHoldings`, sezione 1b), ma:
+Nelle holdings consolidate, il valore di NBIS cambia con il toggle "Protezioni" anche se NBIS non ha alcuna Long PUT.
 
-1. Il loro rischio viene **sommato dentro `stockRisk`**, quindi non è distinguibile come categoria propria nel breakdown per holding.
-2. Il toggle `includeSynthCcDrcc` presente in `EquityExposureView` **non viene passato** a `calculateConsolidatedTopHoldings`, quindi:
-   - quando il toggle è OFF, il `dynamicGrandTotal` non le conta, ma le holdings consolidate continuano a sommarle (incoerenza visibile sui totali per holding);
-   - quando il toggle è ON, contribuiscono a `stockRisk` mescolandosi con lo Stock Diretto e risultando invisibili al dettaglio.
-3. Nel `HoldingBreakdownDialog` non esiste una sezione dedicata: l'unica traccia è una riga "Posizione Sintetica CC/DR-CC" annidata sotto "Stock Diretto", priva di subtotale e di badge proprio.
+## Causa
 
-## Soluzione
+In `src/lib/sectorExposure.ts` (sezione 1, riga 1018) usiamo `stock.riskEUR` come `stockRiskWithProtection`. Ma `stock.riskEUR` arriva da `riskCalculator.ts:360`:
 
-Introdurre `syntheticRisk` come categoria di prima classe nelle holdings consolidate, allineata alle altre (`nakedPutRisk`, `leapCallRisk`, `strategyRisk`, `gpRisk`), con toggle dedicato e sezione dedicata nel dialog.
+```
+riskOriginal = drccRisk + ccCapRisk + protectedRisk + unprotectedRisk
+```
 
-### File coinvolti
+Quindi include anche il cap delle Covered Call e delle DR-CC su shares dirette, non solo l'effetto delle Long PUT. Se NBIS ha una CC ma nessuna PUT, `stock.riskEUR < stockValueEUR` e il toggle (che label/tooltip descrivono come riferito alle sole Long PUT) finisce per modificare il valore.
 
-**`src/lib/sectorExposure.ts`**
-- `ConsolidatedHoldingWithDetails`: aggiungere `syntheticRisk: number` e `syntheticDetails: Array<{ syntheticType, composition, riskEUR, currency, exchangeRate }>`.
-- `createHolding`: inizializzare i nuovi campi.
-- `ConsolidatedTopHoldingsOptions`: aggiungere `includeSynthCcDrcc?: boolean` (default `true`).
-- Sezione 1 (stockDetails): rimuovere il ramo `isSynth` (codice morto: i synth non sono mai in `stockDetails`).
-- Sezione 1b (syntheticCcDrccDetails): **non** sommare più a `stockRisk` / `stockRiskWithProtection`; sommare invece a `syntheticRisk` e popolare `syntheticDetails`. Mantenere l'aggregazione per `tickerKey` (così si fondono con la stessa holding stock se esiste).
-- Sezione 5.5 (re-canonicalizzazione): aggiungere il merge di `syntheticRisk` e `syntheticDetails`.
-- Blocco finale `totalExposure`: includere `(includeSynthCcDrcc ? holding.syntheticRisk : 0)`.
+## Fix
 
-**`src/components/risk/EquityExposureView.tsx`**
-- Passare `includeSynthCcDrcc` all'options di `calculateConsolidatedTopHoldings` e aggiungerlo alle dipendenze del `useMemo`.
+In `src/lib/sectorExposure.ts`, sezione 1 (loop `analysis.stockDetails`, righe ~1016‑1035), calcolare `stockRiskWithProtection` in modo isolato dalle sole Long PUT:
 
-**`src/components/risk/HoldingBreakdownDialog.tsx`**
-- Nuova sezione "Sintetiche CC/DR-CC" (icona `Layers`, colore `fuchsia-500`), elenco con `composition` + `riskEUR` per riga e subtotale.
-- Aggiungere il badge nel footer: `Sintetiche: {formatEUR(holding.syntheticRisk)}` quando `> 0`.
-- Rimuovere il ramo speciale "Posizione Sintetica CC/DR-CC" dal blocco "Stock Diretto" (ora il blocco contiene solo stock reali).
+- Se `!stock.hasProtection` → `stockRiskWithProtection = stockValueEUR` (identico a `stockRisk`).
+- Se `stock.hasProtection` → `putSavingsEUR = min(protectionContracts*100, stockQuantity) * max(0, stockPrice - protectionStrike) / exchangeRate`, e `stockRiskWithProtection = stockValueEUR - putSavingsEUR`.
 
-### Cosa NON cambia
-- Le formule di rischio in `riskCalculator.ts`.
-- L'esposizione settoriale (`calculateSectorExposure`): già gestisce correttamente le synth come `breakdown.stocks` per settore — resta invariata.
-- L'esposizione valutaria.
-- Backend / RLS / hook.
+Aggiornare di conseguenza anche `sources[].exposure` e `stockDetails[].valueWithProtection` per usare il nuovo valore.
 
-### Risultato atteso
-- Ogni holding mostra una riga `Sintetiche: € …` separata da Stock, PUT, LEAP, Strategie.
-- Il toggle "Rischio CC e DR-CC sintetiche" gating sia il `dynamicGrandTotal` sia il `totalExposure` delle holdings consolidate (coerenza).
-- Il dialog di breakdown elenca ogni posizione sintetica con la sua `composition` (es. `Long CALL 100 ITM (PMC 12.34) + Short CALL 110 (spot 115.20)`) e relativo rischio EUR.
+## Risultato
+
+- Il toggle "Protezioni" agisce solo sulle Long PUT, coerente con label e tooltip.
+- NBIS (e ogni altro titolo senza PUT) mostra lo stesso valore con toggle ON/OFF.
+- L'effetto cap di CC/DR-CC resta visibile nelle relative categorie (CC, sintetiche, naked, ecc.), non viene doppio-contato sullo stock diretto.
+
+## File toccati
+
+- `src/lib/sectorExposure.ts` (solo il blocco di sezione 1, ~15 righe). Nessuna modifica a `riskCalculator.ts`, alla UI o ad altre categorie.
