@@ -334,10 +334,11 @@ export interface ConsolidatedHolding {
   nakedPutRisk: number;          // Naked PUT risk (€)
   leapCallRisk: number;          // Leap Call risk - market value (€)
   strategyRisk: number;          // Strategy Max Loss (€)
+  syntheticRisk: number;         // Synthetic CC/DR-CC risk (€)
   gpRisk: number;                // GP stock risk (€)
   totalExposure: number;         // Total with/without protections (calculated based on toggle)
   sources: Array<{
-    type: 'stock' | 'nakedPut' | 'leapCall' | 'strategy' | 'gp';
+    type: 'stock' | 'nakedPut' | 'leapCall' | 'strategy' | 'gp' | 'synthetic';
     name: string;
     exposure: number;
     percentage?: number;
