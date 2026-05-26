@@ -906,12 +906,16 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     value: number;
     valueWithProtection: number;
     // Protection info
-    protectionContracts: number;
-    protectionStrike: number | null;
+    protectionContracts: number;          // Long PUT pure (Protezione pura)
+    protectionStrike: number | null;      // Strike Long PUT pure
+    drccProtectionContracts?: number;     // PUT di protezione interne a DR-CC
+    drccProtectionStrike?: number | null; // Strike PUT di protezione DR-CC
+    protectionSavingsEUR?: number;        // Saving totale (DR-CC PUT + Long PUT pure)
     hasProtection: boolean;
     isSynthetic?: boolean;
     composition?: string;
   }>;
+
   strategyDetails: Array<{
     strategyName: string;
     maxLossEUR: number;
@@ -1020,18 +1024,10 @@ export function calculateConsolidatedTopHoldings(
 
     const stockValueEUR = stock.stockValue / stock.exchangeRate;
 
-    // Il toggle "Protezioni" deve agire SOLO sulle Long PUT, non sul cap di CC/DR-CC
-    // (che è già contabilizzato in altre categorie). Quindi NON usiamo stock.riskEUR
-    // — che include drccRisk + ccCapRisk — ma calcoliamo isolatamente il risparmio PUT.
-    let putSavingsEUR = 0;
-    if (stock.hasProtection && stock.protectionStrike && stock.protectionContracts > 0) {
-      const protectedShares = Math.min(
-        stock.protectionContracts * 100,
-        stock.stockQuantity
-      );
-      const putSavingsOriginal = protectedShares * Math.max(0, stock.stockPrice - stock.protectionStrike);
-      putSavingsEUR = putSavingsOriginal / stock.exchangeRate;
-    }
+    // SINGLE SOURCE OF TRUTH: leggiamo il saving direttamente dal riskCalculator.
+    // Il calcolo include sia le Long PUT pure sia la PUT di protezione di una DR-CC.
+    // Le PUT comprate dentro spread/condor/diagonali NON sono qui (escluse a monte).
+    const putSavingsEUR = Math.max(0, stock.protectionSavingsEUR ?? 0);
     const stockValueWithPutProtectionEUR = stockValueEUR - putSavingsEUR;
 
     holding.stockRisk += stockValueEUR;
@@ -1050,10 +1046,14 @@ export function calculateConsolidatedTopHoldings(
       valueWithProtection: stockValueWithPutProtectionEUR,
       protectionContracts: stock.protectionContracts || 0,
       protectionStrike: stock.protectionStrike ?? null,
+      drccProtectionContracts: stock.drccProtectionContracts || 0,
+      drccProtectionStrike: stock.drccProtectionStrike ?? null,
+      protectionSavingsEUR: putSavingsEUR,
       hasProtection: stock.hasProtection || false,
       isSynthetic: false,
     });
   }
+
 
   // 1b. Synthetic CC/DR-CC exposures: prima classe, separate dallo Stock Diretto.
   for (const s of analysis.syntheticCcDrccDetails || []) {
