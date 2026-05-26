@@ -205,6 +205,7 @@ function buildSynthTooltip(s: {
 export function EquityExposureView({ 
   analysis, 
   portfolioTotalValue,
+  portfolioNettingTotal,
   etfAllocations = {},
   isLoadingETFData = false,
   gpStockHoldings = [],
