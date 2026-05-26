@@ -24,6 +24,11 @@ import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { useSectorMappings } from '@/hooks/useSectorMappings';
+import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
+import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
+import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
+import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
 import { CurrencyExposureView } from '@/components/risk/CurrencyExposureView';
@@ -63,7 +68,18 @@ export function RiskAnalyzer() {
     gpHoldings.filter(h => h.asset_type === 'stock'), 
     [gpHoldings]
   );
-  const { summary } = usePortfolio();
+  const { summary, positions } = usePortfolio();
+  const { isAggregatedView } = usePortfolioContext();
+  const { overrides } = useDerivativeOverrides();
+  const { configurations: strategyConfigs } = useStrategyConfigurations();
+  const derivativeUnderlyings = useMemo(
+    () => positions.filter(p => p.asset_type === 'derivative')
+      .map(p => p.underlying || p.description)
+      .filter((u): u is string => !!u),
+    [positions]
+  );
+  const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
+  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs);
 
   if (typeof window !== 'undefined') {
     console.log('[RiskAnalyzer] render', {
@@ -292,6 +308,7 @@ export function RiskAnalyzer() {
               <EquityExposureView 
                 analysis={analysis} 
                 portfolioTotalValue={summary?.totalValue}
+                portfolioNettingTotal={netting.nettingTotal}
                 etfAllocations={allocations}
                 isLoadingETFData={isETFDataLoading}
                 gpStockHoldings={gpStockHoldings}

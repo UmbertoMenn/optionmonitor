@@ -39,6 +39,7 @@ import { buildDynamicAliasMap } from '@/lib/tickerIdentity';
 interface EquityExposureViewProps {
   analysis: RiskAnalysis;
   portfolioTotalValue?: number;
+  portfolioNettingTotal?: number;
   etfAllocations?: Record<string, ETFAllocation>;
   isLoadingETFData?: boolean;
   gpStockHoldings?: GPHoldingRow[];
@@ -204,6 +205,7 @@ function buildSynthTooltip(s: {
 export function EquityExposureView({ 
   analysis, 
   portfolioTotalValue,
+  portfolioNettingTotal,
   etfAllocations = {},
   isLoadingETFData = false,
   gpStockHoldings = [],
@@ -524,9 +526,9 @@ export function EquityExposureView({
                 </div>
                 <div className="text-3xl font-bold text-primary">{formatEUR(dynamicGrandTotal)}</div>
                 <div className="text-xs text-muted-foreground mt-1">Somma di tutte le categorie di rischio</div>
-                {portfolioTotalValue && portfolioTotalValue > 0 && (
+                {portfolioNettingTotal && portfolioNettingTotal > 0 && (
                   <div className="text-xs text-muted-foreground mt-0.5">
-                    ({((dynamicGrandTotal / portfolioTotalValue) * 100).toFixed(1)}% del valore asset)
+                    ({((dynamicGrandTotal / portfolioNettingTotal) * 100).toFixed(1)}% del Patrimonio Netting Totale)
                   </div>
                 )}
               </div>
