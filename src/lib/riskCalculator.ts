@@ -237,12 +237,10 @@ export function calculateStockRisk(
   // Include only stocks and ETFs (commodities are calculated separately)
   const stockAssetTypes = ['stock', 'etf'];
   
-  // Pre-filter all bought PUTs from positions (quantity > 0 = bought)
-  const allBoughtPuts = allPositions.filter(p => 
-    p.asset_type === 'derivative' && 
-    p.option_type === 'put' && 
-    (p.quantity || 0) > 0
-  );
+  // PUT protections are now sourced ONLY from `longPuts` (classified by categorizeDerivatives
+  // via override `protection` OR strategy_config `protection`) and from DR-CC's `protectionPut`.
+  // PUTs belonging to put_spread / diagonal_put_spread / iron_condor / double_diagonal / other
+  // are NOT counted as stock protection.
   
   for (const stock of stocks) {
     if (!stockAssetTypes.includes(stock.asset_type)) continue;
