@@ -308,6 +308,7 @@ export function RiskAnalyzer() {
               <EquityExposureView 
                 analysis={analysis} 
                 portfolioTotalValue={summary?.totalValue}
+                portfolioNettingTotal={netting.nettingTotal}
                 etfAllocations={allocations}
                 isLoadingETFData={isETFDataLoading}
                 gpStockHoldings={gpStockHoldings}
