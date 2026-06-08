@@ -1,42 +1,45 @@
-## Modifiche all'header
 
-### 1. `src/components/layout/AppHeaderMenu.tsx`
+# Upload di due file Excel con merge intelligente
 
-**a) Nascondi il tasto "Dashboard" quando già su `/`**
-- Usare `useLocation()` da react-router-dom.
-- Renderizzare il `<Link to="/">Dashboard</Link>` solo se `location.pathname !== '/'`.
+Permettere il caricamento di 1 o 2 file Excel portfolio nella stessa operazione. Le posizioni (azioni, obbligazioni, ETF, derivati, commodity) vengono unite; la liquidità viene deduplicata per ID conto e contata una sola volta.
 
-**b) Allarga il pulsante "Menù"**
-- Dato che ora è (spesso) l'unico controllo, aumentarne la larghezza minima (es. `min-w-[200px]`) e mostrare a sinistra dell'icona Menu anche un'anteprima del portafoglio selezionato (icona Briefcase/Layers + nome troncato) — quando `includePortfolioSelector` è attivo. Questo evita di duplicare il selector "brutto" in cima al dropdown.
+## Vincoli funzionali
 
-**c) Riorganizza l'interno del dropdown del PortfolioSelector**
-Il problema dell'immagine è che dentro al `DropdownMenuItem` viene incollato un intero `Button` con icone + chevron + bottone X esterno, creando un blocco visivamente disordinato e troncato.
+- I due file devono avere la stessa `snapshot_date`. Date diverse → errore bloccante, nessun salvataggio.
+- La deduplicazione cassa avviene per **codice conto** (prima cella della riga sezione "DISPONIBILITA' LIQUIDE" del file Fideuram). Se lo stesso ID compare in entrambi i file, conta solo la prima occorrenza.
+- Le posizioni si sommano per concatenazione semplice (no merge per ISIN): se la stessa posizione compare in entrambi i file viene caricata due volte. Si presume che i due file rappresentino sotto-portafogli distinti dello stesso cliente, quindi non devono contenere duplicati di titoli.
+- Il GP upload (seconda dropzone esistente) resta invariato e singolo.
 
-Soluzione: non inserire più il componente `PortfolioSelector` "as is" dentro al dropdown. Invece, nel dropdown del Menù mostriamo direttamente una sezione "Portafoglio" con:
-- header `DropdownMenuLabel` "Portafoglio"
-- riga corrente con icona + nome completo (no troncamento, larghezza ampia del dropdown) + eventuale bottone "esci da aggregato/admin" (icona X piccola a destra)
-- una voce "Cambia portafoglio…" che apre il dropdown nativo del PortfolioSelector (in alternativa: mostrare direttamente l'elenco dei portafogli inline)
+## Modifiche file
 
-Soluzione più semplice e meno invasiva (consigliata):
-- Allargare `DropdownMenuContent` del Menù a `w-72`.
-- Wrappare il `PortfolioSelector` dentro al `DropdownMenuItem` in un contenitore `w-full px-1 py-1` e rimuovere il `min-w-[180px]` forzato del PortfolioSelector solo quando renderizzato nel menu. Per farlo, aggiungere una prop opzionale `compact?: boolean` (o `fullWidth?: boolean`) a `PortfolioSelector` che:
-  - rimuove `min-w-[180px]` dal trigger e usa `w-full justify-between`
-  - aumenta `max-w-` del nome troncato (es. `max-w-[200px]` o nessun limite)
-  - mantiene il bottone X (exit admin/aggregated) ma in modo compatto
+### 1. `src/lib/excelParser.ts`
+- Aggiungere al return di `parsePortfolioExcel` (e `parsePortfolioData`) un campo `cashAccounts: { accountId: string; value: number }[]` che lista i singoli conti di liquidità non esclusi, oltre al `cashValue` aggregato.
+- Modificare il ramo `currentSection === 'cash'`: invece di sommare direttamente in `cashValue`, pushare `{ accountId, value }` in `cashAccounts`. Il totale `cashValue` viene calcolato a fine parsing come somma dei `value`. Comportamento single-file invariato.
 
-### 2. `src/components/portfolio/PortfolioSelector.tsx`
-- Aggiungere prop `fullWidth?: boolean`. Quando true:
-  - Il wrapper `div.flex` diventa `w-full`
-  - Il trigger Button: `w-full justify-between` (no `min-w-[180px]`)
-  - Lo span del nome: `truncate` senza `max-w-[120px]` fisso
-- Default invariato per non rompere altri usi.
+### 2. `src/components/dashboard/FileUploader.tsx`
+- Dropzone Portfolio: `maxFiles: 2`, accetta 1 o 2 file.
+- Nuova funzione `mergePortfolioParseResults(results)`:
+  - Verifica che tutte le `snapshotDate` siano uguali (ignorando i `null`). Se differiscono → `toast.error` e abort.
+  - Concatena `positions[]` di tutti i file.
+  - Deduplica `cashAccounts` per `accountId` (Map con prima occorrenza). `cashValue` finale = somma dei value unici. ID vuoti/falsy non vengono deduplicati (trattati come distinti).
+  - Restituisce `{ positions, cashValue, snapshotDate }`.
+- `onDropPortfolio` itera su tutti gli `acceptedFiles`, parsa ciascuno in parallelo con `Promise.all`, applica `mergePortfolioParseResults`, poi prosegue identico al flusso esistente (update portfolio, `updatePositionsAsync`, snapshot, refresh cache).
+- UI della slide Portfolio: aggiungere sottotitolo "Puoi caricare fino a 2 file" e mostrare in `DropzoneContent` il numero di file selezionati durante il drag se >1.
+- Messaggio toast finale: "Portfolio caricato! N posizioni da X file."
 
-### 3. `AppHeaderMenu.tsx` aggiornamento
-- Passare `<PortfolioSelector fullWidth />` dentro al `DropdownMenuItem`, e allargare `DropdownMenuContent` a `w-72`.
+### 3. Nessuna modifica DB
+- I dati continuano a essere salvati come oggi: il portfolio ha un unico `cash_value` e una sola lista di `positions`. Il merge avviene client-side prima del salvataggio.
 
-## Risultato atteso
-- Nella Dashboard (`/`): visibile solo il tasto "Menù" (più largo).
-- Nelle altre pagine: tasti "Dashboard" + "Menù".
-- Dentro il Menù, il blocco Portfolio occupa tutta la larghezza del dropdown, nome non più troncato a 120px, layout pulito.
+## Edge cases gestiti
 
-Nessuna modifica a logica business, routing o permessi.
+- Solo 1 file → comportamento identico a oggi.
+- 2 file con date diverse → errore, nulla viene scritto.
+- 2 file con stesso conto liquidità → contato una volta.
+- 2 file con conti liquidità diversi → sommati.
+- Conto liquidità senza accountId riconoscibile → non deduplicato (sommato), con warning in console.
+
+## Fuori scope
+
+- Persistere quale file ha generato quali posizioni.
+- UI per scegliere quale liquidità prevale in caso di conflitto sullo stesso accountId (si tiene la prima).
+- Memorizzazione cross-sessione di un flag "cliente multi-file".
