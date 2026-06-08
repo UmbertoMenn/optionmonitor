@@ -20,6 +20,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/comp
 import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
