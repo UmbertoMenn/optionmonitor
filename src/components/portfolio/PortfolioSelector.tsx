@@ -34,7 +34,11 @@ import { Label } from '@/components/ui/label';
 import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check, Users, X, User, Layers } from 'lucide-react';
 import { formatCurrency } from '@/lib/formatters';
 
-export function PortfolioSelector() {
+interface PortfolioSelectorProps {
+  fullWidth?: boolean;
+}
+
+export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps = {}) {
   const { isAdmin, user } = useAuth();
   const {
     portfolios,
@@ -117,13 +121,13 @@ export function PortfolioSelector() {
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className={`flex items-center gap-2 ${fullWidth ? 'w-full' : ''}`}>
         {/* Exit admin mode button */}
         {(isAdminMode || isAggregatedView) && (
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-warning"
+            className="h-8 w-8 text-warning shrink-0"
             onClick={exitAdminMode}
             title="Esci dalla modalità admin"
           >
@@ -136,15 +140,15 @@ export function PortfolioSelector() {
             <Button 
               variant="outline" 
               size="sm" 
-              className={`min-w-[180px] justify-between ${(isAdminMode || isAggregatedView) ? 'border-warning text-warning' : ''}`}
+              className={`${fullWidth ? 'w-full' : 'min-w-[180px]'} justify-between ${(isAdminMode || isAggregatedView) ? 'border-warning text-warning' : ''}`}
             >
-              <span className="flex items-center gap-2 truncate">
+              <span className="flex items-center gap-2 truncate min-w-0">
                 {isAggregatedView ? (
                   <Layers className="w-4 h-4 shrink-0" />
                 ) : (
                   <Briefcase className="w-4 h-4 shrink-0" />
                 )}
-                <span className="truncate max-w-[120px]">
+                <span className={`truncate ${fullWidth ? '' : 'max-w-[120px]'}`}>
                   {getDisplayName()}
                 </span>
               </span>
