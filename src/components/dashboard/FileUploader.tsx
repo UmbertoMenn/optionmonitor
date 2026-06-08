@@ -291,7 +291,7 @@ export function FileUploader() {
       'application/vnd.ms-excel': ['.xls'],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
     },
-    maxFiles: 1,
+    maxFiles: 2,
     disabled: isProcessing,
   });
 
