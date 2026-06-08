@@ -93,10 +93,9 @@ export function FileUploader() {
   const navigate = useNavigate();
   const effectiveUserId = isAdminMode && adminViewUserId ? adminViewUserId : user?.id;
 
-  // ============ PORTFOLIO UPLOAD ============
+  // ============ PORTFOLIO UPLOAD (1 o 2 file) ============
   const onDropPortfolio = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
+    if (!acceptedFiles || acceptedFiles.length === 0) return;
 
     const targetPortfolioId = portfolio?.id;
     if (!targetPortfolioId) {
@@ -109,8 +108,45 @@ export function FileUploader() {
 
     try {
       const excludedPatterns = EXCLUDED_CASH_PATTERNS[effectiveUserId || ''] || [];
-      const { positions, cashValue, snapshotDate } = await parsePortfolioExcel(file, { excludedCashPatterns: excludedPatterns });
-      
+      const parsed = await Promise.all(
+        acceptedFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns }))
+      );
+
+      // Verifica che le snapshot date siano coerenti
+      const dates = parsed.map(p => p.snapshotDate).filter((d): d is string => !!d);
+      const uniqueDates = Array.from(new Set(dates));
+      if (uniqueDates.length > 1) {
+        toast.error('Date dei file non coerenti', {
+          description: `I file hanno date diverse: ${uniqueDates.join(', ')}. Devono essere identiche.`,
+        });
+        return;
+      }
+      const snapshotDate = uniqueDates[0] || null;
+
+      // Merge posizioni (concatenazione semplice)
+      const positions = parsed.flatMap(p => p.positions);
+
+      // Deduplica liquidità per accountId (prima occorrenza vince).
+      // Conti senza ID riconoscibile vengono trattati come distinti.
+      const seenAccounts = new Map<string, number>();
+      let anonCash = 0;
+      for (const p of parsed) {
+        for (const acc of p.cashAccounts) {
+          const id = (acc.accountId || '').trim();
+          if (!id) {
+            anonCash += acc.value;
+            console.warn('[FileUploader] Cash account senza ID, non deduplicabile:', acc.value);
+            continue;
+          }
+          if (!seenAccounts.has(id)) {
+            seenAccounts.set(id, acc.value);
+          } else {
+            console.log(`[FileUploader] Cash account ${id} già presente, deduplicato`);
+          }
+        }
+      }
+      const cashValue = Array.from(seenAccounts.values()).reduce((s, v) => s + v, 0) + anonCash;
+
       if (positions.length === 0) {
         toast.error('Nessuna posizione trovata');
         return;
@@ -119,12 +155,12 @@ export function FileUploader() {
       const updateData: { cash_value?: number; snapshot_date?: string | null } = {};
       if (cashValue > 0) updateData.cash_value = cashValue;
       updateData.snapshot_date = snapshotDate;
-      
+
       const { error } = await supabase
         .from('portfolios')
         .update(updateData)
         .eq('id', targetPortfolioId);
-        
+
       if (!error) {
         await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
         await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
@@ -132,7 +168,7 @@ export function FileUploader() {
 
       await updatePositionsAsync({ positions, targetPortfolioId });
       setUploadSuccess(true);
-      
+
       if (snapshotDate) {
         try {
           await upsertUploadSnapshot({
@@ -151,12 +187,13 @@ export function FileUploader() {
           console.error('[FileUploader] Snapshot save failed:', snapErr);
         }
       }
-      
+
       refreshStrategyCacheForPortfolio(targetPortfolioId);
-      
+
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
+      const filesInfo = acceptedFiles.length > 1 ? ` da ${acceptedFiles.length} file` : '';
       toast.success('Portfolio caricato!', {
-        description: `${positions.length} posizioni importate${dateInfo}.`,
+        description: `${positions.length} posizioni importate${filesInfo}${dateInfo}.`,
       });
 
       const hasDerivatives = positions.some(p => p.asset_type === 'derivative');
@@ -169,7 +206,7 @@ export function FileUploader() {
     } finally {
       setIsProcessing(false);
     }
-  }, [portfolio?.id, portfolio?.cash_value, updatePositionsAsync, queryClient]);
+  }, [portfolio?.id, portfolio?.cash_value, updatePositionsAsync, queryClient, effectiveUserId, navigate]);
 
   // ============ GP UPLOAD ============
   const onDropGP = useCallback(async (acceptedFiles: File[]) => {
