@@ -34,7 +34,11 @@ import { Label } from '@/components/ui/label';
 import { ChevronDown, Plus, Pencil, Trash2, Briefcase, Check, Users, X, User, Layers } from 'lucide-react';
 import { formatCurrency } from '@/lib/formatters';
 
-export function PortfolioSelector() {
+interface PortfolioSelectorProps {
+  fullWidth?: boolean;
+}
+
+export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps = {}) {
   const { isAdmin, user } = useAuth();
   const {
     portfolios,
