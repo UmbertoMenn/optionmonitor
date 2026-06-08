@@ -492,10 +492,9 @@ export function Derivatives() {
                   {derivatives.length} posizioni
                 </p>
               </div>
-              <div className="ml-4 hidden sm:block">
-                <PortfolioSelector />
-              </div>
             </div>
+
+            <AppHeaderMenu />
 
             {/* Mobile: Indice dropdown */}
             <div className="sm:hidden">
