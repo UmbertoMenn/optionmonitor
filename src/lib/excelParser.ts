@@ -194,9 +194,10 @@ function extractSnapshotDate(rows: any[][]): string | null {
 function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
+  cashAccounts: { accountId: string; value: number }[];
 } {
   const positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[] = [];
-  let cashValue = 0;
+  const cashAccounts: { accountId: string; value: number }[] = [];
   let currentSection: AssetType | null = null;
   let headerRow: string[] = [];
   let isDerivativeSection = false;
