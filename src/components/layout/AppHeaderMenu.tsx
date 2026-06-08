@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
 import {
@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,28 +21,35 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
   const { isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isDashboard = location.pathname === '/';
 
   return (
     <div className="flex items-center gap-2">
-      <Button variant="outline" size="sm" asChild className="shrink-0">
-        <Link to="/">
-          <TrendingUp className="w-4 h-4" />
-          <span className="ml-2">Dashboard</span>
-        </Link>
-      </Button>
+      {!isDashboard && (
+        <Button variant="outline" size="sm" asChild className="shrink-0">
+          <Link to="/">
+            <TrendingUp className="w-4 h-4" />
+            <span className="ml-2">Dashboard</span>
+          </Link>
+        </Button>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="shrink-0">
+          <Button variant="outline" size="sm" className="shrink-0 min-w-[140px]">
             <Menu className="w-4 h-4 mr-2" />
             Menù
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-72">
           {includePortfolioSelector && (
             <>
-              <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()}>
-                <div className="w-full"><PortfolioSelector /></div>
-              </DropdownMenuItem>
+              <DropdownMenuLabel className="text-xs text-muted-foreground uppercase tracking-wider">
+                Portafoglio
+              </DropdownMenuLabel>
+              <div className="px-2 py-1.5">
+                <PortfolioSelector fullWidth />
+              </div>
               <DropdownMenuSeparator />
             </>
           )}
