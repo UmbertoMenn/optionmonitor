@@ -81,6 +81,7 @@ function isETF(description: string, isin?: string): boolean {
 export async function parsePortfolioExcel(file: File, options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): Promise<{
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
+  cashAccounts: { accountId: string; value: number }[];
   snapshotDate: string | null;
 }> {
   // Dynamic import of xlsx library (using @e965/xlsx for security patches)
@@ -193,9 +194,10 @@ function extractSnapshotDate(rows: any[][]): string | null {
 function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: string[]; excludedCashPatterns?: { mid: string; last: string }[] }): {
   positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[];
   cashValue: number;
+  cashAccounts: { accountId: string; value: number }[];
 } {
   const positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[] = [];
-  let cashValue = 0;
+  const cashAccounts: { accountId: string; value: number }[] = [];
   let currentSection: AssetType | null = null;
   let headerRow: string[] = [];
   let isDerivativeSection = false;
@@ -264,7 +266,7 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
       }
       const value = findColumnValue(row, headerRow, ['VALORIZZAZIONE EUR', 'VALORIZZAZIONE IN DIVISA']);
       if (value) {
-        cashValue += parseExcelNumber(value);
+        cashAccounts.push({ accountId, value: parseExcelNumber(value) });
       }
       continue;
     }
@@ -289,8 +291,8 @@ function parsePortfolioData(rows: any[][], options?: { excludedCashAccounts?: st
       positions.push(position);
     }
   }
-  
-  return { positions, cashValue };
+  const cashValue = cashAccounts.reduce((s, c) => s + c.value, 0);
+  return { positions, cashValue, cashAccounts };
 }
 
 // Parse EUREX/IDEM expiry format like "MAR26", "DEC25", "JUN27"
