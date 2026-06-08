@@ -308,6 +308,9 @@ export function FileUploader() {
   return (
     <Card className="border-dashed border-2 border-border hover:border-primary/50 transition-colors">
       <CardContent className="p-4">
+        <p className="text-xs text-muted-foreground text-center mb-3 px-2">
+          Se è presente una Gestione Patrimoniale, carica <strong>prima la GP</strong> e poi il Portafoglio: lo snapshot storico viene generato dall'upload del Portafoglio e include la GP solo se già aggiornata.
+        </p>
         <Carousel opts={{ loop: false }}>
           <CarouselContent>
             {/* Slide 1: Portfolio Upload */}
