@@ -100,6 +100,11 @@ function AppRoutes() {
               <RiskSimulator />
             </ErrorBoundary>
           } />
+          <Route path="/option-analyzer" element={
+            <ErrorBoundary title="Errore nel caricamento dell'Option Analyzer">
+              <OptionAnalyzer />
+            </ErrorBoundary>
+          } />
           <Route path="/admin" element={
             <ErrorBoundary title="Errore nel caricamento del pannello admin">
               <AdminPanel />
