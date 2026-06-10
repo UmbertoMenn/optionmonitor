@@ -164,7 +164,7 @@ serve(async (req) => {
         if (typeof rf.data?.regularMarketPrice === "number") riskFree = rf.data.regularMarketPrice;
 
         const update: Record<string, any> = { ticker, updated_at: now };
-        if (beta != null) { update.beta = beta; update.beta_source = "Yahoo Finance"; update.beta_updated_at = now; }
+        if (beta != null) { update.beta = beta; update.beta_source = betaSource; update.beta_updated_at = now; }
         if (rv != null)   { update.rv = rv; update.rv_updated_at = now; }
         if (name)         update.name = name;
         if (currency)     update.currency = currency;
