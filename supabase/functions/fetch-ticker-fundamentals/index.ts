@@ -42,41 +42,76 @@ const CURRENCY_TO_COUNTRY: Record<string, string> = {
   CAD: "Canada",
 };
 
-async function yahooQuote(ticker: string) {
+async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
   try {
-    const r = await fetch(
-      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}`,
-      { headers: { "User-Agent": UA } }
-    );
-    if (!r.ok) return null;
+    const initResp = await fetch("https://fc.yahoo.com", {
+      redirect: "manual",
+      headers: { "User-Agent": UA },
+    });
+    await initResp.text();
+    const setCookies = initResp.headers.get("set-cookie") || "";
+    const cookies = setCookies.split(",").map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ");
+    if (!cookies) return null;
+    const crumbResp = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+      headers: { "User-Agent": UA, Cookie: cookies },
+    });
+    if (!crumbResp.ok) { await crumbResp.text(); return null; }
+    const crumb = await crumbResp.text();
+    if (!crumb || crumb.length > 50) return null;
+    return { crumb, cookie: cookies };
+  } catch { return null; }
+}
+
+function yahooHeaders(auth: { cookie: string } | null) {
+  const h: Record<string, string> = { "User-Agent": UA };
+  if (auth?.cookie) h.Cookie = auth.cookie;
+  return h;
+}
+
+async function yahooQuote(ticker: string, auth: { crumb: string; cookie: string } | null) {
+  try {
+    const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}${auth ? `&crumb=${encodeURIComponent(auth.crumb)}` : ""}`;
+    const r = await fetch(url, { headers: yahooHeaders(auth) });
+    if (!r.ok) { await r.text(); return null; }
     const j = await r.json();
     return j?.quoteResponse?.result?.[0] ?? null;
   } catch { return null; }
 }
 
-async function yahooSummary(ticker: string) {
+async function yahooSummary(ticker: string, auth: { crumb: string; cookie: string } | null) {
   try {
-    const r = await fetch(
-      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,summaryDetail,price`,
-      { headers: { "User-Agent": UA } }
-    );
-    if (!r.ok) return null;
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,summaryDetail,price${auth ? `&crumb=${encodeURIComponent(auth.crumb)}` : ""}`;
+    const r = await fetch(url, { headers: yahooHeaders(auth) });
+    if (!r.ok) { await r.text(); return null; }
     const j = await r.json();
     return j?.quoteSummary?.result?.[0] ?? null;
   } catch { return null; }
 }
 
-async function yahooChart1y(ticker: string): Promise<number[] | null> {
+async function yahooChart1y(ticker: string, auth: { crumb: string; cookie: string } | null): Promise<number[] | null> {
   try {
-    const r = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`,
-      { headers: { "User-Agent": UA } }
-    );
-    if (!r.ok) return null;
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d${auth ? `&crumb=${encodeURIComponent(auth.crumb)}` : ""}`;
+    const r = await fetch(url, { headers: yahooHeaders(auth) });
+    if (!r.ok) { await r.text(); return null; }
     const j = await r.json();
     const closes: (number | null)[] = j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
     return closes.filter((x): x is number => typeof x === "number" && x > 0);
   } catch { return null; }
+}
+
+async function finnhubQuote(ticker: string): Promise<{ price: number | null; name: string | null; currency: string | null }> {
+  const key = Deno.env.get("FINNHUB_API_KEY");
+  if (!key) return { price: null, name: null, currency: null };
+  try {
+    const [qResp, pResp] = await Promise.all([
+      fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=${key}`),
+      fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${key}`),
+    ]);
+    const q = qResp.ok ? await qResp.json() : null;
+    const p = pResp.ok ? await pResp.json() : null;
+    const price = q?.c && q.c > 0 ? Number(q.c) : null;
+    return { price, name: p?.name ?? null, currency: p?.currency ?? null };
+  } catch { return { price: null, name: null, currency: null }; }
 }
 
 function annualizedVol(closes: number[]): number | null {
@@ -181,33 +216,44 @@ serve(async (req) => {
     const cached = await getCachedFundamental(supabase, ticker);
     const now = Date.now();
 
-    // 1. Price + name + currency (always fresh)
-    const q = await yahooQuote(ticker);
-    const price = q?.regularMarketPrice ?? null;
-    const name = q?.longName ?? q?.shortName ?? cached?.name ?? null;
-    const currency = q?.currency ?? cached?.currency ?? "USD";
+    // 0. Auth Yahoo (crumb + cookie)
+    const auth = await getYahooCrumb();
+
+    // 1. Price + name + currency: Yahoo primary, Finnhub fallback
+    const q = await yahooQuote(ticker, auth);
+    let price: number | null = q?.regularMarketPrice ?? null;
+    let name: string | null = q?.longName ?? q?.shortName ?? null;
+    let currency: string | null = q?.currency ?? null;
+
+    if (price == null || name == null || currency == null) {
+      const fh = await finnhubQuote(ticker);
+      if (price == null) price = fh.price;
+      if (name == null) name = fh.name;
+      if (currency == null) currency = fh.currency;
+    }
+    name = name ?? cached?.name ?? null;
+    currency = currency ?? cached?.currency ?? "USD";
 
     // 2. Beta — monthly refresh
     let beta: number | null = cached?.beta ?? null;
     let betaSource: string | null = cached?.beta_source ?? null;
     let betaUpdatedAt = cached?.beta_updated_at ? new Date(cached.beta_updated_at).getTime() : 0;
     if (!beta || now - betaUpdatedAt > MONTH_MS) {
-      const sum = await yahooSummary(ticker);
+      const sum = await yahooSummary(ticker, auth);
       const yBeta = sum?.defaultKeyStatistics?.beta?.raw ?? sum?.summaryDetail?.beta?.raw ?? null;
       if (typeof yBeta === "number" && isFinite(yBeta)) {
-        beta = yBeta; betaSource = "Yahoo Finance";
+        beta = yBeta; betaSource = "Yahoo Finance"; betaUpdatedAt = now;
       } else {
         const gf = await guruFocusBeta(ticker);
-        if (gf != null) { beta = gf; betaSource = "GuruFocus"; }
+        if (gf != null) { beta = gf; betaSource = "GuruFocus"; betaUpdatedAt = now; }
       }
-      betaUpdatedAt = now;
     }
 
     // 3. RV — daily refresh
     let rv: number | null = cached?.rv ?? null;
     let rvUpdatedAt = cached?.rv_updated_at ? new Date(cached.rv_updated_at).getTime() : 0;
     if (!rv || now - rvUpdatedAt > DAY_MS) {
-      const closes = await yahooChart1y(ticker);
+      const closes = await yahooChart1y(ticker, auth);
       if (closes) {
         const v = annualizedVol(closes);
         if (v != null) { rv = v; rvUpdatedAt = now; }
@@ -217,10 +263,10 @@ serve(async (req) => {
     // 4. Risk-free per currency
     let riskFree: number | null = null;
     const rfTk = RF_TICKER[currency] ?? "^TNX";
-    const rfQ = await yahooQuote(rfTk);
+    const rfQ = await yahooQuote(rfTk, auth);
     if (rfQ?.regularMarketPrice != null) riskFree = Number(rfQ.regularMarketPrice);
     if (riskFree == null && currency !== "USD") {
-      const us = await yahooQuote("^TNX");
+      const us = await yahooQuote("^TNX", auth);
       if (us?.regularMarketPrice != null) riskFree = Number(us.regularMarketPrice);
     }
 
