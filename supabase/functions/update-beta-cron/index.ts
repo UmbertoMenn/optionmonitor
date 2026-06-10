@@ -85,6 +85,22 @@ function annualizedVol(closes: number[]): number | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+async function guruFocusBeta(ticker: string): Promise<number | null> {
+  try {
+    const r = await fetch(`https://www.gurufocus.com/term/beta/${encodeURIComponent(ticker)}`, {
+      headers: { "User-Agent": UA },
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/Beta[^<>]{0,40}?(-?\d+\.\d+)/i);
+    if (m) {
+      const v = parseFloat(m[1]);
+      if (isFinite(v) && Math.abs(v) < 10) return v;
+    }
+    return null;
+  } catch { return null; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -130,12 +146,18 @@ serve(async (req) => {
         }
 
         const s = sum.data;
-        const beta: number | null =
+        let beta: number | null =
           (typeof s?.defaultKeyStatistics?.beta?.raw === "number" && isFinite(s.defaultKeyStatistics.beta.raw))
             ? s.defaultKeyStatistics.beta.raw
             : (typeof s?.summaryDetail?.beta?.raw === "number" && isFinite(s.summaryDetail.beta.raw))
               ? s.summaryDetail.beta.raw
               : null;
+        let betaSource: string = "Yahoo Finance";
+        // Fallback GuruFocus se Yahoo non ha Beta
+        if (beta == null) {
+          const gf = await guruFocusBeta(ticker);
+          if (gf != null) { beta = gf; betaSource = "GuruFocus"; }
+        }
         const name: string | null = s?.price?.longName ?? s?.price?.shortName ?? null;
         const currency: string | null = s?.price?.currency ?? null;
         const priceFromSummary: number | null =
@@ -158,7 +180,7 @@ serve(async (req) => {
         if (typeof rf.data?.regularMarketPrice === "number") riskFree = rf.data.regularMarketPrice;
 
         const update: Record<string, any> = { ticker, updated_at: now };
-        if (beta != null) { update.beta = beta; update.beta_source = "Yahoo Finance"; update.beta_updated_at = now; }
+        if (beta != null) { update.beta = beta; update.beta_source = betaSource; update.beta_updated_at = now; }
         if (rv != null)   { update.rv = rv; update.rv_updated_at = now; }
         if (name)         update.name = name;
         if (currency)     update.currency = currency;
