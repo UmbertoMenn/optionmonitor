@@ -467,6 +467,30 @@ export type Database = {
           },
         ]
       }
+      equity_risk_premiums: {
+        Row: {
+          country: string
+          currency: string | null
+          erp_pct: number
+          source: string | null
+          updated_at: string
+        }
+        Insert: {
+          country: string
+          currency?: string | null
+          erp_pct: number
+          source?: string | null
+          updated_at?: string
+        }
+        Update: {
+          country?: string
+          currency?: string | null
+          erp_pct?: number
+          source?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       etf_allocations: {
         Row: {
           country_allocations: Json
@@ -1182,6 +1206,48 @@ export type Database = {
           id?: string
           used_at?: string | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      ticker_fundamentals: {
+        Row: {
+          beta: number | null
+          beta_source: string | null
+          beta_updated_at: string | null
+          currency: string | null
+          name: string | null
+          price: number | null
+          risk_free: number | null
+          rv: number | null
+          rv_updated_at: string | null
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          beta?: number | null
+          beta_source?: string | null
+          beta_updated_at?: string | null
+          currency?: string | null
+          name?: string | null
+          price?: number | null
+          risk_free?: number | null
+          rv?: number | null
+          rv_updated_at?: string | null
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          beta?: number | null
+          beta_source?: string | null
+          beta_updated_at?: string | null
+          currency?: string | null
+          name?: string | null
+          price?: number | null
+          risk_free?: number | null
+          rv?: number | null
+          rv_updated_at?: string | null
+          ticker?: string
+          updated_at?: string
         }
         Relationships: []
       }

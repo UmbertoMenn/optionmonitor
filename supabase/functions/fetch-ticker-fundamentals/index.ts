@@ -1,0 +1,259 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+interface Result {
+  ticker: string;
+  name: string | null;
+  currency: string | null;
+  price: number | null;
+  beta: number | null;
+  betaSource: string | null;
+  rv: number | null;
+  riskFree: number | null;
+  erp: number | null;
+  erpCountry: string | null;
+  asof: string;
+}
+
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36";
+
+// Map currency -> 10y yield ticker on Yahoo
+const RF_TICKER: Record<string, string> = {
+  USD: "^TNX",
+  EUR: "IT10Y.B", // fallback to BTP 10y; if missing, we'll try ^TNX
+  GBP: "GB10Y.B",
+  CHF: "CH10YT=RR",
+  JPY: "JP10Y.B",
+  CAD: "CA10YT=RR",
+};
+
+// Map currency -> Damodaran country key (default)
+const CURRENCY_TO_COUNTRY: Record<string, string> = {
+  USD: "United States",
+  EUR: "Italy",
+  GBP: "United Kingdom",
+  CHF: "Switzerland",
+  JPY: "Japan",
+  CAD: "Canada",
+};
+
+async function yahooQuote(ticker: string) {
+  try {
+    const r = await fetch(
+      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}`,
+      { headers: { "User-Agent": UA } }
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.quoteResponse?.result?.[0] ?? null;
+  } catch { return null; }
+}
+
+async function yahooSummary(ticker: string) {
+  try {
+    const r = await fetch(
+      `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,summaryDetail,price`,
+      { headers: { "User-Agent": UA } }
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.quoteSummary?.result?.[0] ?? null;
+  } catch { return null; }
+}
+
+async function yahooChart1y(ticker: string): Promise<number[] | null> {
+  try {
+    const r = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`,
+      { headers: { "User-Agent": UA } }
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    const closes: (number | null)[] = j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    return closes.filter((x): x is number => typeof x === "number" && x > 0);
+  } catch { return null; }
+}
+
+function annualizedVol(closes: number[]): number | null {
+  if (closes.length < 30) return null;
+  const rets: number[] = [];
+  for (let i = 1; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length - 1);
+  return Math.sqrt(variance) * Math.sqrt(252) * 100;
+}
+
+async function guruFocusBeta(ticker: string): Promise<number | null> {
+  try {
+    const r = await fetch(`https://www.gurufocus.com/term/beta/${encodeURIComponent(ticker)}`, {
+      headers: { "User-Agent": UA },
+    });
+    if (!r.ok) return null;
+    const html = await r.text();
+    // Pattern: "Beta : 1.30" or similar
+    const m = html.match(/Beta[^<>]{0,40}?(-?\d+\.\d+)/i);
+    if (m) {
+      const v = parseFloat(m[1]);
+      if (isFinite(v) && Math.abs(v) < 10) return v;
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function fetchERPDamodaran(): Promise<Record<string, { erp: number; currency?: string }>> {
+  try {
+    const r = await fetch("https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/ctryprem.html", {
+      headers: { "User-Agent": UA },
+    });
+    if (!r.ok) return {};
+    const html = await r.text();
+    const out: Record<string, { erp: number }> = {};
+    // Rows like: <tr>...<td>United States</td>...<td>4.60%</td>...
+    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = rowRe.exec(html))) {
+      const cells = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((c) =>
+        c[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim()
+      );
+      if (cells.length < 3) continue;
+      const country = cells[0];
+      // ERP usually in column 3 or 4 - take last percentage cell
+      let erpStr: string | null = null;
+      for (let i = cells.length - 1; i >= 1; i--) {
+        const c = cells[i].replace(",", ".");
+        const mm = c.match(/^(-?\d+\.\d+)\s*%?$/);
+        if (mm) { erpStr = mm[1]; break; }
+      }
+      if (country && erpStr) {
+        const v = parseFloat(erpStr);
+        if (isFinite(v) && v > 0 && v < 50) out[country] = { erp: v };
+      }
+    }
+    return out;
+  } catch { return {}; }
+}
+
+async function getCachedFundamental(supabase: any, ticker: string) {
+  const { data } = await supabase.from("ticker_fundamentals").select("*").eq("ticker", ticker).maybeSingle();
+  return data;
+}
+
+async function upsertFundamental(supabase: any, row: any) {
+  await supabase.from("ticker_fundamentals").upsert(row, { onConflict: "ticker" });
+}
+
+async function getCachedERP(supabase: any, country: string) {
+  const { data } = await supabase.from("equity_risk_premiums").select("*").eq("country", country).maybeSingle();
+  return data;
+}
+
+async function upsertERPs(supabase: any, all: Record<string, { erp: number }>) {
+  const rows = Object.entries(all).map(([country, v]) => ({
+    country, erp_pct: v.erp, source: "Damodaran", updated_at: new Date().toISOString(),
+  }));
+  if (rows.length) await supabase.from("equity_risk_premiums").upsert(rows, { onConflict: "country" });
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MONTH_MS = 30 * DAY_MS;
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const { ticker: rawTicker } = await req.json();
+    const ticker = String(rawTicker || "").trim().toUpperCase();
+    if (!ticker) {
+      return new Response(JSON.stringify({ error: "Missing ticker" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+
+    const cached = await getCachedFundamental(supabase, ticker);
+    const now = Date.now();
+
+    // 1. Price + name + currency (always fresh)
+    const q = await yahooQuote(ticker);
+    const price = q?.regularMarketPrice ?? null;
+    const name = q?.longName ?? q?.shortName ?? cached?.name ?? null;
+    const currency = q?.currency ?? cached?.currency ?? "USD";
+
+    // 2. Beta — monthly refresh
+    let beta: number | null = cached?.beta ?? null;
+    let betaSource: string | null = cached?.beta_source ?? null;
+    let betaUpdatedAt = cached?.beta_updated_at ? new Date(cached.beta_updated_at).getTime() : 0;
+    if (!beta || now - betaUpdatedAt > MONTH_MS) {
+      const sum = await yahooSummary(ticker);
+      const yBeta = sum?.defaultKeyStatistics?.beta?.raw ?? sum?.summaryDetail?.beta?.raw ?? null;
+      if (typeof yBeta === "number" && isFinite(yBeta)) {
+        beta = yBeta; betaSource = "Yahoo Finance";
+      } else {
+        const gf = await guruFocusBeta(ticker);
+        if (gf != null) { beta = gf; betaSource = "GuruFocus"; }
+      }
+      betaUpdatedAt = now;
+    }
+
+    // 3. RV — daily refresh
+    let rv: number | null = cached?.rv ?? null;
+    let rvUpdatedAt = cached?.rv_updated_at ? new Date(cached.rv_updated_at).getTime() : 0;
+    if (!rv || now - rvUpdatedAt > DAY_MS) {
+      const closes = await yahooChart1y(ticker);
+      if (closes) {
+        const v = annualizedVol(closes);
+        if (v != null) { rv = v; rvUpdatedAt = now; }
+      }
+    }
+
+    // 4. Risk-free per currency
+    let riskFree: number | null = null;
+    const rfTk = RF_TICKER[currency] ?? "^TNX";
+    const rfQ = await yahooQuote(rfTk);
+    if (rfQ?.regularMarketPrice != null) riskFree = Number(rfQ.regularMarketPrice);
+    if (riskFree == null && currency !== "USD") {
+      const us = await yahooQuote("^TNX");
+      if (us?.regularMarketPrice != null) riskFree = Number(us.regularMarketPrice);
+    }
+
+    // 5. ERP from cache, refresh daily if stale
+    const country = CURRENCY_TO_COUNTRY[currency] ?? "United States";
+    let erpRow = await getCachedERP(supabase, country);
+    if (!erpRow || now - new Date(erpRow.updated_at).getTime() > DAY_MS) {
+      const all = await fetchERPDamodaran();
+      if (Object.keys(all).length) {
+        await upsertERPs(supabase, all);
+        erpRow = await getCachedERP(supabase, country);
+      }
+    }
+    const erp = erpRow?.erp_pct != null ? Number(erpRow.erp_pct) : null;
+
+    // Cache
+    await upsertFundamental(supabase, {
+      ticker, name, currency, beta, beta_source: betaSource, rv, risk_free: riskFree, price,
+      beta_updated_at: new Date(betaUpdatedAt || now).toISOString(),
+      rv_updated_at: new Date(rvUpdatedAt || now).toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    const result: Result = {
+      ticker, name, currency, price, beta, betaSource, rv, riskFree, erp,
+      erpCountry: country, asof: new Date().toISOString().slice(0, 10),
+    };
+    return new Response(JSON.stringify(result), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: String(e?.message || e) }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

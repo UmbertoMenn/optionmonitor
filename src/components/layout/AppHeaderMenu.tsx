@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut } from 'lucide-react';
+import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
 
@@ -64,6 +64,10 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
           <DropdownMenuItem onClick={() => navigate('/risk-simulator')}>
             <ShieldAlert className="w-4 h-4 mr-2" />
             Risk Simulator
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => navigate('/option-analyzer')}>
+            <LineChart className="w-4 h-4 mr-2" />
+            Option Analyzer
           </DropdownMenuItem>
           {isAdmin && (
             <DropdownMenuItem onClick={() => navigate('/admin')}>
