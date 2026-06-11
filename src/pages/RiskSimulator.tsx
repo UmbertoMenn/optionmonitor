@@ -11,7 +11,7 @@ export function RiskSimulator() {
             <div className="p-2 rounded-lg bg-primary/10">
               <Activity className="w-6 h-6 text-primary" />
             </div>
-            <h1 className="text-lg font-bold">Risk Simulator</h1>
+            <h1 className="text-lg font-bold">Risk / Margin Simulator</h1>
           </div>
           <AppHeaderMenu />
         </div>

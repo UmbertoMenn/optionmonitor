@@ -63,7 +63,7 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/risk-simulator')}>
             <ShieldAlert className="w-4 h-4 mr-2" />
-            Risk Simulator
+            Risk / Margin Simulator
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/option-analyzer')}>
             <LineChart className="w-4 h-4 mr-2" />
