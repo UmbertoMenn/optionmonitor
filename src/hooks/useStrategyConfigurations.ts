@@ -149,6 +149,11 @@ export function useStrategyConfigurations() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategy-configurations', portfolioId] });
       toast.success('Configurazione strategie salvata');
+      if (portfolioId) {
+        recomputeLatestSnapshot(portfolioId).then(() => {
+          queryClient.invalidateQueries({ queryKey: ['historical-data'] });
+        });
+      }
     },
     onError: (error) => {
       console.error('Failed to batch save strategy configurations:', error);
