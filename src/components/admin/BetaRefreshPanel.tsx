@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -98,9 +99,37 @@ export function BetaRefreshPanel() {
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
+
   const { data: rows, isLoading } = useQuery({ queryKey: ['admin-beta-refresh'], queryFn: loadRows });
 
   const missing = useMemo(() => (rows || []).filter((r) => r.beta == null), [rows]);
+
+  // Opzioni filtro: estraggo tutte le sorgenti uniche dai dati
+  const sourceOptions = useMemo(() => {
+    const set = new Set<string>();
+    (rows || []).forEach((r) => {
+      if (r.beta_manual) set.add('__manual__');
+      else if (r.beta_source) {
+        // Split su "+" per avere fonti singole (es. "Yahoo+GuruFocus" -> Yahoo, GuruFocus)
+        r.beta_source.split('+').forEach((s) => set.add(s.trim()));
+      } else if (r.beta == null) set.add('__none__');
+    });
+    return Array.from(set).sort();
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    if (sourceFilter === 'all') return rows || [];
+    if (sourceFilter === '__manual__') return (rows || []).filter((r) => r.beta_manual);
+    if (sourceFilter === '__none__') return (rows || []).filter((r) => r.beta == null && !r.beta_manual);
+    if (sourceFilter === '__auto_only__') return (rows || []).filter((r) => !r.beta_manual && r.beta != null);
+    // Filtro per sorgente singola (anche dentro media multipla)
+    return (rows || []).filter((r) => {
+      if (r.beta_manual) return false;
+      if (!r.beta_source) return false;
+      return r.beta_source.split('+').map((s) => s.trim()).includes(sourceFilter);
+    });
+  }, [rows, sourceFilter]);
 
   const refetchOne = async (ticker: string) => {
     setBusy(ticker);
@@ -112,7 +141,7 @@ export function BetaRefreshPanel() {
       if (data?.beta != null) {
         toast.success(`${ticker}: β = ${Number(data.beta).toFixed(3)} (${data.betaSource})`);
       } else {
-        toast.warning(`${ticker}: beta non disponibile su Yahoo, GuruFocus, TradingView`);
+        toast.warning(`${ticker}: beta non disponibile su Yahoo, GuruFocus, TradingView, Investing`);
       }
       qc.invalidateQueries({ queryKey: ['admin-beta-refresh'] });
     } catch (e: any) {
@@ -209,9 +238,33 @@ export function BetaRefreshPanel() {
       </CardHeader>
       <CardContent>
         <p className="text-xs text-muted-foreground mb-3">
-          Fonti automatiche: Yahoo Finance, GuruFocus, TradingView (media semplice tra quelle disponibili).
+          Fonti automatiche: Yahoo Finance, GuruFocus, TradingView, Investing (media semplice tra quelle disponibili).
           I valori manuali hanno priorità e non vengono mai sovrascritti dal cron.
         </p>
+        <div className="flex items-center gap-3 mb-3">
+          <Label className="text-xs text-muted-foreground">Filtra per fonte:</Label>
+          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+            <SelectTrigger className="w-[260px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tutte ({rows?.length ?? 0})</SelectItem>
+              <SelectItem value="__manual__">🔒 Solo manuali</SelectItem>
+              <SelectItem value="__auto_only__">Solo automatici (no manuali)</SelectItem>
+              <SelectItem value="__none__">Senza beta</SelectItem>
+              {sourceOptions
+                .filter((s) => s !== '__manual__' && s !== '__none__')
+                .map((s) => (
+                  <SelectItem key={s} value={s}>
+                    Contiene: {s}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-muted-foreground">
+            {filteredRows.length} risultati
+          </span>
+        </div>
         {isLoading ? (
           <div className="text-center py-8 text-muted-foreground">Caricamento...</div>
         ) : (
@@ -229,7 +282,7 @@ export function BetaRefreshPanel() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(rows || []).map((r) => (
+                {filteredRows.map((r) => (
                   <TableRow key={r.ticker} className={r.beta == null ? 'bg-destructive/5' : ''}>
                     <TableCell className="font-mono font-semibold">{r.ticker}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{r.name ?? '-'}</TableCell>
@@ -253,7 +306,7 @@ export function BetaRefreshPanel() {
                           variant="outline"
                           onClick={() => refetchOne(r.ticker)}
                           disabled={busy === r.ticker || r.beta_manual}
-                          title={r.beta_manual ? 'Beta manuale: rimuovi il lock per refetchare' : 'Refetch da Yahoo/GuruFocus/TradingView'}
+                          title={r.beta_manual ? 'Beta manuale: rimuovi il lock per refetchare' : 'Refetch da Yahoo/GuruFocus/TradingView/Investing'}
                         >
                           {busy === r.ticker ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
