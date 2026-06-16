@@ -139,12 +139,18 @@ serve(async (req) => {
     // SINGLE SOURCE OF TRUTH: underlying_prices contiene tutti i ticker noti dell'app.
     // Quando viene aggiunto un nuovo ticker (Option Analyzer, derivatives, ecc.) finisce qui,
     // quindi il cron lo aggiornerà automaticamente al successivo run.
-    const { data: rows, error } = await supabase
-      .from("underlying_prices")
-      .select("ticker");
-    if (error) throw error;
-
-    const tickers = Array.from(new Set((rows ?? []).map((r: any) => String(r.ticker || "").trim().toUpperCase()).filter(Boolean))).sort();
+    // SINGLE SOURCE OF TRUTH: underlying_prices contiene tutti i ticker noti dell'app.
+    // Inoltre, carichiamo i flag beta_manual per saltare i ticker con beta inserito manualmente.
+    const [pricesRes, fundsRes] = await Promise.all([
+      supabase.from("underlying_prices").select("ticker"),
+      supabase.from("ticker_fundamentals").select("ticker, beta_manual"),
+    ]);
+    if (pricesRes.error) throw pricesRes.error;
+    const manualSet = new Set<string>(
+      (fundsRes.data || [])
+        .filter((r: any) => r.beta_manual)
+        .map((r: any) => String(r.ticker || "").toUpperCase()),
+    );
 
     const auth = await getYahooCrumb();
     if (!auth) {
