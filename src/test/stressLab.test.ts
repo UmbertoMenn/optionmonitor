@@ -227,4 +227,92 @@ describe('stressLab — occMargin', () => {
     // call coperta → margine 0
     expect(m.total).toBe(0);
   });
+
+  it('CASO 1: collar (titoli + call corta coperta + put lunga) → margine 0', () => {
+    const collar: StressLeg[] = [
+      { u: 'XYZ', cp: 'C', K: 110, T: 0.25, exp: '2026-09-18', q: -1, px: 2, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'P', K: 90, T: 0.25, exp: '2026-09-18', q: 1, px: 2, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const eqCov: StressEquity[] = [
+      { nm: 'XYZ', ccy: 'USD', px: 100, q: 100, eur: 8620, beta: 1, tick: 'XYZ' },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(collar, eqCov, unders, 0, sig, 0, marPrm);
+    expect(m.nCov).toBe(1);
+    expect(m.total).toBe(0);
+  });
+
+  it('CASO 1b: titoli + call corta COPERTA + call lunga orfana → margine 0 (no addebito sulla long)', () => {
+    // Questo era il BUG: la call lunga residua veniva addebitata dallo scan.
+    const legsBug: StressLeg[] = [
+      { u: 'XYZ', cp: 'C', K: 105, T: 0.25, exp: '2026-09-18', q: -1, px: 3, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'C', K: 130, T: 1.0, exp: '2027-06-18', q: 1, px: 5, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const eqCov: StressEquity[] = [
+      { nm: 'XYZ', ccy: 'USD', px: 100, q: 100, eur: 8620, beta: 1, tick: 'XYZ' },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(legsBug, eqCov, unders, 0, sig, 0, marPrm);
+    expect(m.nCov).toBe(1);
+    expect(m.total).toBe(0); // la call lunga NON deve generare margine
+  });
+
+  it('CASO 2: put comprata + put venduta (vertical) → scan TIMS attivo', () => {
+    const putSpread: StressLeg[] = [
+      { u: 'XYZ', cp: 'P', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 5, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'P', K: 90, T: 0.25, exp: '2026-09-18', q: 1, px: 2, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(putSpread, [], unders, 0, sig, 0, marPrm);
+    expect(m.total).toBeGreaterThan(0);
+    // C'è uno spread vero → lo scan contribuisce (totScan tracciato)
+    const bdXYZ = m.bd.find((b) => b.u === 'XYZ');
+    expect(bdXYZ).toBeDefined();
+  });
+
+  it('CASO 3: call venduta + call comprata SENZA titoli → scan TIMS attivo', () => {
+    const callSpread: StressLeg[] = [
+      { u: 'XYZ', cp: 'C', K: 100, T: 0.25, exp: '2026-09-18', q: -1, px: 6, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+      { u: 'XYZ', cp: 'C', K: 115, T: 0.25, exp: '2026-09-18', q: 1, px: 2, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4, 1: 0.4 };
+    const m = occMargin(callSpread, [], unders, 0, sig, 0, marPrm);
+    expect(m.total).toBeGreaterThan(0);
+  });
+
+  it('long option singola → margine 0 (mai addebitata)', () => {
+    const lone: StressLeg[] = [
+      { u: 'XYZ', cp: 'C', K: 100, T: 0.5, exp: '2026-12-18', q: 1, px: 8, fl: false, mult: 100, nm: 'XYZ', iv: 0.4 },
+    ];
+    const sig: Record<number, number> = { 0: 0.4 };
+    const m = occMargin(lone, [], unders, 0, sig, 0, marPrm);
+    expect(m.total).toBe(0);
+  });
+});
+
+describe('stressLab — pricing a intrinseco (gambe fl)', () => {
+  const unders: StressUnderlyingMap = { DEEP: { S: 650, beta: 1 } };
+
+  it('gamba call deep-ITM flaggata: P&L = variazione di intrinseco (delta 1)', () => {
+    // Call K=400, S=650, prezzo di riferimento 245 (sotto intrinseco 250) → fl=true
+    const legs: StressLeg[] = [
+      { u: 'DEEP', cp: 'C', K: 400, T: 0.02, exp: '2026-06-30', q: 1, px: 245, fl: true, mult: 100, nm: 'DEEP', iv: 0.45 },
+    ];
+    const effIV = effIVMap(legs);
+    // Shock -10% → S passa da 650 a 585; intrinseco da 250 a 185 → ΔP = -65
+    const res = runScenario(legs, [], unders, effIV, -10, 0, baseParams);
+    const expectedPnlUSD = 1 * 100 * (Math.max(0, 585 - 400) - Math.max(0, 650 - 400));
+    const expectedEUR = expectedPnlUSD / FX.USD;
+    expect(res.optEUR).toBeCloseTo(expectedEUR, 0);
+    expect(res.rows[0].atIntrinsic).toBe(true);
+  });
+
+  it('gamba fl: a shock 0 il P&L è esattamente 0', () => {
+    const legs: StressLeg[] = [
+      { u: 'DEEP', cp: 'C', K: 400, T: 0.02, exp: '2026-06-30', q: 1, px: 245, fl: true, mult: 100, nm: 'DEEP', iv: 0.45 },
+    ];
+    const effIV = effIVMap(legs);
+    const res = runScenario(legs, [], unders, effIV, 0, 0, baseParams);
+    expect(res.optEUR).toBe(0);
+  });
 });

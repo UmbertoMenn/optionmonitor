@@ -118,6 +118,8 @@ export interface LegResult {
   T: number;
   /** True se questa gamba è stata trattata "a intrinseco" (netting attivo, short) */
   netted: boolean;
+  /** True se la gamba è valutata a intrinseco puro (fl=prezzo sotto intrinseco, oppure netting) */
+  atIntrinsic: boolean;
 }
 
 export interface EquityResult {
@@ -297,7 +299,7 @@ export function runScenario(
     if (!und) {
       // Underlying mancante: salta la gamba ma logga 0 per non rompere la UI
       rows.push({
-        i, pnlEUR: 0, sig0: 0, sig1: 0, p0: l.px, p1: l.px, dIV: 0, T: l.T, netted: false,
+        i, pnlEUR: 0, sig0: 0, sig1: 0, p0: l.px, p1: l.px, dIV: 0, T: l.T, netted: false, atIntrinsic: false,
       });
       continue;
     }
@@ -342,8 +344,13 @@ export function runScenario(
 
     let p0eff = base.p;
     let p1eff = str.p;
-    if (isNetted) {
-      // Modalità netting: solo intrinseco, no time value né vega
+    // Gambe a intrinseco puro (delta 1):
+    //  - l.fl  → prezzo di riferimento (mid/bid) sotto l'intrinseco: si quota ESATTAMENTE
+    //            all'intrinseco, sia long sia short, senza alcuna guardia. L'opzione si
+    //            muove uno-a-uno con il sottostante (kink allo strike), niente vega/gamma fittizia.
+    //  - isNetted → modalità "hold to expiry" per le gambe corte (Ex CC e NP).
+    const atIntrinsic = l.fl || isNetted;
+    if (atIntrinsic) {
       const S1 = S0 * Math.max(0.02, 1 + (beta * d) / 100);
       p0eff = isCall ? Math.max(0, S0 - l.K) : Math.max(0, l.K - S0);
       p1eff = isCall ? Math.max(0, S1 - l.K) : Math.max(0, l.K - S1);
@@ -363,6 +370,7 @@ export function runScenario(
       dIV: (str.sig - base.sig) * 100,
       T: l.T,
       netted: isNetted,
+      atIntrinsic,
     });
   }
 
@@ -566,11 +574,6 @@ export function occMargin(
       for (let t = 0; t < n; t++) dst[cp].push({ ...lg });
     });
 
-    const hadShort = {
-      C: idxs.some((i) => legs[i].q < 0 && legs[i].cp === 'C'),
-      P: idxs.some((i) => legs[i].q < 0 && legs[i].cp === 'P'),
-    };
-
     // Priorità titoli: call corte più ITM coperte → margine 0
     if (!isFX && (cap[u] || 0) > 0) {
       Sx.C.sort((a, b) => a.K - b.K);
@@ -642,6 +645,9 @@ export function occMargin(
         units.push({ q: 1, K: x.K, px: x.scanPx, T: x.T, iv: x.iv, isC: cp === 'C' }),
       );
       if (!units.length) return 0;
+      // Guardia: lo scan misura il rischio di uno spread (short + long). Un insieme di
+      // sole gambe LONG è un asset già pagato e non genera margine: ritorna 0.
+      if (!units.some((u) => u.q < 0)) return 0;
       let worst = 0;
       for (let kk = 0; kk <= 10; kk++) {
         const mv = -R + (2 * R * kk) / 10;
@@ -673,7 +679,12 @@ export function occMargin(
     let stratU = 0;
     (['C', 'P'] as OptType[]).forEach((cp) => {
       const st = stratSide(cp);
-      const doScan = (hadShort[cp] && Lx[cp].length > 0) || (isFX && hadShort[cp]);
+      // Lo scan TIMS si applica SOLO ai veri spread: deve esistere una short RESIDUA
+      // (dopo la copertura con i titoli) E almeno una long sullo stesso lato.
+      // Usare hadShort (pre-copertura) era errato: una call corta coperta dai titoli
+      // lasciava una long orfana che lo scan addebitava come se fosse a rischio.
+      const hasResidualShort = Sx[cp].length > 0;
+      const doScan = (hasResidualShort && Lx[cp].length > 0) || (isFX && hasResidualShort);
       const sc = doScan ? scanSide(cp) : 0;
       stratU += st;
       mar += Math.max(st, sc);

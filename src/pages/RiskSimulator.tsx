@@ -671,7 +671,8 @@ function StressLabContent() {
             color: C.cyan,
           }}
         >
-          ⚑ {data.ivWarnings} gambe deep-ITM quotate sotto l'intrinseco: IV sostituita con la mediana del sottostante.
+          ⚑ {data.ivWarnings} gambe con prezzo di riferimento sotto l'intrinseco: quotate a intrinseco
+          (delta 1), si muovono uno-a-uno con il sottostante.
         </div>
       )}
 
@@ -1684,17 +1685,24 @@ function StressLabContent() {
                     <td style={{ color: C.text, fontWeight: 700 }}>
                       {l.u}
                       {l.fl ? (
-                        <span style={{ color: C.amber }} title="prezzo sotto intrinseco: IV sostituita">
+                        <span
+                          style={{ color: C.amber }}
+                          title="prezzo di riferimento sotto l'intrinseco: gamba quotata a intrinseco (delta 1)"
+                        >
                           {' '}
                           ⚑
                         </span>
                       ) : (
                         ''
                       )}
-                      {rr.netted ? (
+                      {rr.atIntrinsic ? (
                         <span
                           style={{ color: C.amber, fontSize: 9, fontWeight: 800 }}
-                          title="gamba corta valutata a intrinseco"
+                          title={
+                            rr.netted
+                              ? 'gamba corta valutata a intrinseco (Netting Ex CC e NP)'
+                              : 'gamba valutata a intrinseco (prezzo sotto intrinseco)'
+                          }
                         >
                           {' '}
                           INT
@@ -1720,13 +1728,13 @@ function StressLabContent() {
                       {l.q}
                     </td>
                     <td style={{ textAlign: 'right', color: C.mut }}>
-                      {rr.netted ? '—' : fmtN(rr.sig0 * 100, 1)}
+                      {rr.atIntrinsic ? '—' : fmtN(rr.sig0 * 100, 1)}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      {rr.netted ? '—' : fmtN(rr.sig1 * 100, 1)}
+                      {rr.atIntrinsic ? '—' : fmtN(rr.sig1 * 100, 1)}
                     </td>
                     <td style={{ textAlign: 'right', color: rr.dIV >= 0 ? C.dn : C.up }}>
-                      {rr.netted ? '—' : sgn(rr.dIV, 1)}
+                      {rr.atIntrinsic ? '—' : sgn(rr.dIV, 1)}
                     </td>
                     <td style={{ textAlign: 'right', color: C.mut }}>{fmtN(rr.p0, 2)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtN(rr.p1, 2)}</td>
