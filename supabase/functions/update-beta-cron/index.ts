@@ -101,6 +101,33 @@ async function guruFocusBeta(ticker: string): Promise<number | null> {
   } catch { return null; }
 }
 
+async function tradingViewBeta(ticker: string): Promise<number | null> {
+  try {
+    const sr = await fetch(
+      `https://symbol-search.tradingview.com/symbol_search/?text=${encodeURIComponent(ticker)}&type=stock`,
+      { headers: { "User-Agent": UA, "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/" } },
+    );
+    if (!sr.ok) return null;
+    const arr = await sr.json();
+    const match = Array.isArray(arr)
+      ? arr.find((x: any) => String(x?.symbol || "").toUpperCase() === ticker.toUpperCase()) || arr[0]
+      : null;
+    const prefix = match?.exchange || match?.prefix;
+    if (!prefix) return null;
+    const full = `${prefix}:${ticker.toUpperCase()}`;
+    const sc = await fetch("https://scanner.tradingview.com/global/scan", {
+      method: "POST",
+      headers: { "User-Agent": UA, "Content-Type": "application/json", "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/" },
+      body: JSON.stringify({ symbols: { tickers: [full] }, columns: ["beta_1_year"] }),
+    });
+    if (!sc.ok) return null;
+    const j = await sc.json();
+    const v = j?.data?.[0]?.d?.[0];
+    if (typeof v === "number" && isFinite(v) && Math.abs(v) < 10) return v;
+    return null;
+  } catch { return null; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
