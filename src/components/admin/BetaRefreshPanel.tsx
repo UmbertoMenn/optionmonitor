@@ -263,10 +263,23 @@ export function BetaRefreshPanel() {
             <Badge variant="destructive">{missing.length} senza beta</Badge>
           )}
         </div>
-        <Button onClick={refetchAll} disabled={batchBusy} size="sm">
-          {batchBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-          Refetch tutti
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={refetchMissing}
+            disabled={missingBusy || batchBusy || missing.length === 0}
+            size="sm"
+            variant="outline"
+          >
+            {missingBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            {missingProgress
+              ? `Senza beta ${missingProgress.done}/${missingProgress.total}`
+              : `Fetch solo senza beta (${missing.length})`}
+          </Button>
+          <Button onClick={refetchAll} disabled={batchBusy || missingBusy} size="sm">
+            {batchBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+            Refetch tutti
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         <p className="text-xs text-muted-foreground mb-3">
