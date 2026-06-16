@@ -1,0 +1,230 @@
+import { describe, it, expect } from 'vitest';
+import {
+  bsPrice,
+  normCdf,
+  coupledDV1M,
+  termFactor,
+  T0M,
+  impliedVolFromPrice,
+  runScenario,
+  occMargin,
+  effIVMap,
+  nettingPatrimonialDelta,
+  StressLeg,
+  StressEquity,
+  StressUnderlyingMap,
+  ScenarioParams,
+  MarginParams,
+} from '@/lib/stressLab';
+
+const FX = { USD: 1.16, HKD: 9.04 };
+const R = 0.04;
+
+const surf = { skewB: -0.018, kappa: 0.6, pExp: 0.5 };
+const baseParams: ScenarioParams = {
+  ...surf,
+  r: R,
+  days: 0,
+  fx: FX,
+  netting: false,
+};
+
+describe('stressLab — basics', () => {
+  it('normCdf(0) ≈ 0.5', () => {
+    expect(normCdf(0)).toBeCloseTo(0.5, 4);
+  });
+
+  it('normCdf is monotonic and bounded', () => {
+    expect(normCdf(-5)).toBeLessThan(0.001);
+    expect(normCdf(5)).toBeGreaterThan(0.999);
+  });
+
+  it('bsPrice is positive for OTM call', () => {
+    const p = bsPrice(100, 110, 0.5, 0.3, true, R);
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThan(110);
+  });
+
+  it('bsPrice respects intrinsic at T=0', () => {
+    // Call ITM at T=0 → S-K
+    expect(bsPrice(110, 100, 0, 0.3, true, R)).toBeCloseTo(10, 4);
+    // Put OTM at T=0 → 0
+    expect(bsPrice(110, 100, 0, 0.3, false, R)).toBeCloseTo(0, 4);
+  });
+
+  it('coupledDV1M: ribasso genera vol positiva crescente', () => {
+    expect(coupledDV1M(-10)).toBeGreaterThan(0);
+    expect(coupledDV1M(-30)).toBeGreaterThan(coupledDV1M(-10));
+  });
+
+  it('coupledDV1M: rialzo comprime la vol', () => {
+    expect(coupledDV1M(10)).toBeLessThan(0);
+  });
+
+  it('termFactor decresce con T', () => {
+    expect(termFactor(T0M, 0.5)).toBeCloseTo(1.0, 2);
+    expect(termFactor(1, 0.5)).toBeLessThan(1);
+    expect(termFactor(2, 0.5)).toBeLessThan(termFactor(1, 0.5));
+  });
+});
+
+describe('stressLab — implied vol round-trip', () => {
+  it('IV implicita ricostruisce il prezzo originale', () => {
+    const S = 100,
+      K = 105,
+      T = 0.25;
+    const sigTrue = 0.32;
+    const F = S * Math.exp(R * T);
+    const priceCall = bsPrice(F, K, T, sigTrue, true, R);
+    const ivRecovered = impliedVolFromPrice(priceCall, S, K, T, R, true);
+    expect(ivRecovered).toBeCloseTo(sigTrue, 2);
+  });
+
+  it('IV ritorna NaN se sotto intrinseco', () => {
+    const iv = impliedVolFromPrice(0.5, 100, 70, 0.25, R, true); // call deep-ITM a prezzo sotto intrinseco
+    expect(Number.isNaN(iv)).toBe(true);
+  });
+});
+
+describe('stressLab — runScenario shock=0', () => {
+  const legs: StressLeg[] = [
+    {
+      u: 'AAPL',
+      cp: 'C',
+      K: 200,
+      T: 0.5,
+      exp: '2026-12-18',
+      q: -1,
+      px: 10,
+      fl: false,
+      mult: 100,
+      nm: 'Apple',
+      iv: 0.3,
+    },
+    {
+      u: 'AAPL',
+      cp: 'P',
+      K: 180,
+      T: 0.5,
+      exp: '2026-12-18',
+      q: 1,
+      px: 5,
+      fl: false,
+      mult: 100,
+      nm: 'Apple',
+      iv: 0.32,
+    },
+  ];
+  const eq: StressEquity[] = [
+    { nm: 'Apple', ccy: 'USD', px: 200, q: 100, eur: 17241, beta: 1.1, tick: 'AAPL' },
+  ];
+  const unders: StressUnderlyingMap = { AAPL: { S: 200, beta: 1.1 } };
+  const effIV = effIVMap(legs);
+
+  it('shock 0 + vol 0 + days 0 → P&L = 0 (entro tolleranza)', () => {
+    const res = runScenario(legs, eq, unders, effIV, 0, 0, baseParams);
+    expect(Math.abs(res.totEUR)).toBeLessThan(1); // < 1 EUR di rumore numerico
+  });
+
+  it('shock -10% → P&L equity < 0', () => {
+    const res = runScenario(legs, eq, unders, effIV, -10, 0, baseParams);
+    expect(res.eqEUR).toBeLessThan(0);
+  });
+
+  it('shock +10% → P&L equity > 0', () => {
+    const res = runScenario(legs, eq, unders, effIV, 10, 0, baseParams);
+    expect(res.eqEUR).toBeGreaterThan(0);
+  });
+});
+
+describe('stressLab — netting', () => {
+  const legs: StressLeg[] = [
+    {
+      u: 'TEST',
+      cp: 'P',
+      K: 100,
+      T: 0.25,
+      exp: '2026-09-18',
+      q: -1, // short
+      px: 5,
+      fl: false,
+      mult: 100,
+      nm: 'Test',
+      iv: 0.4,
+    },
+  ];
+  const unders: StressUnderlyingMap = { TEST: { S: 100, beta: 1 } };
+
+  it('netting delta è positivo per una put corta OTM (rimuove time value)', () => {
+    // px=5, intrinseco=0 (S=K=100, OTM) → time value = -5 per la posizione corta
+    // togliendolo, il patrimonio sale di 5*100/fx = 5*100/1.16 ≈ 431
+    const d = nettingPatrimonialDelta(legs, unders, FX.USD);
+    expect(d).toBeCloseTo((1 * 100 * 5) / FX.USD, 0);
+  });
+});
+
+describe('stressLab — occMargin', () => {
+  const legs: StressLeg[] = [
+    {
+      u: 'XYZ',
+      cp: 'P',
+      K: 100,
+      T: 0.25,
+      exp: '2026-09-18',
+      q: -1, // naked short put
+      px: 5,
+      fl: false,
+      mult: 100,
+      nm: 'XYZ',
+      iv: 0.4,
+    },
+  ];
+  const eq: StressEquity[] = [];
+  const unders: StressUnderlyingMap = { XYZ: { S: 100, beta: 1 } };
+  const sig: Record<number, number> = { 0: 0.4 };
+  const marPrm: MarginParams = {
+    ...surf,
+    r: R,
+    fxUSD: FX.USD,
+    kScan: 0.7,
+    fxRange: 0.03,
+  };
+
+  it('short naked put: margine > 0', () => {
+    const m = occMargin(legs, eq, unders, 0, sig, 0, marPrm);
+    expect(m.total).toBeGreaterThan(0);
+  });
+
+  it('short naked put: margine ≈ premio + 20% (con ATM, OTM=0)', () => {
+    // px=5, S=100, K=100 → 5*100 + max(20*100 - 0, 10*100) = 500 + 2000 = 2500 USD = 2155 EUR
+    const m = occMargin(legs, eq, unders, 0, sig, 0, marPrm);
+    expect(m.total).toBeGreaterThan(2000);
+    expect(m.total).toBeLessThan(2300);
+  });
+
+  it('covered call (azioni in portafoglio): nCov > 0', () => {
+    const legsCC: StressLeg[] = [
+      {
+        u: 'XYZ',
+        cp: 'C',
+        K: 110,
+        T: 0.25,
+        exp: '2026-09-18',
+        q: -1, // short call
+        px: 2,
+        fl: false,
+        mult: 100,
+        nm: 'XYZ',
+        iv: 0.4,
+      },
+    ];
+    const eqCov: StressEquity[] = [
+      { nm: 'XYZ', ccy: 'USD', px: 100, q: 100, eur: 8620, beta: 1, tick: 'XYZ' },
+    ];
+    const sigCC: Record<number, number> = { 0: 0.4 };
+    const m = occMargin(legsCC, eqCov, unders, 0, sigCC, 0, marPrm);
+    expect(m.nCov).toBe(1);
+    // call coperta → margine 0
+    expect(m.total).toBe(0);
+  });
+});
