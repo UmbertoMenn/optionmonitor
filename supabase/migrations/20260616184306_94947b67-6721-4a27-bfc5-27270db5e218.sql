@@ -1,0 +1,2 @@
+DELETE FROM public.ticker_fundamentals WHERE ticker IN ('RAMBUS') OR ticker !~ '^[A-Z0-9.\-^=]{1,12}$';
+DELETE FROM public.underlying_prices WHERE ticker IN ('RAMBUS') OR ticker !~ '^[A-Z0-9.\-^=]{1,12}$';
