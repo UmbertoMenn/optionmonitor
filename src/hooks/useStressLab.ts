@@ -6,12 +6,13 @@
  * React Query: i fetch non si ripetono ad ogni movimento di slider.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useGPHoldings } from '@/hooks/useGPHoldings';
+import { normalizeUnderlying } from '@/hooks/useUnderlyingMappings';
 import { Position } from '@/types/portfolio';
 import {
   StressLeg,
@@ -23,6 +24,9 @@ import {
   impliedVolFromPrice,
   effIVMap,
 } from '@/lib/stressLab';
+
+// Ticker pulito (es. AAPL, GOOGL, ENI.MI, ^TNX) — no spazi/virgole/parentesi
+const VALID_TICKER_RE = /^[A-Z0-9.\-^=]{1,12}$/;
 
 /* ===========================================================================
  * COSTANTI / DEFAULT
@@ -100,8 +104,14 @@ function normTick(t?: string | null): string {
   return (t || '').toUpperCase().trim();
 }
 
-/** Estrae il ticker da una posizione opzione: priorità all'underlying, fallback su ticker */
-function getOptionUnderlyingKey(p: Position): string {
+/**
+ * Estrae il ticker da una posizione opzione. NB: spesso `p.underlying` è il
+ * nome grezzo del sottostante (es. "APPLE COMPUTER, INC.") e va risolto a
+ * ticker pulito tramite `underlying_mappings`. Questa è la versione "raw"
+ * che fa solo trim; per la risoluzione vera si veda `makeUnderlyingResolver`
+ * dentro `useStressLab`.
+ */
+function getRawOptionUnderlyingKey(p: Position): string {
   const u = normTick(p.underlying);
   if (u) return u;
   return normTick(p.ticker);
@@ -171,20 +181,72 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     return { USD: usdRate, HKD: hkdRate };
   }, [stocks, etfs, commodities, bonds, derivatives]);
 
+  /* ---------- 3a. Risoluzione underlying→ticker (riuso underlying_mappings) ---------- */
+
+  const mappingsQuery = useQuery({
+    queryKey: ['stress-lab-underlying-mappings'],
+    queryFn: async () => {
+      const [m, up] = await Promise.all([
+        supabase.from('underlying_mappings').select('underlying, ticker'),
+        supabase.from('underlying_prices').select('ticker'),
+      ]);
+      return {
+        mappings: m.data ?? [],
+        knownTickers: new Set((up.data ?? []).map((r: any) => String(r.ticker).toUpperCase())),
+      };
+    },
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const resolveUnderlying = useCallback(
+    (raw: string | null | undefined): string => {
+      if (!raw) return '';
+      const up = String(raw).toUpperCase().trim();
+      const data = mappingsQuery.data;
+      // Se è già un ticker pulito noto -> ok
+      if (VALID_TICKER_RE.test(up)) {
+        if (!data || data.knownTickers.has(up)) return up;
+        // ticker formalmente valido ma sconosciuto: accettiamo comunque
+        return up;
+      }
+      if (!data) return '';
+      // Lookup diretto + normalizzato su underlying_mappings
+      const direct = data.mappings.find((m: any) => m.underlying === raw);
+      if (direct) return String(direct.ticker).toUpperCase();
+      const normKey = normalizeUnderlying(raw);
+      const norm = data.mappings.find((m: any) => normalizeUnderlying(m.underlying) === normKey);
+      if (norm) return String(norm.ticker).toUpperCase();
+      return '';
+    },
+    [mappingsQuery.data],
+  );
+
+  /** Versione risolta di getRawOptionUnderlyingKey */
+  const getOptionUnderlyingKey = useCallback(
+    (p: Position): string => {
+      const fromUnd = resolveUnderlying(p.underlying);
+      if (fromUnd) return fromUnd;
+      const fromTk = normTick(p.ticker);
+      if (fromTk && VALID_TICKER_RE.test(fromTk)) return fromTk;
+      return '';
+    },
+    [resolveUnderlying],
+  );
+
   /* ---------- 3. Tickers che ci servono: derivati + equity ---------- */
 
   const allTickers = useMemo(() => {
     const set = new Set<string>();
     derivatives.forEach((d) => {
       const k = getOptionUnderlyingKey(d);
-      if (k) set.add(k);
+      if (k && VALID_TICKER_RE.test(k)) set.add(k);
     });
     [...stocks, ...etfs, ...commodities].forEach((s) => {
       const t = normTick(s.ticker);
-      if (t) set.add(t);
+      if (t && VALID_TICKER_RE.test(t)) set.add(t);
     });
     return [...set].sort();
-  }, [derivatives, stocks, etfs, commodities]);
+  }, [derivatives, stocks, etfs, commodities, getOptionUnderlyingKey]);
 
   /* ---------- 4. Spot prices via useUnderlyingPrices ---------- */
 
@@ -329,7 +391,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
-  }, [derivatives, stocks, etfs, commodities, underlyingPrices, betaMap, fx.USD]);
+  }, [derivatives, stocks, etfs, commodities, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -367,7 +429,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       });
     });
     return out;
-  }, [derivatives, baselineUnders, riskFree]);
+  }, [derivatives, baselineUnders, riskFree, getOptionUnderlyingKey]);
 
   const effIV = useMemo(() => effIVMap(legs), [legs]);
 
