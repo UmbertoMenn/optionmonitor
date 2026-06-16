@@ -5,7 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, RefreshCw, Activity } from 'lucide-react';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2, RefreshCw, Activity, Pencil, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizeUnderlying } from '@/hooks/useUnderlyingMappings';
 import { formatDate } from '@/lib/formatters';
@@ -19,13 +24,14 @@ interface Row {
   beta: number | null;
   beta_source: string | null;
   beta_updated_at: string | null;
+  beta_manual: boolean;
 }
 
 async function loadRows(): Promise<Row[]> {
   const [positionsRes, mappingsRes, fundamentalsRes, pricesRes] = await Promise.all([
     supabase.from('positions').select('ticker, underlying, description, asset_type'),
     supabase.from('underlying_mappings').select('underlying, ticker'),
-    supabase.from('ticker_fundamentals').select('ticker, name, beta, beta_source, beta_updated_at'),
+    supabase.from('ticker_fundamentals').select('ticker, name, beta, beta_source, beta_updated_at, beta_manual'),
     supabase.from('underlying_prices').select('ticker'),
   ]);
 
@@ -74,6 +80,7 @@ async function loadRows(): Promise<Row[]> {
       beta: f?.beta ?? null,
       beta_source: f?.beta_source ?? null,
       beta_updated_at: f?.beta_updated_at ?? null,
+      beta_manual: !!f?.beta_manual,
     });
   });
   rows.sort((a, b) => {
@@ -87,6 +94,9 @@ export function BetaRefreshPanel() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const { data: rows, isLoading } = useQuery({ queryKey: ['admin-beta-refresh'], queryFn: loadRows });
 
@@ -102,7 +112,7 @@ export function BetaRefreshPanel() {
       if (data?.beta != null) {
         toast.success(`${ticker}: β = ${Number(data.beta).toFixed(3)} (${data.betaSource})`);
       } else {
-        toast.warning(`${ticker}: beta non disponibile su Yahoo né GuruFocus`);
+        toast.warning(`${ticker}: beta non disponibile su Yahoo, GuruFocus, TradingView`);
       }
       qc.invalidateQueries({ queryKey: ['admin-beta-refresh'] });
     } catch (e: any) {
@@ -117,12 +127,67 @@ export function BetaRefreshPanel() {
     try {
       const { data, error } = await supabase.functions.invoke('update-beta-cron', { body: {} });
       if (error) throw error;
-      toast.success(`Batch completato: ${data?.updated ?? 0} aggiornati, ${data?.skipped ?? 0} saltati, ${data?.errors ?? 0} errori`);
+      toast.success(`Batch: ${data?.updated ?? 0} aggiornati, ${data?.skipped ?? 0} saltati, ${data?.errors ?? 0} errori`);
       qc.invalidateQueries({ queryKey: ['admin-beta-refresh'] });
     } catch (e: any) {
       toast.error(`Errore batch: ${e?.message || e}`);
     } finally {
       setBatchBusy(false);
+    }
+  };
+
+  const openEdit = (r: Row) => {
+    setEditing(r);
+    setEditValue(r.beta != null ? String(r.beta) : '');
+  };
+
+  const saveManual = async () => {
+    if (!editing) return;
+    const v = parseFloat(editValue.replace(',', '.'));
+    if (!isFinite(v) || Math.abs(v) > 10) {
+      toast.error('Beta non valido (deve essere un numero, |β| < 10)');
+      return;
+    }
+    setSaving(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const { error } = await supabase
+        .from('ticker_fundamentals')
+        .upsert({
+          ticker: editing.ticker,
+          beta: v,
+          beta_source: 'Manuale (admin)',
+          beta_manual: true,
+          beta_updated_at: nowIso,
+          updated_at: nowIso,
+        }, { onConflict: 'ticker' });
+      if (error) throw error;
+      toast.success(`${editing.ticker}: β manuale = ${v.toFixed(3)}`);
+      setEditing(null);
+      qc.invalidateQueries({ queryKey: ['admin-beta-refresh'] });
+    } catch (e: any) {
+      toast.error(`Errore salvataggio: ${e?.message || e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clearManual = async () => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('ticker_fundamentals')
+        .update({ beta_manual: false, updated_at: new Date().toISOString() })
+        .eq('ticker', editing.ticker);
+      if (error) throw error;
+      toast.success(`${editing.ticker}: beta manuale rimosso, tornerà ad aggiornarsi automaticamente`);
+      setEditing(null);
+      qc.invalidateQueries({ queryKey: ['admin-beta-refresh'] });
+    } catch (e: any) {
+      toast.error(`Errore: ${e?.message || e}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -143,6 +208,10 @@ export function BetaRefreshPanel() {
         </Button>
       </CardHeader>
       <CardContent>
+        <p className="text-xs text-muted-foreground mb-3">
+          Fonti automatiche: Yahoo Finance, GuruFocus, TradingView (media semplice tra quelle disponibili).
+          I valori manuali hanno priorità e non vengono mai sovrascritti dal cron.
+        </p>
         {isLoading ? (
           <div className="text-center py-8 text-muted-foreground">Caricamento...</div>
         ) : (
@@ -156,7 +225,7 @@ export function BetaRefreshPanel() {
                   <TableHead className="text-right">Beta</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>Aggiornato</TableHead>
-                  <TableHead className="text-right">Azione</TableHead>
+                  <TableHead className="text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -168,23 +237,39 @@ export function BetaRefreshPanel() {
                     <TableCell className="text-right font-mono">
                       {r.beta != null ? r.beta.toFixed(3) : <span className="text-destructive">-</span>}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{r.beta_source ?? '-'}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        {r.beta_manual && <Lock className="w-3 h-3 text-amber-500" />}
+                        {r.beta_source ?? '-'}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {r.beta_updated_at ? formatDate(r.beta_updated_at) : '-'}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => refetchOne(r.ticker)}
-                        disabled={busy === r.ticker}
-                      >
-                        {busy === r.ticker ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-3 h-3" />
-                        )}
-                      </Button>
+                      <div className="inline-flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => refetchOne(r.ticker)}
+                          disabled={busy === r.ticker || r.beta_manual}
+                          title={r.beta_manual ? 'Beta manuale: rimuovi il lock per refetchare' : 'Refetch da Yahoo/GuruFocus/TradingView'}
+                        >
+                          {busy === r.ticker ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-3 h-3" />
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEdit(r)}
+                          title="Inserisci/modifica beta manualmente"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -193,6 +278,54 @@ export function BetaRefreshPanel() {
           </div>
         )}
       </CardContent>
+
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Beta manuale — {editing?.ticker}</DialogTitle>
+            <DialogDescription>
+              Il valore inserito viene marcato come <strong>manuale</strong> e non sarà più sovrascritto
+              dal cron automatico né dai refetch. Per riattivare l'aggiornamento automatico usa "Rimuovi manuale".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="manual-beta">Beta</Label>
+              <Input
+                id="manual-beta"
+                type="number"
+                step="0.001"
+                min={-10}
+                max={10}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                placeholder="es. 1.234"
+              />
+            </div>
+            {editing?.beta != null && (
+              <p className="text-xs text-muted-foreground">
+                Valore attuale: <span className="font-mono">{editing.beta.toFixed(3)}</span>
+                {editing.beta_source ? ` (${editing.beta_source})` : ''}
+                {editing.beta_manual && ' — manuale'}
+              </p>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            {editing?.beta_manual && (
+              <Button variant="outline" onClick={clearManual} disabled={saving}>
+                Rimuovi manuale
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => setEditing(null)} disabled={saving}>
+              Annulla
+            </Button>
+            <Button onClick={saveManual} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Salva
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
