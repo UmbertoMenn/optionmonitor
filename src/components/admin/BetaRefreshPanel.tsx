@@ -95,6 +95,8 @@ export function BetaRefreshPanel() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [missingBusy, setMissingBusy] = useState(false);
+  const [missingProgress, setMissingProgress] = useState<{ done: number; total: number } | null>(null);
   const [editing, setEditing] = useState<Row | null>(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
@@ -163,6 +165,36 @@ export function BetaRefreshPanel() {
     } finally {
       setBatchBusy(false);
     }
+  };
+
+  const refetchMissing = async () => {
+    const targets = (rows || []).filter((r) => r.beta == null && !r.beta_manual).map((r) => r.ticker);
+    if (!targets.length) {
+      toast.info('Nessun ticker senza beta da aggiornare');
+      return;
+    }
+    setMissingBusy(true);
+    setMissingProgress({ done: 0, total: targets.length });
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      try {
+        const { data, error } = await supabase.functions.invoke('fetch-ticker-fundamentals', {
+          body: { ticker: t, force: true },
+        });
+        if (error) throw error;
+        if (data?.beta != null) ok++;
+        else fail++;
+      } catch {
+        fail++;
+      }
+      setMissingProgress({ done: i + 1, total: targets.length });
+    }
+    setMissingBusy(false);
+    setMissingProgress(null);
+    toast.success(`Senza beta: ${ok} risolti, ${fail} ancora mancanti (su ${targets.length})`);
+    qc.invalidateQueries({ queryKey: ['admin-beta-refresh'] });
   };
 
   const openEdit = (r: Row) => {
