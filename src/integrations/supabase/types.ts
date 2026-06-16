@@ -1212,6 +1212,7 @@ export type Database = {
       ticker_fundamentals: {
         Row: {
           beta: number | null
+          beta_manual: boolean
           beta_source: string | null
           beta_updated_at: string | null
           currency: string | null
@@ -1225,6 +1226,7 @@ export type Database = {
         }
         Insert: {
           beta?: number | null
+          beta_manual?: boolean
           beta_source?: string | null
           beta_updated_at?: string | null
           currency?: string | null
@@ -1238,6 +1240,7 @@ export type Database = {
         }
         Update: {
           beta?: number | null
+          beta_manual?: boolean
           beta_source?: string | null
           beta_updated_at?: string | null
           currency?: string | null

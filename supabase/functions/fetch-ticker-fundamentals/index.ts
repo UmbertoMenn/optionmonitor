@@ -124,19 +124,52 @@ async function guruFocusBeta(ticker: string): Promise<number | null> {
   } catch { return null; }
 }
 
+async function tradingViewBeta(ticker: string): Promise<number | null> {
+  try {
+    const sr = await fetch(
+      `https://symbol-search.tradingview.com/symbol_search/?text=${encodeURIComponent(ticker)}&type=stock`,
+      { headers: { "User-Agent": UA, "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/" } },
+    );
+    if (!sr.ok) return null;
+    const arr = await sr.json();
+    const match = Array.isArray(arr)
+      ? arr.find((x: any) => String(x?.symbol || "").toUpperCase() === ticker.toUpperCase()) || arr[0]
+      : null;
+    const prefix = match?.exchange || match?.prefix;
+    if (!prefix) return null;
+    const full = `${prefix}:${ticker.toUpperCase()}`;
+    const sc = await fetch("https://scanner.tradingview.com/global/scan", {
+      method: "POST",
+      headers: { "User-Agent": UA, "Content-Type": "application/json", "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/" },
+      body: JSON.stringify({ symbols: { tickers: [full] }, columns: ["beta_1_year"] }),
+    });
+    if (!sc.ok) return null;
+    const j = await sc.json();
+    const v = j?.data?.[0]?.d?.[0];
+    if (typeof v === "number" && isFinite(v) && Math.abs(v) < 10) return v;
+    return null;
+  } catch { return null; }
+}
+
 /**
- * Combina Beta Yahoo + GuruFocus.
- *  - se entrambi presenti -> media, source="Yahoo+GuruFocus"
- *  - se solo uno -> quello, source corrispondente
- *  - se nessuno -> null
+ * Combina Beta Yahoo + GuruFocus + TradingView con media semplice.
+ *  - source elenca le fonti contributrici, es. "Yahoo+GuruFocus+TradingView"
  */
-function combineBeta(yahoo: number | null, guru: number | null): { beta: number | null; source: string | null } {
-  const yOk = typeof yahoo === "number" && isFinite(yahoo);
-  const gOk = typeof guru === "number" && isFinite(guru);
-  if (yOk && gOk) return { beta: (yahoo! + guru!) / 2, source: "Yahoo+GuruFocus" };
-  if (yOk) return { beta: yahoo!, source: "Yahoo Finance" };
-  if (gOk) return { beta: guru!, source: "GuruFocus" };
-  return { beta: null, source: null };
+function combineBeta(
+  yahoo: number | null,
+  guru: number | null,
+  tv: number | null,
+): { beta: number | null; source: string | null } {
+  const parts: { name: string; v: number }[] = [];
+  if (typeof yahoo === "number" && isFinite(yahoo)) parts.push({ name: "Yahoo", v: yahoo });
+  if (typeof guru === "number" && isFinite(guru)) parts.push({ name: "GuruFocus", v: guru });
+  if (typeof tv === "number" && isFinite(tv)) parts.push({ name: "TradingView", v: tv });
+  if (!parts.length) return { beta: null, source: null };
+  const avg = parts.reduce((a, b) => a + b.v, 0) / parts.length;
+  const src = parts.length === 1 && parts[0].name === "Yahoo"
+    ? "Yahoo Finance"
+    : parts.map((p) => p.name).join("+");
+  return { beta: avg, source: src };
 }
 
 async function fetchERPDamodaran(): Promise<Record<string, { erp: number; currency?: string }>> {
@@ -228,11 +261,13 @@ serve(async (req) => {
     name = name ?? cached?.name ?? null;
     currency = currency ?? cached?.currency ?? "USD";
 
-    // 2. Beta — media Yahoo + GuruFocus (refresh mensile, o force)
+    // 2. Beta — media Yahoo + GuruFocus + TradingView (refresh mensile, o force).
+    // RISPETTA il flag beta_manual: se admin ha inserito beta a mano, NON sovrascrivere.
     let beta: number | null = cached?.beta ?? null;
     let betaSource: string | null = cached?.beta_source ?? null;
     let betaUpdatedAt = cached?.beta_updated_at ? new Date(cached.beta_updated_at).getTime() : 0;
-    if (force || beta == null || now - betaUpdatedAt > MONTH_MS) {
+    const isManual = !!cached?.beta_manual;
+    if (!isManual && (force || beta == null || now - betaUpdatedAt > MONTH_MS)) {
       const sum = await yahooSummary(ticker, auth);
       const yBeta: number | null =
         (typeof sum?.defaultKeyStatistics?.beta?.raw === "number" && isFinite(sum.defaultKeyStatistics.beta.raw))
@@ -240,8 +275,8 @@ serve(async (req) => {
           : (typeof sum?.summaryDetail?.beta?.raw === "number" && isFinite(sum.summaryDetail.beta.raw))
             ? sum.summaryDetail.beta.raw
             : null;
-      const gBeta = await guruFocusBeta(ticker);
-      const combined = combineBeta(yBeta, gBeta);
+      const [gBeta, tvBeta] = await Promise.all([guruFocusBeta(ticker), tradingViewBeta(ticker)]);
+      const combined = combineBeta(yBeta, gBeta, tvBeta);
       if (combined.beta != null) {
         beta = combined.beta;
         betaSource = combined.source;

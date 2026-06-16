@@ -101,6 +101,33 @@ async function guruFocusBeta(ticker: string): Promise<number | null> {
   } catch { return null; }
 }
 
+async function tradingViewBeta(ticker: string): Promise<number | null> {
+  try {
+    const sr = await fetch(
+      `https://symbol-search.tradingview.com/symbol_search/?text=${encodeURIComponent(ticker)}&type=stock`,
+      { headers: { "User-Agent": UA, "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/" } },
+    );
+    if (!sr.ok) return null;
+    const arr = await sr.json();
+    const match = Array.isArray(arr)
+      ? arr.find((x: any) => String(x?.symbol || "").toUpperCase() === ticker.toUpperCase()) || arr[0]
+      : null;
+    const prefix = match?.exchange || match?.prefix;
+    if (!prefix) return null;
+    const full = `${prefix}:${ticker.toUpperCase()}`;
+    const sc = await fetch("https://scanner.tradingview.com/global/scan", {
+      method: "POST",
+      headers: { "User-Agent": UA, "Content-Type": "application/json", "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/" },
+      body: JSON.stringify({ symbols: { tickers: [full] }, columns: ["beta_1_year"] }),
+    });
+    if (!sc.ok) return null;
+    const j = await sc.json();
+    const v = j?.data?.[0]?.d?.[0];
+    if (typeof v === "number" && isFinite(v) && Math.abs(v) < 10) return v;
+    return null;
+  } catch { return null; }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -112,12 +139,19 @@ serve(async (req) => {
     // SINGLE SOURCE OF TRUTH: underlying_prices contiene tutti i ticker noti dell'app.
     // Quando viene aggiunto un nuovo ticker (Option Analyzer, derivatives, ecc.) finisce qui,
     // quindi il cron lo aggiornerà automaticamente al successivo run.
-    const { data: rows, error } = await supabase
-      .from("underlying_prices")
-      .select("ticker");
-    if (error) throw error;
-
-    const tickers = Array.from(new Set((rows ?? []).map((r: any) => String(r.ticker || "").trim().toUpperCase()).filter(Boolean))).sort();
+    // SINGLE SOURCE OF TRUTH: underlying_prices contiene tutti i ticker noti dell'app.
+    // Inoltre, carichiamo i flag beta_manual per saltare i ticker con beta inserito manualmente.
+    const [pricesRes, fundsRes] = await Promise.all([
+      supabase.from("underlying_prices").select("ticker"),
+      supabase.from("ticker_fundamentals").select("ticker, beta_manual"),
+    ]);
+    if (pricesRes.error) throw pricesRes.error;
+    const manualSet = new Set<string>(
+      (fundsRes.data || [])
+        .filter((r: any) => r.beta_manual)
+        .map((r: any) => String(r.ticker || "").toUpperCase()),
+    );
+    const tickers = Array.from(new Set((pricesRes.data ?? []).map((r: any) => String(r.ticker || "").trim().toUpperCase()).filter(Boolean))).sort();
 
     const auth = await getYahooCrumb();
     if (!auth) {
@@ -138,6 +172,12 @@ serve(async (req) => {
 
     for (const ticker of tickers) {
       try {
+        // Salta i ticker con beta inserito manualmente: non sovrascrivere mai.
+        if (manualSet.has(ticker)) {
+          stats.skipped++;
+          continue;
+        }
+
         const sum = await yahooSummary(ticker, auth);
         if (sum.status === 429 || sum.status >= 500) {
           delay = Math.min(MAX_DELAY, Math.floor(delay * 1.8));
@@ -152,13 +192,20 @@ serve(async (req) => {
             : (typeof s?.summaryDetail?.beta?.raw === "number" && isFinite(s.summaryDetail.beta.raw))
               ? s.summaryDetail.beta.raw
               : null;
-        // Sempre interroga GuruFocus per fare media con Yahoo
-        const gBeta = await guruFocusBeta(ticker);
+        // Sempre interroga GuruFocus e TradingView per fare media con Yahoo
+        const [gBeta, tvBeta] = await Promise.all([guruFocusBeta(ticker), tradingViewBeta(ticker)]);
+        const parts: { name: string; v: number }[] = [];
+        if (yBeta != null) parts.push({ name: "Yahoo", v: yBeta });
+        if (gBeta != null) parts.push({ name: "GuruFocus", v: gBeta });
+        if (tvBeta != null) parts.push({ name: "TradingView", v: tvBeta });
         let beta: number | null = null;
         let betaSource: string = "";
-        if (yBeta != null && gBeta != null) { beta = (yBeta + gBeta) / 2; betaSource = "Yahoo+GuruFocus"; }
-        else if (yBeta != null) { beta = yBeta; betaSource = "Yahoo Finance"; }
-        else if (gBeta != null) { beta = gBeta; betaSource = "GuruFocus"; }
+        if (parts.length) {
+          beta = parts.reduce((a, b) => a + b.v, 0) / parts.length;
+          betaSource = parts.length === 1 && parts[0].name === "Yahoo"
+            ? "Yahoo Finance"
+            : parts.map((p) => p.name).join("+");
+        }
         const name: string | null = s?.price?.longName ?? s?.price?.shortName ?? null;
         const currency: string | null = s?.price?.currency ?? null;
         const priceFromSummary: number | null =
