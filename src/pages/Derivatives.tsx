@@ -184,6 +184,20 @@ export function Derivatives() {
       sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
     }
   }, []);
+  useEffect(() => {
+    const raw = sessionStorage.getItem(STRATEGY_WIZARD_ACTIVE_KEY);
+    if (!raw) return;
+    try {
+      const active = JSON.parse(raw) as { ts?: number };
+      if (active.ts && Date.now() - active.ts < 4 * 60 * 60 * 1000) {
+        setWizardOpen(true);
+        return;
+      }
+    } catch {
+      // ignore malformed marker and clear below
+    }
+    sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+  }, []);
   const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const reconciliationCheckedRef = useRef(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
@@ -534,6 +548,7 @@ export function Derivatives() {
               existingConfigs={strategyConfigs}
               onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
+              draftKey={portfolio?.id ?? selectedPortfolioId}
               archivedKeys={archivedItems.map(a => a.key)}
               archivedItems={archivedItems}
               onArchive={(key, displayName) => {
