@@ -1,5 +1,4 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
 import { useCoveredCallPremiums, CoveredCallPremium } from '@/hooks/useCoveredCallPremiums';
@@ -12,11 +11,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp } from 'lucide-react';
 
-import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { isMarketOpen } from '@/lib/marketHours';
 
@@ -89,6 +87,8 @@ import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from 
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { saveStrategyCache } from '@/lib/strategyCache';
 
+const STRATEGY_WIZARD_ACTIVE_KEY = 'strategyConfigWizardActive';
+
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
   if (!date) return '-';
@@ -105,9 +105,6 @@ function getOptionCurrency(option: Position): string {
 }
 
 export function Derivatives() {
-  const { user, isAdmin, signOut } = useAuth();
-  const { theme, setTheme } = useTheme();
-  const navigate = useNavigate();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
@@ -175,6 +172,28 @@ export function Derivatives() {
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const setWizardOpenPersisted = useCallback((open: boolean) => {
+    setWizardOpen(open);
+    if (open) {
+      sessionStorage.setItem(STRATEGY_WIZARD_ACTIVE_KEY, JSON.stringify({ ts: Date.now() }));
+    } else {
+      sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+    }
+  }, []);
+  useEffect(() => {
+    const raw = sessionStorage.getItem(STRATEGY_WIZARD_ACTIVE_KEY);
+    if (!raw) return;
+    try {
+      const active = JSON.parse(raw) as { ts?: number };
+      if (active.ts && Date.now() - active.ts < 4 * 60 * 60 * 1000) {
+        setWizardOpen(true);
+        return;
+      }
+    } catch {
+      // ignore malformed marker and clear below
+    }
+    sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+  }, []);
   const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const reconciliationCheckedRef = useRef(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
@@ -519,12 +538,13 @@ export function Derivatives() {
           <ErrorBoundary title="Errore nel Wizard Strategie">
             <StrategyConfigWizard
               open={wizardOpen}
-              onOpenChange={setWizardOpen}
+              onOpenChange={setWizardOpenPersisted}
               derivatives={derivatives}
               allPositions={positions}
               existingConfigs={strategyConfigs}
               onSave={handleSaveConfigs}
               isSaving={isConfigSaving}
+              draftKey={portfolio?.id ?? selectedPortfolioId}
               archivedKeys={archivedItems.map(a => a.key)}
               archivedItems={archivedItems}
               onArchive={(key, displayName) => {
@@ -573,7 +593,7 @@ export function Derivatives() {
             </TooltipProvider>
           </div>
           {derivatives.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)} className="relative">
+            <Button variant="outline" size="sm" onClick={() => setWizardOpenPersisted(true)} className="relative">
               <Settings className="w-4 h-4 mr-2" />
               {hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}
               {needsWizard && (
@@ -593,7 +613,7 @@ export function Derivatives() {
                 Per visualizzare le strategie, configura prima come classificare le posizioni derivati.
                 La configurazione verrà ricordata per i prossimi upload.
               </p>
-              <Button onClick={() => setWizardOpen(true)}>
+              <Button onClick={() => setWizardOpenPersisted(true)}>
                 <Settings className="w-4 h-4 mr-2" />
                 Configura strategie
               </Button>

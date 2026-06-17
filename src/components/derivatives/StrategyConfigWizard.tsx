@@ -55,6 +55,7 @@ interface StrategyConfigWizardProps {
   existingConfigs: StrategyConfiguration[];
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
+  draftKey?: string | null;
   filterUnderlyings?: string[];
   archivedKeys?: string[];
   archivedItems?: ArchivedItem[];
@@ -375,6 +376,14 @@ interface UnderlyingGroup {
   positions: Position[];
 }
 
+interface WizardDraft {
+  ts: number;
+  strategies: WizardStrategy[];
+  selectedIdsByGroup: [string, string[]][];
+  splitPositionIds: string[];
+  searchQuery: string;
+}
+
 export function StrategyConfigWizard({
   open,
   onOpenChange,
@@ -383,12 +392,14 @@ export function StrategyConfigWizard({
   existingConfigs,
   onSave,
   isSaving,
+  draftKey,
   filterUnderlyings,
   archivedKeys = [],
   archivedItems = [],
   onArchive,
   onUnarchive,
 }: StrategyConfigWizardProps) {
+  const draftStorageKey = `strategyConfigWizardDraft:${draftKey || 'default'}`;
   // Build all available positions (derivatives as-is + stocks as-is) — skip when closed
   const allAvailable = useMemo(() => {
     if (!open) return [];
@@ -658,21 +669,55 @@ export function StrategyConfigWizard({
     if (open && !hasInitialized.current) {
       hasInitialized.current = true;
       startTransition(() => {
+        const rawDraft = sessionStorage.getItem(draftStorageKey);
+        if (rawDraft) {
+          try {
+            const draft = JSON.parse(rawDraft) as WizardDraft;
+            if (Date.now() - draft.ts < 4 * 60 * 60 * 1000) {
+              const restoredSelections = new Map<string, Set<string>>(
+                (draft.selectedIdsByGroup || []).map(([key, ids]) => [key, new Set(ids)])
+              );
+              setStrategies(draft.strategies || []);
+              setSplitPositionIds(new Set(draft.splitPositionIds || []));
+              setSelectedIdsByGroup(restoredSelections);
+              setSearchQuery(draft.searchQuery || '');
+              return;
+            }
+            sessionStorage.removeItem(draftStorageKey);
+          } catch {
+            sessionStorage.removeItem(draftStorageKey);
+          }
+        }
         const { strategies: restored, autoSplitIds } = restoreFromConfigs();
         setStrategies(restored);
         setSplitPositionIds(autoSplitIds);
+        setSelectedIdsByGroup(new Map());
+        setSearchQuery('');
       });
-      setSelectedIdsByGroup(new Map());
-      setSearchQuery('');
     }
     if (!open) {
       hasInitialized.current = false;
     }
-  }, [open, restoreFromConfigs, hasInitialized]);
+  }, [open, restoreFromConfigs, hasInitialized, draftStorageKey]);
+
+  useEffect(() => {
+    if (!open || !hasInitialized.current) return;
+    const draft: WizardDraft = {
+      ts: Date.now(),
+      strategies,
+      selectedIdsByGroup: Array.from(selectedIdsByGroup.entries()).map(([key, ids]) => [key, Array.from(ids)]),
+      splitPositionIds: Array.from(splitPositionIds),
+      searchQuery,
+    };
+    sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+  }, [open, strategies, selectedIdsByGroup, splitPositionIds, searchQuery, draftStorageKey, hasInitialized]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
+    if (!isOpen) {
+      sessionStorage.removeItem(draftStorageKey);
+    }
     onOpenChange(isOpen);
-  }, [onOpenChange]);
+  }, [onOpenChange, draftStorageKey]);
 
   const toggleSelected = (groupKey: string, posId: string) => {
     setSelectedIdsByGroup(prev => {
@@ -709,13 +754,13 @@ export function StrategyConfigWizard({
   };
 
   const removeFromStrategy = (strategyId: string, positionId: string) => {
-    setStrategies(prev => prev.map(s => {
+    setStrategies(prev => prev.flatMap(s => {
       if (s.id !== strategyId) return s;
       const newPositions = s.positions.filter(p => p.id !== positionId);
-      if (newPositions.length === 0) return null as any;
+      if (newPositions.length === 0) return [];
       const suggested = detectStrategyType(newPositions);
       return { ...s, positions: newPositions, suggestedType: suggested };
-    }).filter(Boolean));
+    }));
   };
 
   const deleteStrategy = (strategyId: string) => {
@@ -816,6 +861,7 @@ export function StrategyConfigWizard({
 
     // NO deduplication — each strategy is saved as a separate row
     await onSave(rawConfigs);
+    sessionStorage.removeItem(draftStorageKey);
     onOpenChange(false);
   };
 
@@ -823,7 +869,7 @@ export function StrategyConfigWizard({
 
   // Filter groups by search AND exclude archived
   const filteredGroups = useMemo(() => {
-    let groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
+    const groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
     if (!searchQuery.trim()) return groups;
     const q = searchQuery.toLowerCase();
     return groups.filter(g =>
