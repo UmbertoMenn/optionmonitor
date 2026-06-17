@@ -674,9 +674,12 @@ export function StrategyConfigWizard({
           try {
             const draft = JSON.parse(rawDraft) as WizardDraft;
             if (Date.now() - draft.ts < 4 * 60 * 60 * 1000) {
+              const restoredSelections = new Map<string, Set<string>>(
+                (draft.selectedIdsByGroup || []).map(([key, ids]) => [key, new Set(ids)])
+              );
               setStrategies(draft.strategies || []);
               setSplitPositionIds(new Set(draft.splitPositionIds || []));
-              setSelectedIdsByGroup(new Map((draft.selectedIdsByGroup || []).map(([k, ids]) => [k, new Set(ids)])));
+              setSelectedIdsByGroup(restoredSelections);
               setSearchQuery(draft.searchQuery || '');
               return;
             }
