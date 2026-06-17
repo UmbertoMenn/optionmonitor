@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { PortfolioProvider } from "@/contexts/PortfolioContext";
 import { AuthForm } from "@/components/auth/AuthForm";
@@ -25,6 +25,7 @@ const Simulator = lazy(() => import("@/pages/Simulator"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
+const STRATEGY_WIZARD_ACTIVE_KEY = 'strategyConfigWizardActive';
 
 // Minimal loading fallback for lazy components
 function PageLoader() {
@@ -36,6 +37,33 @@ function PageLoader() {
       </div>
     </div>
   );
+}
+
+function InProgressRouteGuard() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem(STRATEGY_WIZARD_ACTIVE_KEY);
+    if (!raw) return;
+
+    try {
+      const active = JSON.parse(raw) as { ts?: number };
+      if (active.ts && Date.now() - active.ts > 4 * 60 * 60 * 1000) {
+        sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+        return;
+      }
+    } catch {
+      sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+      return;
+    }
+
+    if (location.pathname === '/') {
+      navigate('/derivatives', { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  return null;
 }
 
 function AppRoutes() {
@@ -77,6 +105,7 @@ function AppRoutes() {
 
   return (
     <PortfolioProvider>
+      <InProgressRouteGuard />
       <ScrollArrows />
       <Suspense fallback={<PageLoader />}>
         <Routes>
