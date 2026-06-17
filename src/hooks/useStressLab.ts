@@ -291,8 +291,32 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     const have = new Set(
       betasQuery.data.filter((r) => r.beta != null).map((r) => normTick(r.ticker)),
     );
-    return allTickers.filter((t) => !have.has(t));
-  }, [betasQuery.data, allTickers]);
+    const missing = allTickers.filter((t) => !have.has(t));
+
+    // Diagnostica mirata: per ogni ticker mancante mostra nome grezzo dell'opzione,
+    // ticker risolto, e cosa ha restituito ticker_fundamentals. Aiuta a distinguere
+    // "mapping mancante" da "riga presente ma beta NULL" da "ticker scritto diverso".
+    if (missing.length > 0) {
+      const rowsByTicker = new Map(
+        (betasQuery.data || []).map((r) => [normTick(r.ticker), r]),
+      );
+      const detail = missing.map((t) => {
+        const rawNames = derivatives
+          .filter((d) => getOptionUnderlyingKey(d) === t)
+          .map((d) => d.underlying || d.description);
+        const row = rowsByTicker.get(t);
+        return {
+          ticker: t,
+          rawUnderlyingNames: [...new Set(rawNames)],
+          dbRowFound: !!row,
+          dbBeta: row ? row.beta : '(nessuna riga)',
+        };
+      });
+      console.log('[StressLab] Beta mancanti — dettaglio risoluzione:', detail);
+    }
+
+    return missing;
+  }, [betasQuery.data, allTickers, derivatives, getOptionUnderlyingKey]);
 
   const missingBetaKey = missingBetaTickers.join('|');
 
