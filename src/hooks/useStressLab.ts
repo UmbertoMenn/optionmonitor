@@ -598,13 +598,16 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
    * simulatore (escludere bond / cash / oro dal patrimonio) sottraggo le componenti
    * disattivate; la GP non è inclusa nel summary, quindi la aggiungo se richiesta.
    */
+  const nettingPositions = useMemo(() => positions || [], [positions]);
+  const nettingOverrides = useMemo(() => overrides || [], [overrides]);
+  const nettingConfigs = useMemo(() => strategyConfigs || [], [strategyConfigs]);
   const liveNetting = useDerivativeNetting(
-    positions || [],
+    nettingPositions,
     summary,
-    overrides || [],
+    nettingOverrides,
     underlyingPrices,
     false,
-    strategyConfigs || [],
+    nettingConfigs,
   );
 
   const { nettingTotal, nettingExCCAndNP } = useMemo(() => {

@@ -347,20 +347,31 @@ function StressLabContent() {
   /* ---------- Override editabili dei sottostanti ---------- */
   const [unders, setUnders] = useState<StressUnderlyingMap>({});
 
-  // Quando arrivano nuovi underlyings dall'hook, resetto solo i nuovi (preservo gli edit fatti dall'utente)
+  // Quando arrivano nuovi underlyings dall'hook, resetto solo i nuovi (preservo gli edit fatti dall'utente).
+  // IMPORTANTE: dipendiamo da una FIRMA STABILE (chiavi + valori baseline serializzati), non dal
+  // riferimento dell'oggetto `data.baselineUnders`, che cambia a ogni render dell'hook e causerebbe
+  // un loop infinito di setState ("Maximum update depth exceeded").
+  const baselineSig = useMemo(() => {
+    const keys = Object.keys(data.baselineUnders).sort();
+    return keys
+      .map((k) => `${k}:${data.baselineUnders[k].S.toFixed(4)}:${data.baselineUnders[k].beta.toFixed(4)}`)
+      .join('|');
+  }, [data.baselineUnders]);
+
   useEffect(() => {
     setUnders((prev) => {
       const next: StressUnderlyingMap = { ...prev };
+      let changed = false;
       for (const [k, v] of Object.entries(data.baselineUnders)) {
-        if (!next[k]) next[k] = v;
+        if (!next[k]) { next[k] = v; changed = true; }
       }
-      // rimuovi chiavi non più presenti
       for (const k of Object.keys(next)) {
-        if (!data.baselineUnders[k]) delete next[k];
+        if (!data.baselineUnders[k]) { delete next[k]; changed = true; }
       }
-      return next;
+      return changed ? next : prev; // niente nuovo riferimento se nulla è cambiato → niente re-render inutile
     });
-  }, [data.baselineUnders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baselineSig]);
 
   /* ---------- Slider scenario ---------- */
   const [d, setD] = useState(-15);
