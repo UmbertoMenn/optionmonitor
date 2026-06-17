@@ -47,12 +47,17 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(() => {
+    // Se c'è una vista admin attiva in sessione, ripristina il portfolio admin
+    const adminPid = sessionStorage.getItem(ADMIN_VIEW_PORTFOLIO_KEY);
+    if (adminPid) return adminPid;
     return localStorage.getItem(SELECTED_PORTFOLIO_KEY);
   });
   const [hasInitialized, setHasInitialized] = useState(false);
   
-  // Admin mode state
-  const [adminViewUserId, setAdminViewUserId] = useState<string | null>(null);
+  // Admin mode state (persistito in sessionStorage per sopravvivere a remount/refresh token)
+  const [adminViewUserId, setAdminViewUserId] = useState<string | null>(() => {
+    return sessionStorage.getItem(ADMIN_VIEW_USER_KEY);
+  });
   const isAdminMode = adminViewUserId !== null && adminViewUserId !== user?.id;
   const isAggregatedView = isAnyAggregatedId(selectedId);
 
