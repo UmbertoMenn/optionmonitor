@@ -6,6 +6,8 @@ import { Portfolio } from '@/types/portfolio';
 import { toast } from 'sonner';
 
 const SELECTED_PORTFOLIO_KEY = 'selectedPortfolioId';
+const ADMIN_VIEW_USER_KEY = 'adminViewUserId';
+const ADMIN_VIEW_PORTFOLIO_KEY = 'adminViewPortfolioId';
 
 export const AGGREGATED_PORTFOLIO_ID = 'AGGREGATED';
 export const AGGREGATED_USER_PREFIX = 'AGGREGATED_USER:';
