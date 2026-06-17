@@ -431,6 +431,33 @@ function StressLabContent() {
     const sig0s: Record<number, number> = {};
     base.rows.forEach((x) => (sig0s[x.i] = x.sig0));
     const now = occMargin(legs, eq, unders, 0, sig0s, 0, marPrm);
+
+    // Diagnostica margine iniziale: scomposizione per sottostante (strategy vs scan),
+    // call coperte dai titoli, range di scan. Serve a capire DOVE il margine risulta
+    // troppo basso rispetto al broker (es. short trattata come coperta, scan azzerato).
+    try {
+      console.log('[MarginDiag] Margine iniziale totale (EUR):', Math.round(now.total),
+        '| strategy:', Math.round(now.totStrat), '| scan:', Math.round(now.totScan),
+        '| call coperte da titoli:', now.nCov);
+      console.table(
+        now.bd.map((b) => ({
+          sottostante: b.u,
+          margine_EUR: Math.round(b.mar),
+          strategy_EUR: Math.round(b.strat),
+          scan_EUR: Math.round(b.scan),
+          range_scan: +(b.R * 100).toFixed(1) + '%',
+        })),
+      );
+      // Dettaglio gambe per sottostante (qty firmata, strike, scadenza)
+      console.log('[MarginDiag] Gambe opzioni:', legs.map((l) => ({
+        u: l.u, cp: l.cp, q: l.q, K: l.K, T_anni: +l.T.toFixed(3), px: l.px,
+      })));
+      console.log('[MarginDiag] Titoli (per copertura call):', eq.map((s) => ({
+        tick: s.tick, q: s.q,
+      })));
+    } catch (e) {
+      console.error('[MarginDiag] log error', e);
+    }
     const cur = runScenario(legs, eq, unders, effIV, d, dV1M, { ...bp, days });
     const sigDs: Record<number, number> = {};
     cur.rows.forEach((x) => (sigDs[x.i] = x.sig1));
