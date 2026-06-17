@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -42,14 +42,19 @@ function PageLoader() {
 function InProgressRouteGuard() {
   const location = useLocation();
   const navigate = useNavigate();
+  const lastPathRef = useRef<string>(location.pathname);
 
   useEffect(() => {
+    const prevPath = lastPathRef.current;
+    lastPathRef.current = location.pathname;
+
     const raw = sessionStorage.getItem(STRATEGY_WIZARD_ACTIVE_KEY);
     if (!raw) return;
 
+    // Marker bozza scaduto → pulizia e stop.
     try {
       const active = JSON.parse(raw) as { ts?: number };
-      if (active.ts && Date.now() - active.ts > 4 * 60 * 60 * 1000) {
+      if (!active.ts || Date.now() - active.ts > 4 * 60 * 60 * 1000) {
         sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
         return;
       }
@@ -58,7 +63,13 @@ function InProgressRouteGuard() {
       return;
     }
 
-    if (location.pathname === '/') {
+    // Rimbalzo INVOLONTARIO: eravamo in /derivatives (con config attiva) e qualcosa
+    // ci ha spostati su / senza una navigazione esplicita dell'utente. Solo in questo
+    // caso riportiamo l'utente al wizard. Una navigazione VOLUTA verso la dashboard
+    // (da un altro path, o cliccando un link) NON viene intercettata: l'utente resta
+    // libero di muoversi. Il Fix in AuthContext elimina la causa del rimbalzo;
+    // questo è solo una rete di sicurezza per i casi residui.
+    if (location.pathname === '/' && prevPath === '/derivatives') {
       navigate('/derivatives', { replace: true });
     }
   }, [location.pathname, navigate]);
