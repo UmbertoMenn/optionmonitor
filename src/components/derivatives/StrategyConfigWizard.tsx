@@ -55,6 +55,7 @@ interface StrategyConfigWizardProps {
   existingConfigs: StrategyConfiguration[];
   onSave: (configs: UpsertConfigParams[]) => Promise<void>;
   isSaving: boolean;
+  draftKey?: string | null;
   filterUnderlyings?: string[];
   archivedKeys?: string[];
   archivedItems?: ArchivedItem[];
@@ -375,6 +376,14 @@ interface UnderlyingGroup {
   positions: Position[];
 }
 
+interface WizardDraft {
+  ts: number;
+  strategies: WizardStrategy[];
+  selectedIdsByGroup: [string, string[]][];
+  splitPositionIds: string[];
+  searchQuery: string;
+}
+
 export function StrategyConfigWizard({
   open,
   onOpenChange,
@@ -383,12 +392,14 @@ export function StrategyConfigWizard({
   existingConfigs,
   onSave,
   isSaving,
+  draftKey,
   filterUnderlyings,
   archivedKeys = [],
   archivedItems = [],
   onArchive,
   onUnarchive,
 }: StrategyConfigWizardProps) {
+  const draftStorageKey = `strategyConfigWizardDraft:${draftKey || 'default'}`;
   // Build all available positions (derivatives as-is + stocks as-is) — skip when closed
   const allAvailable = useMemo(() => {
     if (!open) return [];
