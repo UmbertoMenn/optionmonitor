@@ -11,6 +11,7 @@ import { analyzePortfolioRisk } from './riskCalculator';
 import { calculateCurrencyExposure } from './currencyExposure';
 import { computeSinglePortfolioNetting } from '@/hooks/useDerivativeNetting';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+import { fetchLocalPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 
 interface UploadSnapshotInput {
   portfolioId: string;
@@ -83,11 +84,33 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       .eq('portfolio_id', portfolioId);
     const strategyConfigs = (configsRaw || []) as unknown as StrategyConfiguration[];
 
-    // 4. Compute netting — ora con le strategy configs aggiornate
+    // 3c. Prezzi dei sottostanti — IDENTICA fonte del calcolo live (useDerivativeNetting).
+    //     Servono per il valore intrinseco delle covered call / naked put il cui
+    //     sottostante NON è una posizione azionaria collegata in portafoglio: senza
+    //     questi prezzi resolveUnderlyingPrice() ritorna 0, l'intrinseco non viene
+    //     calcolato e quelle gambe contribuiscono a market value pieno → il netting
+    //     Ex-CC-NP dello snapshot divergeva da quello live (stesso identico ammontare).
+    const derivativeUnderlyings = Array.from(
+      new Set(
+        positions
+          .filter((p) => p.asset_type === 'derivative')
+          .map((p) => p.underlying || p.description || '')
+          .filter((u) => !!u),
+      ),
+    );
+    let underlyingPrices: Record<string, UnderlyingPrice> = {};
+    try {
+      const local = await fetchLocalPrices(derivativeUnderlyings);
+      underlyingPrices = local.prices;
+    } catch (e) {
+      console.error('[UploadSnapshot] Could not fetch underlying prices:', e);
+    }
+
+    // 4. Compute netting — con le strategy configs E i prezzi sottostanti, come il live
     const nettingResult = computeSinglePortfolioNetting(
       positions,
       overrides,
-      undefined,
+      underlyingPrices,
       strategyConfigs,
     );
     const nettingTotal = totalValue + nettingResult.totalNetting;

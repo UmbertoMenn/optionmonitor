@@ -43,7 +43,7 @@ interface LocalFetchResult {
   missingUnderlyings: string[];
 }
 
-async function fetchLocalPrices(uniqueUnderlyings: string[]): Promise<LocalFetchResult> {
+export async function fetchLocalPrices(uniqueUnderlyings: string[]): Promise<LocalFetchResult> {
   if (uniqueUnderlyings.length === 0) return { prices: {}, missingUnderlyings: [] };
 
   const [mappingsRes, pricesRes] = await Promise.all([
