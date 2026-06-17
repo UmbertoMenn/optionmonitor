@@ -164,13 +164,18 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const selectPortfolio = useCallback((id: string) => {
     setSelectedId(id);
-    localStorage.setItem(SELECTED_PORTFOLIO_KEY, id);
+    // In admin mode aggiorna la chiave di sessione admin, non lo storage del portfolio personale
+    if (adminViewUserId !== null && adminViewUserId !== user?.id) {
+      sessionStorage.setItem(ADMIN_VIEW_PORTFOLIO_KEY, id);
+    } else {
+      localStorage.setItem(SELECTED_PORTFOLIO_KEY, id);
+    }
     // Invalidate position-related queries when switching portfolio
     queryClient.invalidateQueries({ queryKey: ['positions'] });
     queryClient.invalidateQueries({ queryKey: ['deposits'] });
     queryClient.invalidateQueries({ queryKey: ['historicalData'] });
     queryClient.invalidateQueries({ queryKey: ['derivativeOverrides'] });
-  }, [queryClient]);
+  }, [queryClient, adminViewUserId, user?.id]);
 
   // Create portfolio mutation
   const createMutation = useMutation({
