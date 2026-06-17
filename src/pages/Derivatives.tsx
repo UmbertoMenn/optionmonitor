@@ -16,7 +16,7 @@ import { useTheme } from 'next-themes';
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { StalePriceIndicator } from '@/components/ui/stale-price-indicator';
 import { isMarketOpen } from '@/lib/marketHours';
 
@@ -89,6 +89,8 @@ import { usePortfolioContext, isAnyAggregatedId, AGGREGATED_PORTFOLIO_ID } from 
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { saveStrategyCache } from '@/lib/strategyCache';
 
+const STRATEGY_WIZARD_ACTIVE_KEY = 'strategyConfigWizardActive';
+
 // Format expiry as MMM/YY (e.g., DIC/27, FEB/26) - Italian months
 function formatExpiryMMY(date: string | null | undefined): string {
   if (!date) return '-';
@@ -107,7 +109,6 @@ function getOptionCurrency(option: Position): string {
 export function Derivatives() {
   const { user, isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
-  const navigate = useNavigate();
   const { portfolio, positions, isLoading } = usePortfolio();
   const { overrides, getOverrideForPosition } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations, upsertBatch, isSaving: isConfigSaving } = useStrategyConfigurations();
@@ -175,6 +176,14 @@ export function Derivatives() {
   const [protectionsOpen, setProtectionsOpen] = useState(false);
   const [otherStrategiesOpen, setOtherStrategiesOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const setWizardOpenPersisted = useCallback((open: boolean) => {
+    setWizardOpen(open);
+    if (open) {
+      sessionStorage.setItem(STRATEGY_WIZARD_ACTIVE_KEY, JSON.stringify({ ts: Date.now() }));
+    } else {
+      sessionStorage.removeItem(STRATEGY_WIZARD_ACTIVE_KEY);
+    }
+  }, []);
   const [reconciliationOpen, setReconciliationOpen] = useState(false);
   const reconciliationCheckedRef = useRef(false);
   // includePutPremiums toggle removed — now inside CallPremiumCalculatorDialog
