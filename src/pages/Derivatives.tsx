@@ -528,7 +528,7 @@ export function Derivatives() {
           <ErrorBoundary title="Errore nel Wizard Strategie">
             <StrategyConfigWizard
               open={wizardOpen}
-              onOpenChange={setWizardOpen}
+              onOpenChange={setWizardOpenPersisted}
               derivatives={derivatives}
               allPositions={positions}
               existingConfigs={strategyConfigs}
@@ -582,7 +582,7 @@ export function Derivatives() {
             </TooltipProvider>
           </div>
           {derivatives.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)} className="relative">
+            <Button variant="outline" size="sm" onClick={() => setWizardOpenPersisted(true)} className="relative">
               <Settings className="w-4 h-4 mr-2" />
               {hasConfigurations ? 'Riconfigura strategie' : 'Configura strategie'}
               {needsWizard && (
@@ -602,7 +602,7 @@ export function Derivatives() {
                 Per visualizzare le strategie, configura prima come classificare le posizioni derivati.
                 La configurazione verrà ricordata per i prossimi upload.
               </p>
-              <Button onClick={() => setWizardOpen(true)}>
+              <Button onClick={() => setWizardOpenPersisted(true)}>
                 <Settings className="w-4 h-4 mr-2" />
                 Configura strategie
               </Button>
