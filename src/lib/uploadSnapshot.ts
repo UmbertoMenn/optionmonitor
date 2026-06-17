@@ -84,12 +84,16 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       .eq('portfolio_id', portfolioId);
     const strategyConfigs = (configsRaw || []) as unknown as StrategyConfiguration[];
 
-    // 3c. Prezzi dei sottostanti — IDENTICA fonte del calcolo live (useDerivativeNetting).
-    //     Servono per il valore intrinseco delle covered call / naked put il cui
-    //     sottostante NON è una posizione azionaria collegata in portafoglio: senza
-    //     questi prezzi resolveUnderlyingPrice() ritorna 0, l'intrinseco non viene
-    //     calcolato e quelle gambe contribuiscono a market value pieno → il netting
-    //     Ex-CC-NP dello snapshot divergeva da quello live (stesso identico ammontare).
+    // 3c. Prezzi dei sottostanti CONGELATI per QUESTA data di snapshot.
+    //     Principio: il netting non deve muoversi coi prezzi live. Per ogni sottostante
+    //     il prezzo è fissato al momento del primo calcolo di QUESTO snapshot e non
+    //     cambia più (gli snapshot storici restano quindi immutati per costruzione).
+    //     Priorità per ogni underlying:
+    //       1) prezzo già congelato in historical_data.snapshot_underlying_prices (questa data)
+    //       2) altrimenti prezzo live preso UNA volta da underlying_prices e congelato ora
+    //     I sottostanti che sono anche titoli in portafoglio usano il loro snapshot_price
+    //     dall'Excel (gestito dentro il netting via associatedUnderlying) e non necessitano
+    //     di questa mappa, ma vengono comunque congelati per coerenza/diagnostica.
     const derivativeUnderlyings = Array.from(
       new Set(
         positions
@@ -98,15 +102,39 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
           .filter((u) => !!u),
       ),
     );
-    let underlyingPrices: Record<string, UnderlyingPrice> = {};
-    try {
-      const local = await fetchLocalPrices(derivativeUnderlyings);
-      underlyingPrices = local.prices;
-    } catch (e) {
-      console.error('[UploadSnapshot] Could not fetch underlying prices:', e);
+
+    // Prezzi già congelati per questa data (se lo snapshot esiste già)
+    const { data: existingSnap } = await supabase
+      .from('historical_data')
+      .select('snapshot_underlying_prices')
+      .eq('portfolio_id', portfolioId)
+      .eq('snapshot_date', snapshotDate)
+      .maybeSingle();
+    const frozen: Record<string, number> = {
+      ...(((existingSnap?.snapshot_underlying_prices as Record<string, number>) || {})),
+    };
+
+    // Solo i sottostanti non ancora congelati vengono presi dal feed live, una volta
+    const missingKeys = derivativeUnderlyings.filter((k) => !(k in frozen) || !(frozen[k] > 0));
+    if (missingKeys.length > 0) {
+      try {
+        const local = await fetchLocalPrices(missingKeys);
+        for (const k of missingKeys) {
+          const px = local.prices[k]?.price;
+          if (typeof px === 'number' && px > 0) frozen[k] = px;
+        }
+      } catch (e) {
+        console.error('[UploadSnapshot] Could not fetch underlying prices to freeze:', e);
+      }
     }
 
-    // 4. Compute netting — con le strategy configs E i prezzi sottostanti, come il live
+    // Mappa nel formato atteso dal netting
+    const underlyingPrices: Record<string, UnderlyingPrice> = {};
+    for (const [k, px] of Object.entries(frozen)) {
+      underlyingPrices[k] = { price: px, currency: 'USD' };
+    }
+
+    // 4. Compute netting — con le strategy configs E i prezzi CONGELATI (fissi)
     const nettingResult = computeSinglePortfolioNetting(
       positions,
       overrides,
@@ -160,6 +188,7 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
         netting_ex_cc_np: nettingExCCAndNP,
         equity_exposure_pct: equityExposurePct,
         usd_exposure_pct: usdExposurePct,
+        snapshot_underlying_prices: frozen as unknown as Record<string, number>,
         deposits: 0,
         average_balance: 0,
       }, { onConflict: 'portfolio_id,snapshot_date' });

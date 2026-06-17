@@ -4,7 +4,7 @@ import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID } from '@/contexts/Portfol
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
-import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
+import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useDeposits } from '@/hooks/useDeposits';
 import { useEquityExposurePct } from '@/hooks/useEquityExposurePct';
@@ -100,8 +100,7 @@ export function Dashboard() {
     [positions]
   );
   const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
-  
-  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs);
+
   // Equity exposure for benchmark: only protections, no derivatives
   const { equityExposurePct } = useEquityExposurePct({
     includeNakedPut: false,
@@ -124,6 +123,27 @@ export function Dashboard() {
     deleteHistoricalData,
     isUpserting,
   } = useHistoricalData(portfolio?.id, viewMode);
+
+  // Prezzi CONGELATI dello snapshot corrente: la card di netting NON deve muoversi
+  // coi prezzi live. Prendo i prezzi fissati nel record storico della data corrente
+  // del portafoglio e li uso per il netting. Fallback ai prezzi live solo per i
+  // sottostanti non ancora congelati (es. snapshot non ancora ricalcolato): al primo
+  // ricalcolo dello snapshot vengono congelati e da lì in poi il valore è stabile.
+  const frozenUnderlyingPrices = useMemo(() => {
+    const currentDate = portfolio?.snapshot_date;
+    const currentEntry = currentDate
+      ? historicalData.find(h => h.snapshot_date === currentDate)
+      : null;
+    const frozenRaw = (currentEntry?.snapshot_underlying_prices ?? {}) as Record<string, number>;
+    const merged: Record<string, UnderlyingPrice> = {};
+    for (const [k, v] of Object.entries(underlyingPrices)) merged[k] = v;
+    for (const [k, px] of Object.entries(frozenRaw)) {
+      if (typeof px === 'number' && px > 0) merged[k] = { price: px, currency: 'USD' };
+    }
+    return merged;
+  }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
+
+  const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
   
   const {
     deposits,

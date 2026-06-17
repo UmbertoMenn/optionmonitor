@@ -10,6 +10,7 @@ export interface HistoricalDataEntry {
   average_balance: number;
   equity_exposure_pct: number; // 0-1, default 0.6
   usd_exposure_pct: number;    // 0-1, default 0.8
+  snapshot_underlying_prices?: Record<string, number>; // prezzi sottostanti congelati per il netting
   created_at: string;
   updated_at: string;
 }
