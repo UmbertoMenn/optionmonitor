@@ -10,6 +10,7 @@ import { categorizeDerivatives } from './derivativeStrategies';
 import { analyzePortfolioRisk } from './riskCalculator';
 import { calculateCurrencyExposure } from './currencyExposure';
 import { computeSinglePortfolioNetting } from '@/hooks/useDerivativeNetting';
+import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 
 interface UploadSnapshotInput {
   portfolioId: string;
@@ -71,17 +72,26 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       .eq('portfolio_id', portfolioId);
     const overrides = (overridesRaw || []) as unknown as DerivativeOverride[];
 
-    // 4. Compute netting
-    const nettingResult = computeSinglePortfolioNetting(positions, overrides);
-    const nettingTotal = totalValue + nettingResult.totalNetting;
-    const nettingExCCAndNP = totalValue + nettingResult.nettingExCCAndNP;
-
-    // 5. Fetch strategy configurations
+    // 3b. Fetch strategy configurations — DEVONO essere lette PRIMA del netting:
+    //     determinano come i derivati vengono raggruppati in strategie (covered call,
+    //     naked put, put spread, …) e quindi il valore di netting Ex-CC-e-NP.
+    //     In precedenza venivano lette dopo e NON passate al netting: lo snapshot
+    //     ricalcolava il netting ignorando del tutto la configurazione appena salvata.
     const { data: configsRaw } = await supabase
       .from('strategy_configurations')
       .select('*')
       .eq('portfolio_id', portfolioId);
-    const strategyConfigs = (configsRaw || []) as any[];
+    const strategyConfigs = (configsRaw || []) as unknown as StrategyConfiguration[];
+
+    // 4. Compute netting — ora con le strategy configs aggiornate
+    const nettingResult = computeSinglePortfolioNetting(
+      positions,
+      overrides,
+      undefined,
+      strategyConfigs,
+    );
+    const nettingTotal = totalValue + nettingResult.totalNetting;
+    const nettingExCCAndNP = totalValue + nettingResult.nettingExCCAndNP;
 
     // 6. Compute equity exposure — formula allineata al Risk Analyzer:
     //    numeratore = grandTotal (stock+ETF+commodity+naked put+leap+strategie+sintetiche CC/DR-CC)
