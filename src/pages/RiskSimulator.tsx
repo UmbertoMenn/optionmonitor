@@ -384,6 +384,9 @@ function StressLabContent() {
   const [showAdv, setShowAdv] = useState(false);
   const [showUnd, setShowUnd] = useState(false);
   const [netting, setNetting] = useState(false);
+  // Card beta: 'market' = beta al MERCATO (mossa trasmessa via beta di ciascun nome);
+  // 'titoli' = Delta di portafoglio (i sottostanti si muovono DIRETTAMENTE della stessa %).
+  const [betaMode, setBetaMode] = useState<'market' | 'titoli'>('market');
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
   const [ivScan, setIvScan] = useState(0.4);
@@ -434,6 +437,41 @@ function StressLabContent() {
     const pl = runScenario(legs, eq, unders, effIV, d, volAt(d), bp).totEUR;
     return pl / ptfBase / (d / 100);
   }, [legs, eq, unders, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
+
+  /* ---------- DELTA DI PORTAFOGLIO (beta sui titoli) ----------
+   * Misura quanto si muove il portafoglio quando i SUOI sottostanti si muovono
+   * direttamente di una certa %, indipendentemente dal beta col mercato. Es. solo
+   * MICRON: se MICRON fa −10% e il portafoglio fa −5% → Delta 0,50. Si ottiene
+   * eseguendo lo stesso scenario ma con beta=1 su ogni nome (l'EUR/USD resta fermo:
+   * non è un "titolo"). Denominatore identico (patrimonio), quindi confrontabile col
+   * beta di mercato. */
+  const undersDelta = useMemo<StressUnderlyingMap>(() => {
+    const m: StressUnderlyingMap = {};
+    for (const k of Object.keys(unders)) {
+      m[k] = { S: unders[k].S, beta: k === 'EURUSD' ? 0 : 1 };
+    }
+    return m;
+  }, [unders]);
+
+  const { deltaDown, deltaUp } = useMemo(() => {
+    if (!ptfBase || ptfBase === 0) return { deltaDown: 0, deltaUp: 0 };
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
+    const dn = runScenario(legs, eq, undersDelta, effIV, -10, volAt(-10), bp).totEUR;
+    const up = runScenario(legs, eq, undersDelta, effIV, 10, volAt(10), bp).totEUR;
+    return { deltaDown: dn / ptfBase / -0.1, deltaUp: up / ptfBase / 0.1 };
+  }, [legs, eq, undersDelta, effIV, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
+
+  const deltaScen = useMemo(() => {
+    if (!ptfBase || ptfBase === 0) return 0;
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
+    if (Math.abs(d) < 0.25) {
+      const pu = runScenario(legs, eq, undersDelta, effIV, 0.25, volAt(0.25), bp).totEUR;
+      const pd = runScenario(legs, eq, undersDelta, effIV, -0.25, volAt(-0.25), bp).totEUR;
+      return (pu - pd) / ptfBase / 0.005;
+    }
+    const pl = runScenario(legs, eq, undersDelta, effIV, d, volAt(d), bp).totEUR;
+    return pl / ptfBase / (d / 100);
+  }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
 
   /* ---------- Margine cassa ---------- */
   const { marNow, marScen, marCurve, marPnlMTM } = useMemo(() => {
@@ -1061,34 +1099,86 @@ function StressLabContent() {
               </Panel>
             ))}
             <Panel style={{ padding: '14px 16px' }}>
-              <div style={{ ...lbl, display: 'flex', alignItems: 'center' }}>
-                Beta @ scenario
-                <Info title="Quanto si muove il portafoglio col mercato" w={420}>
-                  Se il mercato fa −10%, di quanto si muove il portafoglio? Beta 1,5 = cala una volta e mezza il
-                  mercato. Le put vendute hanno <b>gamma negativo</b>: a ogni gradino di discesa pesano di più e
-                  la perdita accelera. Per questo il numero cresce muovendo lo slider verso il basso.
+              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {betaMode === 'market' ? 'Beta @ scenario' : 'Delta portafoglio'}
+                <Info
+                  title={
+                    betaMode === 'market'
+                      ? 'Quanto si muove il portafoglio col mercato'
+                      : 'Quanto si muove il portafoglio coi suoi titoli'
+                  }
+                  w={440}
+                >
+                  {betaMode === 'market' ? (
+                    <>
+                      Se il <b>mercato</b> fa −10%, di quanto si muove il portafoglio? La mossa è trasmessa via
+                      il <b>beta</b> di ciascun nome. Beta 1,5 = cala una volta e mezza il mercato. Le put
+                      vendute hanno gamma negativo: a ogni gradino di discesa pesano di più e la perdita
+                      accelera.
+                    </>
+                  ) : (
+                    <>
+                      Se i <b>titoli in portafoglio</b> si muovono direttamente di −10% (a prescindere dal beta
+                      col mercato), di quanto si muove il portafoglio? È il <b>delta complessivo</b> del
+                      portafoglio sui propri sottostanti. Esempio: solo MICRON, se MICRON fa −10% e il
+                      portafoglio fa −5% → Delta 0,50. L'EUR/USD resta fermo (non è un titolo). Lo slider qui
+                      vale come shock diretto sui titoli, non sul mercato.
+                    </>
+                  )}
                 </Info>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 0 }}>
+                  {(['market', 'titoli'] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setBetaMode(m)}
+                      style={{
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.4,
+                        padding: '3px 7px',
+                        cursor: 'pointer',
+                        border: `1px solid ${C.border2}`,
+                        background: betaMode === m ? C.cyan : 'transparent',
+                        color: betaMode === m ? '#0b0f17' : C.mut,
+                        borderRadius: m === 'market' ? '4px 0 0 4px' : '0 4px 4px 0',
+                        borderLeft: m === 'titoli' ? 'none' : `1px solid ${C.border2}`,
+                      }}
+                    >
+                      {m === 'market' ? 'Mercato' : 'Titoli'}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div
-                style={{
-                  fontFamily: MONO,
-                  fontSize: 24,
-                  fontWeight: 800,
-                  margin: '6px 0 2px',
-                  color: betaScen >= 1.5 ? C.dn : betaScen <= 0.9 ? C.up : C.text,
-                }}
-              >
-                {fmtN(betaScen, 2)}
-                <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>
-                  {' '}
-                  @ {sgn(d, 1)}%
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
-                rif. <span style={{ color: C.dn }}>{fmtN(betaDown, 2)}↓</span> ·{' '}
-                <span style={{ color: C.up }}>{fmtN(betaUp, 2)}↑</span>{' '}
-                <span style={{ fontSize: 10 }}>(∓10%)</span>
-              </div>
+              {(() => {
+                const headline = betaMode === 'market' ? betaScen : deltaScen;
+                const refDn = betaMode === 'market' ? betaDown : deltaDown;
+                const refUp = betaMode === 'market' ? betaUp : deltaUp;
+                return (
+                  <>
+                    <div
+                      style={{
+                        fontFamily: MONO,
+                        fontSize: 24,
+                        fontWeight: 800,
+                        margin: '6px 0 2px',
+                        color: headline >= 1.5 ? C.dn : headline <= 0.9 ? C.up : C.text,
+                      }}
+                    >
+                      {fmtN(headline, 2)}
+                      <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>
+                        {' '}
+                        @ {sgn(d, 1)}%{betaMode === 'titoli' ? ' titoli' : ''}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
+                      rif. <span style={{ color: C.dn }}>{fmtN(refDn, 2)}↓</span> ·{' '}
+                      <span style={{ color: C.up }}>{fmtN(refUp, 2)}↑</span>{' '}
+                      <span style={{ fontSize: 10 }}>(∓10%)</span>
+                    </div>
+                  </>
+                );
+              })()}
             </Panel>
 
             <Panel style={{ padding: '14px 16px' }}>
