@@ -358,34 +358,20 @@ function StressLabContent() {
 
   const data = useStressLab(inputs);
 
-  /* ---------- Override editabili dei sottostanti ---------- */
-  const [unders, setUnders] = useState<StressUnderlyingMap>({});
+  /* ---------- Override editabili dei sottostanti ----------
+   * Gli edit dell'utente sono un override SPARSO. Gli `unders` effettivi usati in
+   * TUTTI i calcoli (beta, P&L, margine) sono SEMPRE il baseline live di
+   * useStressLab con sopra gli override dell'utente. Niente effetto di sync, niente
+   * stato che "congela" beta/spot: così non può esserci desync tra `unders` e
+   * legs/prezzi/netting. Conseguenza: rientrando nella pagina (remount) o facendo
+   * refresh i numeri sono IDENTICI, perché derivano dallo stesso baseline. */
+  const [undersOverride, setUndersOverride] = useState<StressUnderlyingMap>({});
 
-  // Quando arrivano nuovi underlyings dall'hook, resetto solo i nuovi (preservo gli edit fatti dall'utente).
-  // IMPORTANTE: dipendiamo da una FIRMA STABILE (chiavi + valori baseline serializzati), non dal
-  // riferimento dell'oggetto `data.baselineUnders`, che cambia a ogni render dell'hook e causerebbe
-  // un loop infinito di setState ("Maximum update depth exceeded").
-  const baselineSig = useMemo(() => {
-    const keys = Object.keys(data.baselineUnders).sort();
-    return keys
-      .map((k) => `${k}:${data.baselineUnders[k].S.toFixed(4)}:${data.baselineUnders[k].beta.toFixed(4)}`)
-      .join('|');
-  }, [data.baselineUnders]);
-
-  useEffect(() => {
-    setUnders((prev) => {
-      const next: StressUnderlyingMap = { ...prev };
-      let changed = false;
-      for (const [k, v] of Object.entries(data.baselineUnders)) {
-        if (!next[k]) { next[k] = v; changed = true; }
-      }
-      for (const k of Object.keys(next)) {
-        if (!data.baselineUnders[k]) { delete next[k]; changed = true; }
-      }
-      return changed ? next : prev; // niente nuovo riferimento se nulla è cambiato → niente re-render inutile
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baselineSig]);
+  const unders = useMemo<StressUnderlyingMap>(() => {
+    const m: StressUnderlyingMap = { ...data.baselineUnders };
+    for (const k of Object.keys(undersOverride)) m[k] = undersOverride[k];
+    return m;
+  }, [data.baselineUnders, undersOverride]);
 
   /* ---------- Slider scenario ---------- */
   const [d, setD] = useState(-10);
@@ -1891,10 +1877,10 @@ function StressLabContent() {
                   type="number"
                   step="any"
                   onChange={(e) =>
-                    setUnders({
-                      ...unders,
+                    setUndersOverride((p) => ({
+                      ...p,
                       [u]: { ...o, S: parseFloat(e.target.value) || o.S },
-                    })
+                    }))
                   }
                   style={{
                     width: 70,
@@ -1913,10 +1899,10 @@ function StressLabContent() {
                   type="number"
                   step="0.1"
                   onChange={(e) =>
-                    setUnders({
-                      ...unders,
+                    setUndersOverride((p) => ({
+                      ...p,
                       [u]: { ...o, beta: parseFloat(e.target.value) || 0 },
-                    })
+                    }))
                   }
                   style={{
                     width: 48,
