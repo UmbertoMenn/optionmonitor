@@ -1622,9 +1622,9 @@ function StressLabContent() {
       >
         <div style={{ overflowX: 'auto', maxHeight: 440, overflowY: 'auto' }}>
           <table
-            className="grid"
             style={{
-              borderCollapse: 'collapse',
+              borderCollapse: 'separate',
+              borderSpacing: 0,
               fontFamily: MONO,
               fontSize: 11.5,
               width: '100%',
@@ -1632,7 +1632,7 @@ function StressLabContent() {
             }}
           >
             <thead>
-              <tr style={{ position: 'sticky', top: 0, background: C.panel, zIndex: 5 }}>
+              <tr>
                 {[
                   'Sottostante',
                   'β',
@@ -1651,6 +1651,10 @@ function StressLabContent() {
                       fontSize: 10,
                       textTransform: 'uppercase',
                       textAlign: i === 0 ? 'left' : 'right',
+                      position: 'sticky',
+                      top: 0,
+                      background: C.panel,
+                      zIndex: 5,
                     }}
                   >
                     {h}
@@ -1719,9 +1723,9 @@ function StressLabContent() {
       >
         <div style={{ overflowX: 'auto', maxHeight: 460, overflowY: 'auto' }}>
           <table
-            className="grid"
             style={{
-              borderCollapse: 'collapse',
+              borderCollapse: 'separate',
+              borderSpacing: 0,
               fontFamily: MONO,
               fontSize: 11.5,
               width: '100%',
@@ -1729,7 +1733,7 @@ function StressLabContent() {
             }}
           >
             <thead>
-              <tr style={{ position: 'sticky', top: 0, background: C.panel, zIndex: 5 }}>
+              <tr>
                 {[
                   'Sottostante',
                   'Gamba',
@@ -1749,6 +1753,10 @@ function StressLabContent() {
                       fontSize: 10,
                       textTransform: 'uppercase',
                       textAlign: i < 2 ? 'left' : 'right',
+                      position: 'sticky',
+                      top: 0,
+                      background: C.panel,
+                      zIndex: 5,
                     }}
                   >
                     {h}
