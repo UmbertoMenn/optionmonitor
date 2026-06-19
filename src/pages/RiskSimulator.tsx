@@ -265,95 +265,23 @@ function Panel({
   );
 }
 
-function Toggle({
-  active,
-  set,
-  label,
-  info,
-  accent = C.blue,
-}: {
-  active: boolean;
-  set: (v: boolean) => void;
-  label: string;
-  info?: React.ReactNode;
-  accent?: string;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '8px 10px',
-        background: active ? `${accent}14` : C.panel2,
-        border: `1px solid ${active ? accent : C.border2}`,
-        borderRadius: 7,
-      }}
-    >
-      <span
-        style={{
-          fontSize: 11,
-          color: active ? accent : C.mut,
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
-          fontWeight: 700,
-          display: 'inline-flex',
-          alignItems: 'center',
-        }}
-      >
-        {label}
-        {info}
-      </span>
-      <button
-        onClick={() => set(!active)}
-        style={{
-          width: 38,
-          height: 20,
-          borderRadius: 10,
-          border: `1px solid ${active ? accent : C.border2}`,
-          background: active ? `${accent}4D` : C.panel,
-          cursor: 'pointer',
-          position: 'relative',
-          padding: 0,
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            position: 'absolute',
-            top: 2,
-            left: active ? 20 : 2,
-            width: 14,
-            height: 14,
-            borderRadius: '50%',
-            background: active ? accent : C.mut,
-            transition: 'left .15s',
-          }}
-        />
-      </button>
-    </div>
-  );
-}
-
 /* ============================== STRESS LAB CONTENT ============================== */
 
 function StressLabContent() {
-  /* ---------- Toggle patrimonio / GP ---------- */
-  const [includeBonds, setIncludeBonds] = useState(true);
-  const [includeCash, setIncludeCash] = useState(true);
-  const [includeCommodity, setIncludeCommodity] = useState(true);
-  const [includeGPInPatrimony, setIncludeGPInPatrimony] = useState(false);
-  const [includeGPInShock, setIncludeGPInShock] = useState(false);
+  /* ---------- Ambito del patrimonio di riferimento ----------
+   * total = patrimonio totale (netting completo)
+   * equity = solo equity (netting − bond − cash − oro/commodity)
+   * equityGP = solo equity + esposizione equity della Gestione Patrimoniale
+   * I tre sono mutuamente esclusivi. Si combinano col toggle "Netting Ex CC e NP". */
+  const [patrimonyScope, setPatrimonyScope] = useState<'total' | 'equity' | 'equityGP'>('total');
+
+  // Ordinamento delle tabelle di dettaglio (click sull'intestazione di colonna)
+  const [undSort, setUndSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'nm', dir: 'asc' });
+  const [legSort, setLegSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'ticker', dir: 'asc' });
 
   const inputs: StressLabInputs = useMemo(
-    () => ({
-      includeBonds,
-      includeCash,
-      includeCommodity,
-      includeGPInPatrimony,
-      includeGPInShock,
-    }),
-    [includeBonds, includeCash, includeCommodity, includeGPInPatrimony, includeGPInShock],
+    () => ({ patrimonyScope }),
+    [patrimonyScope],
   );
 
   const data = useStressLab(inputs);
@@ -591,10 +519,36 @@ function StressLabContent() {
         o.optNotional += (Math.abs(l.q) * l.mult * undersActive[l.u].S) / fx.USD;
       }
     });
-    return Object.values(m)
-      .map((o) => ({ ...o, tot: o.pnlEq + o.pnlOpt }))
-      .sort((a, b) => a.nm.localeCompare(b.nm));
+    return Object.values(m).map((o) => ({ ...o, tot: o.pnlEq + o.pnlOpt }));
   }, [scen, undersActive, legs, fx.USD]);
+
+  // Vista ordinabile (click sull'intestazione). Default: ticker A→Z.
+  const undView = useMemo(() => {
+    const get = (o: (typeof undTable)[number], k: string): number | string => {
+      switch (k) {
+        case 'nm': return o.nm;
+        case 'beta': return o.beta ?? -Infinity;
+        case 'spot': return o.spot ?? -Infinity;
+        case 'spotScen': return (o.spot ?? 0) * (1 + ((o.beta ?? 0) * d) / 100);
+        case 'move': return (o.beta ?? 0) * d;
+        case 'ctv': return o.ctv;
+        case 'nLegs': return o.nLegs;
+        case 'pnlEq': return o.pnlEq;
+        case 'pnlOpt': return o.pnlOpt;
+        default: return o.tot ?? 0;
+      }
+    };
+    const dir = undSort.dir === 'asc' ? 1 : -1;
+    return [...undTable].sort((a, b) => {
+      const av = get(a, undSort.col);
+      const bv = get(b, undSort.col);
+      const c =
+        typeof av === 'string' || typeof bv === 'string'
+          ? String(av).localeCompare(String(bv))
+          : (av as number) - (bv as number);
+      return dir * c;
+    });
+  }, [undTable, undSort, d]);
 
   // Beta "totale" = media dei beta di riga PESATA per l'esposizione al sottostante
   // (|ctv titoli| + nozionale opzioni). È il vero totale della COLONNA beta: in modalità
@@ -653,16 +607,39 @@ function StressLabContent() {
   const ladderMax = Math.max(...ladder.map((b) => Math.abs(b.dv)), 1);
 
   /* ---------- Tabella per gamba ---------- */
-  const tableRows = useMemo(
-    () =>
-      scen.rows
-        .map((rr) => ({ ...rr, leg: legs[rr.i] }))
-        .sort(
-          (a, b) =>
-            a.leg.u.localeCompare(b.leg.u) || Math.abs(b.pnlEUR) - Math.abs(a.pnlEUR),
-        ),
-    [scen, legs],
-  );
+  const tableRows = useMemo(() => {
+    const rows = scen.rows.map((rr) => ({ ...rr, leg: legs[rr.i] }));
+    const get = (rr: (typeof rows)[number], k: string): number | string => {
+      switch (k) {
+        case 'ticker': return rr.leg.u;
+        case 'gamba': return rr.leg.cp + String(rr.leg.K).padStart(12, '0');
+        case 'q': return rr.leg.q;
+        case 'spot': return undersActive[rr.leg.u]?.S ?? 0;
+        case 'sig0': return rr.sig0;
+        case 'sig1': return rr.sig1;
+        case 'dIV': return rr.dIV;
+        case 'p0': return rr.p0;
+        case 'p1': return rr.p1;
+        default: return rr.pnlEUR;
+      }
+    };
+    const dir = legSort.dir === 'asc' ? 1 : -1;
+    return rows.sort((a, b) => {
+      if (legSort.col === 'ticker') {
+        // raggruppa per ticker (A→Z o Z→A); dentro al gruppo, impatto |P&L| decrescente
+        const t = a.leg.u.localeCompare(b.leg.u);
+        if (t !== 0) return dir * t;
+        return Math.abs(b.pnlEUR) - Math.abs(a.pnlEUR);
+      }
+      const av = get(a, legSort.col);
+      const bv = get(b, legSort.col);
+      const c =
+        typeof av === 'string' || typeof bv === 'string'
+          ? String(av).localeCompare(String(bv))
+          : (av as number) - (bv as number);
+      return dir * c;
+    });
+  }, [scen, legs, legSort, undersActive]);
 
   const kpi = [
     { l: 'P&L Totale', v: scen.totEUR, sub: `valore stressato ${fmtEUR(ptfBase + scen.totEUR)}` },
@@ -792,92 +769,94 @@ function StressLabContent() {
         </div>
       )}
 
-      {/* PATRIMONIO TOGGLES */}
+      {/* PATRIMONIO — AMBITO */}
       <Panel
-        title="Patrimonio — cosa includere"
+        title="Patrimonio di riferimento"
         info={
-          <Info title="Cosa entra nel patrimonio di riferimento" w={400}>
-            Il <b>patrimonio MTM</b> è il denominatore per calcolare il P&L percentuale e il beta scenario.
-            Le voci escluse dallo shock equity (bond, cash, oro) influiscono sul patrimonio ma non vengono
-            shockate dal modello: la loro presenza “attutisce” il beta complessivo.
+          <Info title="Ambito del patrimonio (denominatore di P&L% e beta)" w={440}>
+            <b>Patrimonio Totale</b>: netting completo (equity + bond + cash + oro + derivati nettati).
             <br />
             <br />
-            <b>GP nel patrimonio</b>: somma i valori delle Gestioni Patrimoniali al patrimonio totale.
+            <b>Solo Equity</b>: tolti bond, cash e oro/commodity → resta l'esposizione azionaria + derivati
+            nettati.
             <br />
-            <b>GP nello shock</b>: applica anche alle azioni GP lo shock di mercato secondo i loro beta.
-            Senza questo toggle, le GP restano statiche.
+            <br />
+            <b>Solo Equity + Equity GP</b>: aggiunge l'esposizione equity (solo azioni) della Gestione
+            Patrimoniale, che viene anche shockata nello scenario.
+            <br />
+            <br />
+            Si combina col toggle <b>Netting Ex CC e NP</b>: se attivo, la base di partenza è il netting ex CC
+            e NP invece del netting totale.
           </Info>
         }
         style={{ marginBottom: 14 }}
       >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 8,
-          }}
-        >
-          <Toggle
-            active={includeBonds}
-            set={setIncludeBonds}
-            label={`Bond (${fmtN(data.patrimonyBreakdown.bondsEUR / 1000, 0)}k)`}
-            info={
-              <Info title="Bond" w={280}>
-                Inclusi nel patrimonio MTM ma <b>esclusi dallo shock equity</b> (la duration non è modellata).
-                Spegnere se vuoi vedere solo l'esposizione al rischio azionario/derivati.
-              </Info>
-            }
-            accent={C.cyan}
-          />
-          <Toggle
-            active={includeCash}
-            set={setIncludeCash}
-            label={`Cash (${fmtN(data.patrimonyBreakdown.cashEUR / 1000, 0)}k)`}
-            info={
-              <Info title="Cash" w={280}>
-                Liquidità del conto. Sempre esclusa dallo shock; spegnere per misurare l'esposizione "lorda" del
-                portafoglio investito.
-              </Info>
-            }
-            accent={C.cyan}
-          />
-          <Toggle
-            active={includeCommodity}
-            set={setIncludeCommodity}
-            label={`Oro / Commodity (${fmtN(data.patrimonyBreakdown.commodityEUR / 1000, 0)}k)`}
-            info={
-              <Info title="Oro / Materie Prime" w={280}>
-                Inclusi nel patrimonio con beta 0 (non si muovono con lo shock equity). Se vuoi che l'oro
-                reagisca, modifica il suo beta nel pannello “Sottostanti”.
-              </Info>
-            }
-            accent={C.cyan}
-          />
-          <Toggle
-            active={includeGPInPatrimony}
-            set={setIncludeGPInPatrimony}
-            label={`GP nel patrimonio (${fmtN(data.patrimonyBreakdown.gpEUR / 1000, 0)}k)`}
-            info={
-              <Info title="GP nel patrimonio" w={300}>
-                Somma i valori delle Gestioni Patrimoniali al patrimonio totale. Senza questo toggle il GP è
-                considerato un asset separato (e non incide sull'incidenza del margine).
-              </Info>
-            }
-            accent={C.amber}
-          />
-          <Toggle
-            active={includeGPInShock}
-            set={setIncludeGPInShock}
-            label="GP nello shock"
-            info={
-              <Info title="GP nello shock equity" w={300}>
-                Estende lo shock di mercato anche alle azioni delle Gestioni Patrimoniali (con i loro beta).
-                Le obbligazioni GP restano sempre fuori dallo shock.
-              </Info>
-            }
-            accent={C.amber}
-          />
-        </div>
+        {(() => {
+          const pb = data.patrimonyBreakdown;
+          const baseRaw = netting ? data.nettingExCCAndNPRaw : data.nettingTotalRaw;
+          const vEquity = baseRaw - pb.bondsEUR - pb.cashEUR - pb.commodityEUR;
+          const scopeOpts: { k: 'total' | 'equity' | 'equityGP'; label: string; val: number }[] = [
+            { k: 'total', label: 'Patrimonio Totale', val: baseRaw },
+            { k: 'equity', label: 'Solo Equity', val: vEquity },
+            { k: 'equityGP', label: 'Solo Equity + Equity GP', val: vEquity + pb.gpEquityEUR },
+          ];
+          return (
+            <>
+              <div style={{ display: 'flex', gap: 0, flexWrap: 'wrap' }}>
+                {scopeOpts.map((o, i) => {
+                  const act = patrimonyScope === o.k;
+                  return (
+                    <button
+                      key={o.k}
+                      onClick={() => setPatrimonyScope(o.k)}
+                      style={{
+                        flex: '1 1 170px',
+                        padding: '10px 12px',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        background: act ? `${C.cyan}14` : C.panel2,
+                        border: `1px solid ${act ? C.cyan : C.border2}`,
+                        borderLeft: i > 0 ? 'none' : `1px solid ${act ? C.cyan : C.border2}`,
+                        borderRadius:
+                          i === 0 ? '7px 0 0 7px' : i === scopeOpts.length - 1 ? '0 7px 7px 0' : 0,
+                        fontFamily: SANS,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          letterSpacing: 0.4,
+                          color: act ? C.cyan : C.mut,
+                        }}
+                      >
+                        {o.label}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 16,
+                          fontWeight: 800,
+                          color: act ? C.text : C.mut,
+                          marginTop: 3,
+                        }}
+                      >
+                        {fmtEUR(o.val)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
+                Equity (az+ETF) {fmtN((pb.stocksEUR + pb.etfEUR) / 1000, 0)}k · Bond{' '}
+                {fmtN(pb.bondsEUR / 1000, 0)}k · Cash {fmtN(pb.cashEUR / 1000, 0)}k · Oro{' '}
+                {fmtN(pb.commodityEUR / 1000, 0)}k · Equity GP {fmtN(pb.gpEquityEUR / 1000, 0)}k
+                {netting ? ' · base: netting Ex CC e NP' : ' · base: netting totale'}
+              </div>
+            </>
+          );
+        })()}
       </Panel>
 
       {/* CONTROLS + KPI */}
@@ -1786,21 +1765,29 @@ function StressLabContent() {
             <thead>
               <tr>
                 {[
-                  'Sottostante',
-                  'β',
-                  'Spot',
-                  'Spot scen.',
-                  'Mossa %',
-                  'Ctv titoli €',
-                  'Gambe opz.',
-                  'P&L titoli €',
-                  'P&L opzioni €',
-                  'P&L totale €',
-                ].map((h, i) => (
+                  { h: 'Sottostante', k: 'nm' },
+                  { h: 'β', k: 'beta' },
+                  { h: 'Spot', k: 'spot' },
+                  { h: 'Spot scen.', k: 'spotScen' },
+                  { h: 'Mossa %', k: 'move' },
+                  { h: 'Ctv titoli €', k: 'ctv' },
+                  { h: 'Gambe opz.', k: 'nLegs' },
+                  { h: 'P&L titoli €', k: 'pnlEq' },
+                  { h: 'P&L opzioni €', k: 'pnlOpt' },
+                  { h: 'P&L totale €', k: 'tot' },
+                ].map((c, i) => (
                   <th
-                    key={h}
+                    key={c.h}
+                    onClick={() =>
+                      setUndSort((s) =>
+                        s.col === c.k
+                          ? { col: c.k, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+                          : { col: c.k, dir: c.k === 'nm' ? 'asc' : 'desc' },
+                      )
+                    }
+                    title="Clicca per ordinare"
                     style={{
-                      color: C.mut,
+                      color: undSort.col === c.k ? C.cyan : C.mut,
                       fontWeight: 600,
                       fontSize: 10,
                       textTransform: 'uppercase',
@@ -1809,15 +1796,19 @@ function StressLabContent() {
                       top: 0,
                       background: C.panel,
                       zIndex: 5,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    {h}
+                    {c.h}
+                    {undSort.col === c.k ? (undSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {undTable.map((o) => {
+              {undView.map((o) => {
                 const moveP = (o.beta ?? 0) * d; // mossa del sottostante in %
                 const spot1 = o.spot != null ? o.spot * (1 + moveP / 100) : null;
                 const sEUR = (x: number) => (x > 0 ? '+' : '') + fmtN(x, 0);
@@ -1914,21 +1905,29 @@ function StressLabContent() {
             <thead>
               <tr>
                 {[
-                  'Sottostante',
-                  'Gamba',
-                  'Qtà',
-                  'Spot → scen.',
-                  'IV base',
-                  'IV scen.',
-                  'ΔIV',
-                  'Px base',
-                  'Px scen.',
-                  'P&L €',
-                ].map((h, i) => (
+                  { h: 'Sottostante', k: 'ticker' },
+                  { h: 'Gamba', k: 'gamba' },
+                  { h: 'Qtà', k: 'q' },
+                  { h: 'Spot → scen.', k: 'spot' },
+                  { h: 'IV base', k: 'sig0' },
+                  { h: 'IV scen.', k: 'sig1' },
+                  { h: 'ΔIV', k: 'dIV' },
+                  { h: 'Px base', k: 'p0' },
+                  { h: 'Px scen.', k: 'p1' },
+                  { h: 'P&L €', k: 'pnl' },
+                ].map((c, i) => (
                   <th
-                    key={h}
+                    key={c.h}
+                    onClick={() =>
+                      setLegSort((s) =>
+                        s.col === c.k
+                          ? { col: c.k, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+                          : { col: c.k, dir: c.k === 'ticker' || c.k === 'gamba' ? 'asc' : 'desc' },
+                      )
+                    }
+                    title="Clicca per ordinare"
                     style={{
-                      color: C.mut,
+                      color: legSort.col === c.k ? C.cyan : C.mut,
                       fontWeight: 600,
                       fontSize: 10,
                       textTransform: 'uppercase',
@@ -1937,9 +1936,13 @@ function StressLabContent() {
                       top: 0,
                       background: C.panel,
                       zIndex: 5,
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    {h}
+                    {c.h}
+                    {legSort.col === c.k ? (legSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                   </th>
                 ))}
               </tr>

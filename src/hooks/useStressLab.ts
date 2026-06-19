@@ -46,16 +46,11 @@ const DEFAULT_USD_RATE = 1.15; // USD per 1 EUR (fallback se nessuna posizione U
  * ========================================================================= */
 
 export interface StressLabInputs {
-  /** Includi bond nel patrimonio MTM (default ON; fuori dallo shock) */
-  includeBonds: boolean;
-  /** Includi cash nel patrimonio MTM (default ON; fuori dallo shock) */
-  includeCash: boolean;
-  /** Includi oro/commodity nel patrimonio MTM (default ON; fuori dallo shock se beta=0) */
-  includeCommodity: boolean;
-  /** Includi posizioni GP nel patrimonio (default OFF: GP separato) */
-  includeGPInPatrimony: boolean;
-  /** Includi posizioni GP nello shock di mercato (default OFF) */
-  includeGPInShock: boolean;
+  /** Ambito del patrimonio di riferimento (denominatore di P&L% e beta, e valore mostrato):
+   *  'total'    = patrimonio totale (netting completo: equity+etf+bond+cash+oro+derivati nettati)
+   *  'equity'   = solo equity (netting − bond − cash − oro/commodity)
+   *  'equityGP' = solo equity + esposizione equity della Gestione Patrimoniale */
+  patrimonyScope: 'total' | 'equity' | 'equityGP';
 }
 
 export interface BetaRow {
@@ -79,6 +74,9 @@ export interface StressLabData {
   nettingTotal: number;
   /** Patrimonio = NETTING EX CC E NP (stessa metrica della dashboard), coi toggle applicati */
   nettingExCCAndNP: number;
+  /** Netting GREZZO (ambito 'total', senza ritaglio), per etichettare le opzioni di ambito */
+  nettingTotalRaw: number;
+  nettingExCCAndNPRaw: number;
   /** Risk-free aggregato (default 4%) */
   riskFree: number;
   /** Numero di gambe per cui non è stato possibile calcolare l'IV */
@@ -99,6 +97,7 @@ export interface StressLabData {
     commodityEUR: number;
     cashEUR: number;
     gpEUR: number;
+    gpEquityEUR: number;
   };
 }
 
@@ -500,16 +499,9 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       const e = buildFromPosition(p);
       if (e) out.push(e);
     });
-    // Commodity: opzionale, ma se inclusa nel patrimonio entra qui con beta default 0
-    if (inputs.includeCommodity) {
-      commodities.forEach((p) => {
-        // L'oro fisico hedged ha beta ~0; lo stesso per le materie prime non agganciate all'equity
-        const e = buildFromPosition(p, 0);
-        if (e) out.push(e);
-      });
-    }
-    // GP nel shock: solo se richiesto (solo azioni — bond non si muovono con equity shock)
-    if (inputs.includeGPInShock) {
+    // GP: l'esposizione equity della Gestione Patrimoniale entra nello shock SOLO
+    // nell'ambito "Solo Equity + Equity GP" (solo le azioni; le obbligazioni GP restano fuori).
+    if (inputs.patrimonyScope === 'equityGP') {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
@@ -528,43 +520,26 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         });
     }
     return out;
-  }, [stocks, etfs, commodities, gpHoldings, betaMap, inputs.includeCommodity, inputs.includeGPInShock]);
+  }, [stocks, etfs, gpHoldings, betaMap, inputs.patrimonyScope]);
 
-  /* ---------- 11. Patrimonio MTM (con toggle applicati) ---------- */
+  /* ---------- 11. Patrimonio MTM (totale, per il rapporto di margine) ---------- */
 
   const { ptfBaseMTM, patrimonyBreakdown } = useMemo(() => {
-    const derivativesEUR = derivatives.reduce(
-      (a, p) => a + (p.snapshot_market_value ?? p.market_value ?? 0),
-      0,
-    );
-    const stocksEUR = stocks.reduce(
-      (a, p) => a + (p.snapshot_market_value ?? p.market_value ?? 0),
-      0,
-    );
-    const etfEUR = etfs.reduce(
-      (a, p) => a + (p.snapshot_market_value ?? p.market_value ?? 0),
-      0,
-    );
-    const bondsEUR = bonds.reduce(
-      (a, p) => a + (p.snapshot_market_value ?? p.market_value ?? 0),
-      0,
-    );
-    const commodityEUR = commodities.reduce(
-      (a, p) => a + (p.snapshot_market_value ?? p.market_value ?? 0),
-      0,
-    );
+    const sum = (arr: Position[]) =>
+      arr.reduce((a, p) => a + (p.snapshot_market_value ?? p.market_value ?? 0), 0);
+    const derivativesEUR = sum(derivatives);
+    const stocksEUR = sum(stocks);
+    const etfEUR = sum(etfs);
+    const bondsEUR = sum(bonds);
+    const commodityEUR = sum(commodities);
     const cashEUR = portfolio?.cash_value ?? 0;
+    const gpEUR = (gpHoldings || []).reduce((a, h) => a + (h.market_value ?? 0), 0);
+    const gpEquityEUR = (gpHoldings || [])
+      .filter((h) => h.asset_type === 'stock')
+      .reduce((a, h) => a + (h.market_value ?? 0), 0);
 
-    let gpEUR = 0;
-    if (inputs.includeGPInPatrimony) {
-      gpEUR = (gpHoldings || []).reduce((a, h) => a + (h.market_value ?? 0), 0);
-    }
-
-    let total = derivativesEUR + stocksEUR + etfEUR;
-    if (inputs.includeBonds) total += bondsEUR;
-    if (inputs.includeCash) total += cashEUR;
-    if (inputs.includeCommodity) total += commodityEUR;
-    if (inputs.includeGPInPatrimony) total += gpEUR;
+    // Patrimonio MTM TOTALE (sempre completo): denominatore del rapporto di margine.
+    const total = derivativesEUR + stocksEUR + etfEUR + bondsEUR + cashEUR + commodityEUR;
 
     return {
       ptfBaseMTM: total,
@@ -576,33 +551,22 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         commodityEUR,
         cashEUR,
         gpEUR,
+        gpEquityEUR,
       },
     };
-  }, [
-    derivatives,
-    stocks,
-    etfs,
-    bonds,
-    commodities,
-    gpHoldings,
-    portfolio?.cash_value,
-    inputs.includeBonds,
-    inputs.includeCash,
-    inputs.includeCommodity,
-    inputs.includeGPInPatrimony,
-  ]);
+  }, [derivatives, stocks, etfs, bonds, commodities, gpHoldings, portfolio?.cash_value]);
 
   /* ---------- 12. Warning counters ---------- */
 
   const ivWarnings = useMemo(() => legs.filter((l) => l.fl).length, [legs]);
 
   /* ---------- 12b. NETTING (stessa metrica e stesso motore della dashboard) ----------
-   * Il patrimonio mostrato nel simulatore deve essere il NETTING TOTALE (e, col toggle,
-   * il NETTING EX CC E NP), identico a quello che vede l'utente in dashboard.
-   * useDerivativeNetting parte da summary.totalValue (azioni+etf+bond+cash+commodity)
-   * e vi somma il contributo nettato dei derivati. Per rispettare i toggle del
-   * simulatore (escludere bond / cash / oro dal patrimonio) sottraggo le componenti
-   * disattivate; la GP non è inclusa nel summary, quindi la aggiungo se richiesta.
+   * useDerivativeNetting parte da summary.totalValue (azioni+etf+bond+cash+commodity) e vi
+   * somma il contributo nettato dei derivati. L'AMBITO (patrimonyScope) ritaglia il base:
+   *  - 'total'    → netting completo
+   *  - 'equity'   → netting − bond − cash − oro/commodity (resta equity+etf+derivati nettati)
+   *  - 'equityGP' → equity + esposizione equity della GP
+   * La GP non è nel summary, quindi va SOMMATA quando richiesta.
    */
   const nettingPositions = useMemo(() => positions || [], [positions]);
   const nettingOverrides = useMemo(() => overrides || [], [overrides]);
@@ -618,10 +582,11 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
   const { nettingTotal, nettingExCCAndNP } = useMemo(() => {
     let adj = 0;
-    if (!inputs.includeBonds) adj -= patrimonyBreakdown.bondsEUR;
-    if (!inputs.includeCash) adj -= patrimonyBreakdown.cashEUR;
-    if (!inputs.includeCommodity) adj -= patrimonyBreakdown.commodityEUR;
-    if (inputs.includeGPInPatrimony) adj += patrimonyBreakdown.gpEUR;
+    if (inputs.patrimonyScope !== 'total') {
+      // togli le componenti non-equity dal patrimonio di riferimento
+      adj -= patrimonyBreakdown.bondsEUR + patrimonyBreakdown.cashEUR + patrimonyBreakdown.commodityEUR;
+      if (inputs.patrimonyScope === 'equityGP') adj += patrimonyBreakdown.gpEquityEUR;
+    }
     return {
       nettingTotal: liveNetting.nettingTotal + adj,
       nettingExCCAndNP: liveNetting.nettingExCCAndNP + adj,
@@ -629,10 +594,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
   }, [
     liveNetting.nettingTotal,
     liveNetting.nettingExCCAndNP,
-    inputs.includeBonds,
-    inputs.includeCash,
-    inputs.includeCommodity,
-    inputs.includeGPInPatrimony,
+    inputs.patrimonyScope,
     patrimonyBreakdown,
   ]);
 
@@ -647,6 +609,8 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     ptfBaseMTM,
     nettingTotal,
     nettingExCCAndNP,
+    nettingTotalRaw: liveNetting.nettingTotal,
+    nettingExCCAndNPRaw: liveNetting.nettingExCCAndNP,
     riskFree,
     ivWarnings,
     missingBetaTickers,
