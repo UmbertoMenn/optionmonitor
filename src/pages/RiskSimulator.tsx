@@ -593,7 +593,7 @@ function StressLabContent() {
     });
     return Object.values(m)
       .map((o) => ({ ...o, tot: o.pnlEq + o.pnlOpt }))
-      .sort((a, b) => Math.abs(b.tot) - Math.abs(a.tot));
+      .sort((a, b) => a.nm.localeCompare(b.nm));
   }, [scen, undersActive, legs, fx.USD]);
 
   // Beta "totale" = media dei beta di riga PESATA per l'esposizione al sottostante
@@ -657,7 +657,10 @@ function StressLabContent() {
     () =>
       scen.rows
         .map((rr) => ({ ...rr, leg: legs[rr.i] }))
-        .sort((a, b) => Math.abs(b.pnlEUR) - Math.abs(a.pnlEUR)),
+        .sort(
+          (a, b) =>
+            a.leg.u.localeCompare(b.leg.u) || Math.abs(b.pnlEUR) - Math.abs(a.pnlEUR),
+        ),
     [scen, legs],
   );
 
