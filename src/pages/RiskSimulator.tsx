@@ -384,9 +384,11 @@ function StressLabContent() {
   const [showAdv, setShowAdv] = useState(false);
   const [showUnd, setShowUnd] = useState(false);
   const [netting, setNetting] = useState(false);
-  // Card beta: 'market' = beta al MERCATO (mossa trasmessa via beta di ciascun nome);
-  // 'titoli' = Delta di portafoglio (i sottostanti si muovono DIRETTAMENTE della stessa %).
-  const [betaMode, setBetaMode] = useState<'market' | 'titoli'>('market');
+  // Metodologia dello scenario: 'market' = shock di MERCATO (mossa trasmessa via beta
+  // di ciascun nome) → card "Beta". 'titoli' = shock diretto sui TITOLI in portafoglio
+  // (beta=1 su ogni nome, l'EUR/USD resta fermo) → card "Delta di portafoglio".
+  // Il toggle vive nella card Scenario perché cambia TUTTI i P&L (totale/azioni/opzioni).
+  const [shockMode, setShockMode] = useState<'market' | 'titoli'>('market');
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
   const [ivScan, setIvScan] = useState(0.4);
@@ -394,6 +396,20 @@ function StressLabContent() {
 
   const { legs, eq, fx, effIV, ptfBaseMTM, nettingTotal, nettingExCCAndNP, riskFree } = data;
   const r = riskFree;
+
+  // Sottostanti per lo SCENARIO attivo: in modalità 'titoli' i nomi si muovono
+  // direttamente della stessa % (beta=1), l'EUR/USD resta fermo. Così l'intero
+  // scenario (P&L totale, azioni, opzioni, curva, heatmap, margine a scenario)
+  // segue la metodologia scelta.
+  const undersDelta = useMemo<StressUnderlyingMap>(() => {
+    const m: StressUnderlyingMap = {};
+    for (const k of Object.keys(unders)) {
+      m[k] = { S: unders[k].S, beta: k === 'EURUSD' ? 0 : 1 };
+    }
+    return m;
+  }, [unders]);
+
+  const undersActive = shockMode === 'titoli' ? undersDelta : unders;
   const prm = useMemo(
     () => ({ r, skewB, kappa, pExp, days, fx, netting }),
     [r, skewB, kappa, pExp, days, fx, netting],
@@ -402,8 +418,8 @@ function StressLabContent() {
   const dV1M = volMode === 'auto' ? coupledDV1M(d) : dVman;
 
   const scen = useMemo(
-    () => runScenario(legs, eq, unders, effIV, d, dV1M, prm),
-    [legs, eq, unders, effIV, d, dV1M, prm],
+    () => runScenario(legs, eq, undersActive, effIV, d, dV1M, prm),
+    [legs, eq, undersActive, effIV, d, dV1M, prm],
   );
 
   /* ---------- Patrimonio di riferimento = NETTING della dashboard ----------
@@ -441,18 +457,8 @@ function StressLabContent() {
   /* ---------- DELTA DI PORTAFOGLIO (beta sui titoli) ----------
    * Misura quanto si muove il portafoglio quando i SUOI sottostanti si muovono
    * direttamente di una certa %, indipendentemente dal beta col mercato. Es. solo
-   * MICRON: se MICRON fa −10% e il portafoglio fa −5% → Delta 0,50. Si ottiene
-   * eseguendo lo stesso scenario ma con beta=1 su ogni nome (l'EUR/USD resta fermo:
-   * non è un "titolo"). Denominatore identico (patrimonio), quindi confrontabile col
-   * beta di mercato. */
-  const undersDelta = useMemo<StressUnderlyingMap>(() => {
-    const m: StressUnderlyingMap = {};
-    for (const k of Object.keys(unders)) {
-      m[k] = { S: unders[k].S, beta: k === 'EURUSD' ? 0 : 1 };
-    }
-    return m;
-  }, [unders]);
-
+   * MICRON: se MICRON fa −10% e il portafoglio fa −5% → Delta 0,50. Usa undersDelta
+   * (beta=1, EUR/USD fermo), definito sopra. Denominatore identico (patrimonio). */
   const { deltaDown, deltaUp } = useMemo(() => {
     if (!ptfBase || ptfBase === 0) return { deltaDown: 0, deltaUp: 0 };
     const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
@@ -520,22 +526,22 @@ function StressLabContent() {
     } catch (e) {
       console.error('[MarginDiag] log error', e);
     }
-    const cur = runScenario(legs, eq, unders, effIV, d, dV1M, { ...bp, days });
+    const cur = runScenario(legs, eq, undersActive, effIV, d, dV1M, { ...bp, days });
     const sigDs: Record<number, number> = {};
     cur.rows.forEach((x) => (sigDs[x.i] = x.sig1));
-    const sc = occMargin(legs, eq, unders, d, sigDs, days, marPrm);
+    const sc = occMargin(legs, eq, undersActive, d, sigDs, days, marPrm);
     const pts: { d: number; Margine: number }[] = [];
     for (let x = -35; x <= 15.01; x += 2.5) {
-      const s = runScenario(legs, eq, unders, effIV, x, volAt(x), { ...bp, days });
+      const s = runScenario(legs, eq, undersActive, effIV, x, volAt(x), { ...bp, days });
       const sgs: Record<number, number> = {};
       s.rows.forEach((row) => (sgs[row.i] = row.sig1));
       pts.push({
         d: x,
-        Margine: Math.round(occMargin(legs, eq, unders, x, sgs, days, marPrm).total),
+        Margine: Math.round(occMargin(legs, eq, undersActive, x, sgs, days, marPrm).total),
       });
     }
     return { marNow: now, marScen: sc, marCurve: pts, marPnlMTM: cur.totEUR };
-  }, [legs, eq, unders, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, ptfBase]);
+  }, [legs, eq, unders, undersActive, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, ptfBase]);
 
   /* ---------- Tabella per sottostante ---------- */
   const undTable = useMemo(() => {
@@ -569,7 +575,7 @@ function StressLabContent() {
       o.ctv += e.ctv || 0;
       o.pnlEq += e.pnl;
       o.nm = e.tick || e.nm;
-      if (e.tick && unders[e.tick]) o.spot = unders[e.tick].S;
+      if (e.tick && undersActive[e.tick]) o.spot = undersActive[e.tick].S;
     });
     scen.rows.forEach((rr) => {
       const l = legs[rr.i];
@@ -577,22 +583,22 @@ function StressLabContent() {
       o.pnlOpt += rr.pnlEUR;
       o.nLegs += 1;
       o.nm = l.u;
-      if (unders[l.u]) {
-        o.beta = unders[l.u].beta;
-        o.spot = unders[l.u].S;
+      if (undersActive[l.u]) {
+        o.beta = undersActive[l.u].beta;
+        o.spot = undersActive[l.u].S;
       }
     });
     return Object.values(m)
       .map((o) => ({ ...o, tot: o.pnlEq + o.pnlOpt }))
       .sort((a, b) => Math.abs(b.tot) - Math.abs(a.tot));
-  }, [scen, unders, legs]);
+  }, [scen, undersActive, legs]);
 
   /* ---------- Curva P&L vs mercato ---------- */
   const curve = useMemo(() => {
     const pts: { d: number; Totale: number; 'Azioni/ETF': number; Opzioni: number }[] = [];
     for (let x = -35; x <= 15.01; x += 2.5) {
       const dv = volMode === 'auto' ? coupledDV1M(x) : dVman;
-      const s = runScenario(legs, eq, unders, effIV, x, dv, prm);
+      const s = runScenario(legs, eq, undersActive, effIV, x, dv, prm);
       pts.push({
         d: x,
         Totale: Math.round(s.totEUR),
@@ -601,14 +607,14 @@ function StressLabContent() {
       });
     }
     return pts;
-  }, [legs, eq, unders, effIV, volMode, dVman, prm]);
+  }, [legs, eq, undersActive, effIV, volMode, dVman, prm]);
 
   /* ---------- Heatmap ---------- */
   const HM_D = [-30, -25, -20, -15, -10, -5, 0, 5, 10];
   const HM_V = [40, 30, 20, 15, 10, 5, 0, -5, -10];
   const heat = useMemo(
-    () => HM_V.map((v) => HM_D.map((x) => runScenario(legs, eq, unders, effIV, x, v, prm).totEUR)),
-    [legs, eq, unders, effIV, prm],
+    () => HM_V.map((v) => HM_D.map((x) => runScenario(legs, eq, undersActive, effIV, x, v, prm).totEUR)),
+    [legs, eq, undersActive, effIV, prm],
   );
   const hmMax = Math.max(...heat.flat().map(Math.abs), 1);
 
@@ -639,7 +645,7 @@ function StressLabContent() {
 
   const kpi = [
     { l: 'P&L Totale', v: scen.totEUR, sub: `valore stressato ${fmtEUR(ptfBase + scen.totEUR)}` },
-    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: 'lineare via beta' },
+    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: shockMode === 'titoli' ? 'shock diretto (β=1)' : 'lineare via beta' },
     {
       l: 'P&L Opzioni',
       v: scen.optEUR,
@@ -878,15 +884,46 @@ function StressLabContent() {
             </Info>
           }
         >
+          <div style={{ display: 'flex', gap: 0, marginBottom: 12 }}>
+            {(['market', 'titoli'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setShockMode(m)}
+                style={{
+                  flex: 1,
+                  padding: '7px 4px',
+                  cursor: 'pointer',
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  background:
+                    shockMode === m
+                      ? m === 'titoli'
+                        ? C.cyan
+                        : 'rgba(41,98,255,.16)'
+                      : 'transparent',
+                  border: `1px solid ${
+                    shockMode === m ? (m === 'titoli' ? C.cyan : C.blue) : C.border2
+                  }`,
+                  borderLeft: m === 'titoli' ? 'none' : undefined,
+                  color:
+                    shockMode === m ? (m === 'titoli' ? '#0b0f17' : C.blue) : C.mut,
+                  borderRadius: m === 'market' ? '6px 0 0 6px' : '0 6px 6px 0',
+                  fontFamily: SANS,
+                }}
+              >
+                {m === 'market' ? 'Shock mercato' : 'Shock titoli'}
+              </button>
+            ))}
+          </div>
           <Slider
-            label="Shock mercato"
+            label={shockMode === 'titoli' ? 'Shock titoli (diretto)' : 'Shock mercato'}
             value={d}
             set={setD}
             min={-40}
             max={20}
             step={1}
             fmt={(v) => sgn(v, 1) + '%'}
-            accent={d < 0 ? C.dn : C.up}
+            accent={shockMode === 'titoli' ? C.cyan : d < 0 ? C.dn : C.up}
           />
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {(
@@ -1107,18 +1144,33 @@ function StressLabContent() {
                 <div style={{ fontSize: 10.5, color: C.mut }}>{k.sub}</div>
               </Panel>
             ))}
-            <Panel style={{ padding: '14px 16px' }}>
-              <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>
-                {betaMode === 'market' ? 'Beta @ scenario' : 'Delta portafoglio'}
+            <Panel
+              style={{
+                padding: '14px 16px',
+                ...(shockMode === 'titoli'
+                  ? { border: `1px solid ${C.cyan}`, boxShadow: `0 0 0 1px ${C.cyan} inset` }
+                  : {}),
+              }}
+            >
+              <div
+                style={{
+                  ...lbl,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: shockMode === 'titoli' ? C.cyan : undefined,
+                }}
+              >
+                {shockMode === 'market' ? 'Beta @ scenario' : 'Delta portafoglio'}
                 <Info
                   title={
-                    betaMode === 'market'
+                    shockMode === 'market'
                       ? 'Quanto si muove il portafoglio col mercato'
                       : 'Quanto si muove il portafoglio coi suoi titoli'
                   }
                   w={440}
                 >
-                  {betaMode === 'market' ? (
+                  {shockMode === 'market' ? (
                     <>
                       Se il <b>mercato</b> fa −10%, di quanto si muove il portafoglio? La mossa è trasmessa via
                       il <b>beta</b> di ciascun nome. Beta 1,5 = cala una volta e mezza il mercato. Le put
@@ -1130,39 +1182,16 @@ function StressLabContent() {
                       Se i <b>titoli in portafoglio</b> si muovono direttamente di −10% (a prescindere dal beta
                       col mercato), di quanto si muove il portafoglio? È il <b>delta complessivo</b> del
                       portafoglio sui propri sottostanti. Esempio: solo MICRON, se MICRON fa −10% e il
-                      portafoglio fa −5% → Delta 0,50. L'EUR/USD resta fermo (non è un titolo). Lo slider qui
-                      vale come shock diretto sui titoli, non sul mercato.
+                      portafoglio fa −5% → Delta 0,50. L'EUR/USD resta fermo (non è un titolo). La metodologia
+                      si imposta dalla card <b>Scenario</b>.
                     </>
                   )}
                 </Info>
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: 0 }}>
-                  {(['market', 'titoli'] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setBetaMode(m)}
-                      style={{
-                        fontSize: 9.5,
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        letterSpacing: 0.4,
-                        padding: '3px 7px',
-                        cursor: 'pointer',
-                        border: `1px solid ${C.border2}`,
-                        background: betaMode === m ? C.cyan : 'transparent',
-                        color: betaMode === m ? '#0b0f17' : C.mut,
-                        borderRadius: m === 'market' ? '4px 0 0 4px' : '0 4px 4px 0',
-                        borderLeft: m === 'titoli' ? 'none' : `1px solid ${C.border2}`,
-                      }}
-                    >
-                      {m === 'market' ? 'Mercato' : 'Titoli'}
-                    </button>
-                  ))}
-                </div>
               </div>
               {(() => {
-                const headline = betaMode === 'market' ? betaScen : deltaScen;
-                const refDn = betaMode === 'market' ? betaDown : deltaDown;
-                const refUp = betaMode === 'market' ? betaUp : deltaUp;
+                const headline = shockMode === 'market' ? betaScen : deltaScen;
+                const refDn = shockMode === 'market' ? betaDown : deltaDown;
+                const refUp = shockMode === 'market' ? betaUp : deltaUp;
                 return (
                   <>
                     <div
@@ -1177,7 +1206,7 @@ function StressLabContent() {
                       {fmtN(headline, 2)}
                       <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>
                         {' '}
-                        @ {sgn(d, 1)}%{betaMode === 'titoli' ? ' titoli' : ''}
+                        @ {sgn(d, 1)}%{shockMode === 'titoli' ? ' titoli' : ''}
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
