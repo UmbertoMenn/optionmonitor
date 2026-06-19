@@ -553,6 +553,7 @@ function StressLabContent() {
       pnlEq: number;
       pnlOpt: number;
       nLegs: number;
+      optNotional: number; // esposizione opzioni (Σ|q|·100·spot in EUR) — peso per il beta medio
       nm: string;
       tot?: number;
     };
@@ -567,6 +568,7 @@ function StressLabContent() {
         pnlEq: 0,
         pnlOpt: 0,
         nLegs: 0,
+        optNotional: 0,
         nm: '',
       });
     scen.eqRows.forEach((e) => {
@@ -586,12 +588,28 @@ function StressLabContent() {
       if (undersActive[l.u]) {
         o.beta = undersActive[l.u].beta;
         o.spot = undersActive[l.u].S;
+        o.optNotional += (Math.abs(l.q) * l.mult * undersActive[l.u].S) / fx.USD;
       }
     });
     return Object.values(m)
       .map((o) => ({ ...o, tot: o.pnlEq + o.pnlOpt }))
       .sort((a, b) => Math.abs(b.tot) - Math.abs(a.tot));
-  }, [scen, undersActive, legs]);
+  }, [scen, undersActive, legs, fx.USD]);
+
+  // Beta "totale" = media dei beta di riga PESATA per l'esposizione al sottostante
+  // (|ctv titoli| + nozionale opzioni). È il vero totale della COLONNA beta: in modalità
+  // titoli ogni nome ha beta 1 → la media pesata è 1,00. L'EUR/USD non è un titolo → escluso.
+  const totBetaWeighted = useMemo(() => {
+    let num = 0;
+    let den = 0;
+    for (const o of undTable) {
+      if (o.key === 'EURUSD' || o.beta == null) continue;
+      const w = Math.abs(o.ctv) + o.optNotional;
+      num += o.beta * w;
+      den += w;
+    }
+    return den > 0 ? num / den : 0;
+  }, [undTable]);
 
   /* ---------- Curva P&L vs mercato ---------- */
   const curve = useMemo(() => {
@@ -1742,9 +1760,12 @@ function StressLabContent() {
         title={`Dettaglio per sottostante · scenario corrente (${sgn(d, 1)}% / ${sgn(dV1M, 1)} pt)`}
         style={{ marginBottom: 14 }}
         info={
-          <Info title="La vista che riconcilia tutto" w={360}>
-            Per ogni sottostante: beta, P&L titoli e P&L opzioni. La somma riconcilia con le card in alto. I
-            beta sono modificabili nel pannello "Sottostanti".
+          <Info title="La vista che riconcilia tutto" w={400}>
+            Per ogni sottostante: beta usato, spot e spot nello scenario, controvalore titoli,
+            P&L titoli e P&L opzioni. <b>P&L titoli = Ctv × (β × shock%)</b>; passa il mouse sulla riga
+            per il calcolo completo. Il beta <b>TOTALE</b> è la media dei beta pesata per l'esposizione
+            (|ctv| + nozionale opzioni): in modalità <b>titoli</b> ogni beta è 1 → totale 1,00. La somma
+            riconcilia con le card in alto. I beta sono modificabili nel pannello "Sottostanti".
           </Info>
         }
       >
@@ -1756,7 +1777,7 @@ function StressLabContent() {
               fontFamily: MONO,
               fontSize: 11.5,
               width: '100%',
-              minWidth: 780,
+              minWidth: 920,
             }}
           >
             <thead>
@@ -1765,6 +1786,8 @@ function StressLabContent() {
                   'Sottostante',
                   'β',
                   'Spot',
+                  'Spot scen.',
+                  'Mossa %',
                   'Ctv titoli €',
                   'Gambe opz.',
                   'P&L titoli €',
@@ -1791,33 +1814,58 @@ function StressLabContent() {
               </tr>
             </thead>
             <tbody>
-              {undTable.map((o) => (
-                <tr key={o.key}>
-                  <td style={{ fontWeight: 700, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {o.nm}
-                  </td>
-                  <td style={{ textAlign: 'right', color: C.cyan, fontWeight: 700 }}>
-                    {o.beta != null ? fmtN(o.beta, 2) : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right', color: C.mut }}>
-                    {o.spot != null ? fmtN(o.spot, o.spot < 5 ? 3 : 2) : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right', color: C.mut }}>{o.ctv ? fmtN(o.ctv, 0) : '—'}</td>
-                  <td style={{ textAlign: 'right', color: C.mut }}>{o.nLegs || '—'}</td>
-                  <td style={{ textAlign: 'right', color: pnlColor(o.pnlEq) }}>
-                    {o.pnlEq ? (o.pnlEq > 0 ? '+' : '') + fmtN(o.pnlEq, 0) : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right', color: pnlColor(o.pnlOpt) }}>
-                    {o.pnlOpt ? (o.pnlOpt > 0 ? '+' : '') + fmtN(o.pnlOpt, 0) : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right', fontWeight: 800, color: pnlColor(o.tot ?? 0) }}>
-                    {((o.tot ?? 0) > 0 ? '+' : '') + fmtN(o.tot ?? 0, 0)}
-                  </td>
-                </tr>
-              ))}
+              {undTable.map((o) => {
+                const moveP = (o.beta ?? 0) * d; // mossa del sottostante in %
+                const spot1 = o.spot != null ? o.spot * (1 + moveP / 100) : null;
+                const sEUR = (x: number) => (x > 0 ? '+' : '') + fmtN(x, 0);
+                const tip =
+                  `${o.nm}\n` +
+                  `Mossa sottostante = β ${fmtN(o.beta ?? 0, 2)} × ${sgn(d, 1)}% = ${sgn(moveP, 2)}%\n` +
+                  (o.spot != null ? `Spot ${fmtN(o.spot, 2)} → ${fmtN(spot1 as number, 2)}\n` : '') +
+                  `P&L titoli = Ctv ${fmtN(o.ctv, 0)} € × (${sgn(moveP, 2)}%) = ${sEUR(o.pnlEq)} €\n` +
+                  `P&L opzioni = somma di ${o.nLegs} gambe = ${sEUR(o.pnlOpt)} € (dettaglio nella tabella per gamba)\n` +
+                  `P&L totale = ${sEUR(o.tot ?? 0)} €`;
+                return (
+                  <tr key={o.key} title={tip} style={{ cursor: 'help' }}>
+                    <td style={{ fontWeight: 700, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {o.nm}
+                    </td>
+                    <td style={{ textAlign: 'right', color: C.cyan, fontWeight: 700 }}>
+                      {o.beta != null ? fmtN(o.beta, 2) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: C.mut }}>
+                      {o.spot != null ? fmtN(o.spot, o.spot < 5 ? 3 : 2) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: C.mut }}>
+                      {spot1 != null ? fmtN(spot1, spot1 < 5 ? 3 : 2) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: o.beta != null ? pnlColor(moveP) : C.mut }}>
+                      {o.beta != null ? sgn(moveP, 2) + '%' : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: C.mut }}>{o.ctv ? fmtN(o.ctv, 0) : '—'}</td>
+                    <td style={{ textAlign: 'right', color: C.mut }}>{o.nLegs || '—'}</td>
+                    <td style={{ textAlign: 'right', color: pnlColor(o.pnlEq) }}>
+                      {o.pnlEq ? (o.pnlEq > 0 ? '+' : '') + fmtN(o.pnlEq, 0) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: pnlColor(o.pnlOpt) }}>
+                      {o.pnlOpt ? (o.pnlOpt > 0 ? '+' : '') + fmtN(o.pnlOpt, 0) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 800, color: pnlColor(o.tot ?? 0) }}>
+                      {((o.tot ?? 0) > 0 ? '+' : '') + fmtN(o.tot ?? 0, 0)}
+                    </td>
+                  </tr>
+                );
+              })}
               <tr style={{ background: C.panel2 }}>
                 <td style={{ fontWeight: 800, color: C.text }}>TOTALE</td>
-                <td style={{ textAlign: 'right', color: C.cyan, fontWeight: 800 }}>{fmtN(betaDown, 2)}↓</td>
+                <td
+                  style={{ textAlign: 'right', color: C.cyan, fontWeight: 800, cursor: 'help' }}
+                  title={"Media dei beta di riga pesata per l'esposizione (|ctv titoli| + nozionale opzioni). In modalità titoli ogni beta è 1 → 1,00."}
+                >
+                  {fmtN(totBetaWeighted, 2)}
+                </td>
+                <td></td>
+                <td></td>
                 <td></td>
                 <td style={{ textAlign: 'right', color: C.mut, fontWeight: 700 }}>
                   {fmtN(undTable.reduce((a, o) => a + o.ctv, 0), 0)}
@@ -1866,6 +1914,7 @@ function StressLabContent() {
                   'Sottostante',
                   'Gamba',
                   'Qtà',
+                  'Spot → scen.',
                   'IV base',
                   'IV scen.',
                   'ΔIV',
@@ -1896,8 +1945,25 @@ function StressLabContent() {
               {tableRows.map((rr) => {
                 const l = rr.leg;
                 const expS = l.exp.slice(2).split('-');
+                const und = undersActive[l.u];
+                const S0 = und ? und.S : null;
+                const betaL = und ? und.beta : 0;
+                const moveP = betaL * d;
+                const S1 = S0 != null ? S0 * Math.max(0.02, 1 + moveP / 100) : null;
+                const sEUR = (x: number) => (x > 0 ? '+' : '') + fmtN(x, 0);
+                const tip =
+                  `${l.u} ${l.cp === 'C' ? 'CALL' : 'PUT'} K${fmtN(l.K, l.K < 5 ? 3 : 0)} ${expS[1]}/${expS[0]}\n` +
+                  (S0 != null
+                    ? `Spot ${fmtN(S0, 2)} → ${fmtN(S1 as number, 2)}  (mossa β ${fmtN(betaL, 2)} × ${sgn(d, 1)}% = ${sgn(moveP, 2)}%)\n`
+                    : '') +
+                  (rr.atIntrinsic
+                    ? `Valutazione a INTRINSECO (delta 1)\n`
+                    : `IV ${fmtN(rr.sig0 * 100, 1)}% → ${fmtN(rr.sig1 * 100, 1)}%   T ${fmtN(l.T, 3)} anni   r ${fmtN(r * 100, 2)}%\n`) +
+                  `Prezzo opzione (USD): ${fmtN(rr.p0, 4)} → ${fmtN(rr.p1, 4)}\n` +
+                  `P&L = q(${l.q}) × ${l.mult} × (Px_scen − Px_base) / EURUSD(${fmtN(fx.USD, 4)})\n` +
+                  `    = ${l.q} × ${l.mult} × (${fmtN(rr.p1, 4)} − ${fmtN(rr.p0, 4)}) / ${fmtN(fx.USD, 4)} = ${sEUR(rr.pnlEUR)} €`;
                 return (
-                  <tr key={rr.i}>
+                  <tr key={rr.i} title={tip} style={{ cursor: 'help' }}>
                     <td style={{ color: C.text, fontWeight: 700 }}>
                       {l.u}
                       {l.fl ? (
@@ -1942,6 +2008,11 @@ function StressLabContent() {
                     >
                       {l.q > 0 ? '+' : ''}
                       {l.q}
+                    </td>
+                    <td style={{ textAlign: 'right', color: C.mut }}>
+                      {S0 != null
+                        ? `${fmtN(S0, S0 < 5 ? 3 : 2)} → ${fmtN(S1 as number, (S1 as number) < 5 ? 3 : 2)}`
+                        : '—'}
                     </td>
                     <td style={{ textAlign: 'right', color: C.mut }}>
                       {rr.atIntrinsic ? '—' : fmtN(rr.sig0 * 100, 1)}
