@@ -10,8 +10,9 @@ import { useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
-import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
+import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { useGPHoldings } from '@/hooks/useGPHoldings';
+import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
@@ -47,9 +48,10 @@ const DEFAULT_USD_RATE = 1.15; // USD per 1 EUR (fallback se nessuna posizione U
 
 export interface StressLabInputs {
   /** Ambito del patrimonio di riferimento (denominatore di P&L% e beta, e valore mostrato):
-   *  'total'    = patrimonio totale (netting completo: equity+etf+bond+cash+oro+derivati nettati)
-   *  'equity'   = solo equity (netting − bond − cash − oro/commodity)
-   *  'equityGP' = solo equity + esposizione equity della Gestione Patrimoniale */
+   *  'total'    = patrimonio totale = netting completo (equity+etf+bond+cash+oro+derivati
+   *               nettati) + Gestione Patrimoniale (cassa+azioni+bond GP). = netting dashboard.
+   *  'equity'   = solo equity (netting − bond − cash − oro/commodity del book − tutta la GP)
+   *  'equityGP' = solo equity + sole azioni della Gestione Patrimoniale (gpEquityEUR) */
   patrimonyScope: 'total' | 'equity' | 'equityGP';
 }
 
@@ -97,6 +99,7 @@ export interface StressLabData {
     commodityEUR: number;
     cashEUR: number;
     gpEUR: number;
+    gpTotalEUR: number;
     gpEquityEUR: number;
   };
 }
@@ -135,7 +138,7 @@ function getOptionCurrency(p: Position): string {
 
 export function useStressLab(inputs: StressLabInputs): StressLabData {
   const { positions, portfolio, summary, isLoading: isLoadingPortfolio } = usePortfolio();
-  const { gpHoldings } = useGPHoldings();
+  const { gpHoldings, gpSummary } = useGPHoldings();
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs } = useStrategyConfigurations();
 
@@ -534,6 +537,9 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     const commodityEUR = sum(commodities);
     const cashEUR = portfolio?.cash_value ?? 0;
     const gpEUR = (gpHoldings || []).reduce((a, h) => a + (h.market_value ?? 0), 0);
+    // GP "totale" come la dashboard: SOLO cash+stock+bond (gpSummary.totalValue), non
+    // altri asset_type. È esattamente la quota che la dashboard fonde in summary.totalValue.
+    const gpTotalEUR = gpSummary.totalValue;
     const gpEquityEUR = (gpHoldings || [])
       .filter((h) => h.asset_type === 'stock')
       .reduce((a, h) => a + (h.market_value ?? 0), 0);
@@ -551,10 +557,11 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         commodityEUR,
         cashEUR,
         gpEUR,
+        gpTotalEUR,
         gpEquityEUR,
       },
     };
-  }, [derivatives, stocks, etfs, bonds, commodities, gpHoldings, portfolio?.cash_value]);
+  }, [derivatives, stocks, etfs, bonds, commodities, gpHoldings, gpSummary.totalValue, portfolio?.cash_value]);
 
   /* ---------- 12. Warning counters ---------- */
 
@@ -562,20 +569,49 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
   /* ---------- 12b. NETTING (stessa metrica e stesso motore della dashboard) ----------
    * useDerivativeNetting parte da summary.totalValue (azioni+etf+bond+cash+commodity) e vi
-   * somma il contributo nettato dei derivati. L'AMBITO (patrimonyScope) ritaglia il base:
-   *  - 'total'    → netting completo
-   *  - 'equity'   → netting − bond − cash − oro/commodity (resta equity+etf+derivati nettati)
-   *  - 'equityGP' → equity + esposizione equity della GP
-   * La GP non è nel summary, quindi va SOMMATA quando richiesta.
+   * somma il contributo nettato dei derivati. Per essere BYTE-IDENTICI alla dashboard:
+   *   1) summary fuso con la GP (summary.totalValue += gpSummary.totalValue), come fa
+   *      Dashboard.tsx — altrimenti il "Patrimonio Totale" del simulatore esclude la GP;
+   *   2) netting su PREZZI CONGELATI dello snapshot (snapshot_underlying_prices), non sui
+   *      prezzi live: gli stessi che usa la dashboard, così il contributo intrinseco di
+   *      covered call / naked put orfane coincide e non si muove al remount (cfr. §10).
+   * L'AMBITO (patrimonyScope) ritaglia poi il base partendo da questo totale-con-GP:
+   *  - 'total'    → netting completo CON GP
+   *  - 'equity'   → − bond/cassa/commodity del book − TUTTA la GP (cassa+azioni+bond GP)
+   *  - 'equityGP' → 'equity' + sole azioni GP (gpEquityEUR)
    */
   const nettingPositions = useMemo(() => positions || [], [positions]);
   const nettingOverrides = useMemo(() => overrides || [], [overrides]);
   const nettingConfigs = useMemo(() => strategyConfigs || [], [strategyConfigs]);
+
+  // (1) summary con GP fusa — identico a Dashboard.tsx (solo totalValue serve al netting)
+  const summaryWithGP = useMemo(() => {
+    if (!summary) return summary;
+    if (gpSummary.totalValue === 0) return summary;
+    return { ...summary, totalValue: summary.totalValue + gpSummary.totalValue };
+  }, [summary, gpSummary.totalValue]);
+
+  // (2) prezzi congelati dello snapshot corrente — identico a Dashboard.tsx
+  const { historicalData } = useHistoricalData(portfolio?.id);
+  const frozenUnderlyingPrices = useMemo(() => {
+    const currentDate = portfolio?.snapshot_date;
+    const currentEntry = currentDate
+      ? historicalData.find((h) => h.snapshot_date === currentDate)
+      : null;
+    const frozenRaw = (currentEntry?.snapshot_underlying_prices ?? {}) as Record<string, number>;
+    const merged: Record<string, UnderlyingPrice> = {};
+    for (const [k, v] of Object.entries(underlyingPrices)) merged[k] = v;
+    for (const [k, px] of Object.entries(frozenRaw)) {
+      if (typeof px === 'number' && px > 0) merged[k] = { price: px, currency: 'USD' };
+    }
+    return merged;
+  }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
+
   const liveNetting = useDerivativeNetting(
     nettingPositions,
-    summary,
+    summaryWithGP,
     nettingOverrides,
-    underlyingPrices,
+    frozenUnderlyingPrices,
     false,
     nettingConfigs,
   );
@@ -583,8 +619,10 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
   const { nettingTotal, nettingExCCAndNP } = useMemo(() => {
     let adj = 0;
     if (inputs.patrimonyScope !== 'total') {
-      // togli le componenti non-equity dal patrimonio di riferimento
+      // Solo Equity: togli bond/cassa/commodity del book E tutta la GP fusa sopra.
       adj -= patrimonyBreakdown.bondsEUR + patrimonyBreakdown.cashEUR + patrimonyBreakdown.commodityEUR;
+      adj -= patrimonyBreakdown.gpTotalEUR;
+      // Solo Equity + Equity GP: riaggiungi SOLO le azioni della GP.
       if (inputs.patrimonyScope === 'equityGP') adj += patrimonyBreakdown.gpEquityEUR;
     }
     return {

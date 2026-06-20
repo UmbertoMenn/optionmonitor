@@ -774,11 +774,12 @@ function StressLabContent() {
         title="Patrimonio di riferimento"
         info={
           <Info title="Ambito del patrimonio (denominatore di P&L% e beta)" w={440}>
-            <b>Patrimonio Totale</b>: netting completo (equity + bond + cash + oro + derivati nettati).
+            <b>Patrimonio Totale</b>: netting completo (equity + bond + cash + oro + derivati nettati)
+            + Gestione Patrimoniale (cassa + azioni + bond GP). Coincide col netting totale della dashboard.
             <br />
             <br />
-            <b>Solo Equity</b>: tolti bond, cash e oro/commodity → resta l'esposizione azionaria + derivati
-            nettati.
+            <b>Solo Equity</b>: tolti bond, cash e oro/commodity del book e tutta la GP → resta
+            l'esposizione azionaria + derivati nettati.
             <br />
             <br />
             <b>Solo Equity + Equity GP</b>: aggiunge l'esposizione equity (solo azioni) della Gestione
@@ -794,7 +795,7 @@ function StressLabContent() {
         {(() => {
           const pb = data.patrimonyBreakdown;
           const baseRaw = netting ? data.nettingExCCAndNPRaw : data.nettingTotalRaw;
-          const vEquity = baseRaw - pb.bondsEUR - pb.cashEUR - pb.commodityEUR;
+          const vEquity = baseRaw - pb.bondsEUR - pb.cashEUR - pb.commodityEUR - pb.gpTotalEUR;
           const scopeOpts: { k: 'total' | 'equity' | 'equityGP'; label: string; val: number }[] = [
             { k: 'total', label: 'Patrimonio Totale', val: baseRaw },
             { k: 'equity', label: 'Solo Equity', val: vEquity },
@@ -851,7 +852,8 @@ function StressLabContent() {
               <div style={{ marginTop: 8, fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
                 Equity (az+ETF) {fmtN((pb.stocksEUR + pb.etfEUR) / 1000, 0)}k · Bond{' '}
                 {fmtN(pb.bondsEUR / 1000, 0)}k · Cash {fmtN(pb.cashEUR / 1000, 0)}k · Oro{' '}
-                {fmtN(pb.commodityEUR / 1000, 0)}k · Equity GP {fmtN(pb.gpEquityEUR / 1000, 0)}k
+                {fmtN(pb.commodityEUR / 1000, 0)}k · Equity GP {fmtN(pb.gpEquityEUR / 1000, 0)}k · GP tot{' '}
+                {fmtN(pb.gpTotalEUR / 1000, 0)}k
                 {netting ? ' · base: netting Ex CC e NP' : ' · base: netting totale'}
               </div>
             </>
