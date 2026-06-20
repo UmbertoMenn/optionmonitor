@@ -70,7 +70,8 @@ export interface StressLabData {
   unders: StressUnderlyingMap;
   fx: ForexRates;
   effIV: Record<number, number>;
-  /** Patrimonio MTM di base (EUR), già al netto/con i toggle applicati */
+  /** Patrimonio MTM totale (EUR): book a market value (derivati inclusi a MTM pieno) + GP.
+   *  Denominatore dell'incidenza margine; indipendente dall'ambito. */
   ptfBaseMTM: number;
   /** Patrimonio = NETTING TOTALE (stessa metrica della dashboard), coi toggle applicati */
   nettingTotal: number;
@@ -545,7 +546,9 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       .reduce((a, h) => a + (h.market_value ?? 0), 0);
 
     // Patrimonio MTM TOTALE (sempre completo): denominatore del rapporto di margine.
-    const total = derivativesEUR + stocksEUR + etfEUR + bondsEUR + cashEUR + commodityEUR;
+    // Include la GP (gpTotalEUR) come ogni altra metrica di patrimonio totale.
+    const total =
+      derivativesEUR + stocksEUR + etfEUR + bondsEUR + cashEUR + commodityEUR + gpTotalEUR;
 
     return {
       ptfBaseMTM: total,
