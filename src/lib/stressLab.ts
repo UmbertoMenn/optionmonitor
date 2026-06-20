@@ -58,6 +58,9 @@ export interface StressEquity {
   beta: number;
   /** Ticker (può essere stringa vuota per ETF/oro) */
   tick: string;
+  /** True se la riga è esposizione equity della Gestione Patrimoniale (mandato separato):
+   *  va shockata come un titolo, ma NON deve coprire i covered call del book nel margine. */
+  gp?: boolean;
 }
 
 export interface StressUnderlying {
@@ -566,6 +569,9 @@ export function occMargin(
 
   const sharesByU: Record<string, number> = {};
   eq.forEach((s) => {
+    // Le azioni della Gestione Patrimoniale NON coprono i covered call del book
+    // (mandato separato): non entrano nel conteggio coperture del margine.
+    if (s.gp) return;
     if (s.tick && unders[s.tick]) sharesByU[s.tick] = (sharesByU[s.tick] || 0) + s.q;
   });
   const cap: Record<string, number> = {};

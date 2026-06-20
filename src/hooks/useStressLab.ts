@@ -431,11 +431,28 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       }
     });
 
+    // b2) Azioni della GP (solo ambiti che le shockano: 'total' e 'equityGP'). Vanno in
+    //     mappa così runScenario usa il beta da unders (mercato) e il remap beta=1 della
+    //     modalità "titoli" le raggiunge. Guardia !m[t]: non sovrascrive mai book/opzioni
+    //     (se il ticker coincide, vince l'entry già presente e si somma il controvalore).
+    if (inputs.patrimonyScope !== 'equity') {
+      (gpHoldings || [])
+        .filter((h) => h.asset_type === 'stock')
+        .forEach((h) => {
+          const t = normTick(h.ticker_code);
+          const px = h.price;
+          if (!t || m[t]) return;
+          if (typeof px === 'number' && px > 0) {
+            m[t] = { S: px, beta: betaMap[t] ?? DEFAULT_BETA_UNKNOWN };
+          }
+        });
+    }
+
     // c) EUR/USD: lo "spot" è quante USD per 1 EUR = fx.USD
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
-  }, [derivatives, stocks, etfs, commodities, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey]);
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.patrimonyScope, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -503,9 +520,10 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       const e = buildFromPosition(p);
       if (e) out.push(e);
     });
-    // GP: l'esposizione equity della Gestione Patrimoniale entra nello shock SOLO
-    // nell'ambito "Solo Equity + Equity GP" (solo le azioni; le obbligazioni GP restano fuori).
-    if (inputs.patrimonyScope === 'equityGP') {
+    // GP: l'esposizione equity della Gestione Patrimoniale entra nello shock dello scenario
+    // in OGNI ambito che la conta nel patrimonio: 'total' e 'equityGP' (non 'equity', dove la
+    // GP è interamente esclusa). Solo le azioni; le obbligazioni GP restano fuori dallo shock.
+    if (inputs.patrimonyScope !== 'equity') {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
@@ -520,6 +538,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
             eur: h.market_value ?? 0,
             beta: t ? betaMap[t] ?? DEFAULT_BETA_UNKNOWN : 1.0,
             tick: t,
+            gp: true,
           });
         });
     }
