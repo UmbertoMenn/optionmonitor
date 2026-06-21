@@ -462,3 +462,52 @@ describe('stressLab — pricing a intrinseco (gambe fl)', () => {
     expect(res.optEUR).toBe(0);
   });
 });
+
+describe('stressLab — netting Ex CC e NP (intrinseco direzionale)', () => {
+  // 4 gambe ATM sullo stesso sottostante (beta=1): short call, long put, long call, short put.
+  const legs: StressLeg[] = [
+    { u: 'X', cp: 'C', K: 100, T: 0.5, exp: '2026-12-18', q: -1, px: 8, fl: false, mult: 100, nm: 'X', iv: 0.3 }, // 0: CALL venduta
+    { u: 'X', cp: 'P', K: 100, T: 0.5, exp: '2026-12-18', q: 1, px: 7, fl: false, mult: 100, nm: 'X', iv: 0.3 },  // 1: PUT comprata
+    { u: 'X', cp: 'C', K: 100, T: 0.5, exp: '2026-12-18', q: 1, px: 8, fl: false, mult: 100, nm: 'X', iv: 0.3 },  // 2: CALL comprata
+    { u: 'X', cp: 'P', K: 100, T: 0.5, exp: '2026-12-18', q: -1, px: 7, fl: false, mult: 100, nm: 'X', iv: 0.3 }, // 3: PUT venduta
+  ];
+  const unders: StressUnderlyingMap = { X: { S: 100, beta: 1 } };
+  const effIV = effIVMap(legs);
+  const netParams: ScenarioParams = { ...baseParams, netting: true };
+
+  it('shock GIÙ: PUT a intrinseco, CALL a zero', () => {
+    const res = runScenario(legs, [], unders, effIV, -10, 0, netParams); // S: 100 → 90
+    // CALL venduta e CALL comprata → zero P&L
+    expect(res.rows[0].pnlEUR).toBeCloseTo(0, 6);
+    expect(res.rows[2].pnlEUR).toBeCloseTo(0, 6);
+    // PUT comprata → guadagna intrinseco (S<K); PUT venduta → perde intrinseco
+    expect(res.rows[1].pnlEUR).toBeGreaterThan(0);
+    expect(res.rows[3].pnlEUR).toBeLessThan(0);
+    // PUT comprata: ΔP = intrinseco(90)-intrinseco(100) = 10-0 = 10 → q·mult·10/fx
+    expect(res.rows[1].pnlEUR).toBeCloseTo((1 * 100 * 10) / FX.USD, 4);
+    // tutte le gambe trattate a intrinseco sotto netting
+    expect(res.rows.every((r) => r.atIntrinsic)).toBe(true);
+  });
+
+  it('shock SU: CALL a intrinseco, PUT a zero (opposto)', () => {
+    const res = runScenario(legs, [], unders, effIV, 10, 0, netParams); // S: 100 → 110
+    // PUT comprata e PUT venduta → zero P&L
+    expect(res.rows[1].pnlEUR).toBeCloseTo(0, 6);
+    expect(res.rows[3].pnlEUR).toBeCloseTo(0, 6);
+    // CALL venduta → perde intrinseco (S>K); CALL comprata → guadagna
+    expect(res.rows[0].pnlEUR).toBeLessThan(0);
+    expect(res.rows[2].pnlEUR).toBeGreaterThan(0);
+    // CALL venduta: ΔP = intrinseco(110)-intrinseco(100) = 10-0 = 10 → q=-1
+    expect(res.rows[0].pnlEUR).toBeCloseTo((-1 * 100 * 10) / FX.USD, 4);
+  });
+
+  it('a shock 0 il netting non genera P&L', () => {
+    const res = runScenario(legs, [], unders, effIV, 0, 0, netParams);
+    expect(Math.abs(res.optEUR)).toBeCloseTo(0, 6);
+  });
+
+  it('senza netting le stesse gambe NON sono a intrinseco', () => {
+    const res = runScenario(legs, [], unders, effIV, -10, 0, baseParams);
+    expect(res.rows.every((r) => !r.atIntrinsic)).toBe(true);
+  });
+});

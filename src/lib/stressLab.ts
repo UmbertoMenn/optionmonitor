@@ -312,7 +312,12 @@ export function runScenario(
     const sig0Base = effIV[i];
     const isCall = l.cp === 'C';
     const F0 = S0 * Math.exp(r * l.T);
-    const isNetted = netting && l.q < 0;
+    // NETTING Ex CC e NP (hold-to-expiry, intrinseco DIREZIONALE): ogni gamba — long e short
+    // allo stesso modo — è valutata a intrinseco sul lato che conta per la DIREZIONE dello
+    // shock, e a ZERO sull'altro lato (premio/costo già contabilizzato nel patrimonio base):
+    //   shock giù (d<=0): PUT → intrinseco, CALL → zero
+    //   shock su  (d>0):  CALL → intrinseco, PUT → zero
+    // Il segno (long/short) entra solo via q nel P&L (q·mult·Δ), dando il verso corretto.
 
     // Decomposizione base: sigma0 = sigmaATM0 + skewB * m0
     // (m0 standardizzata, 2-3 iterazioni di punto fisso)
@@ -347,16 +352,31 @@ export function runScenario(
 
     let p0eff = base.p;
     let p1eff = str.p;
-    // Gambe a intrinseco puro (delta 1):
-    //  - l.fl  → prezzo di riferimento (mid/bid) sotto l'intrinseco: si quota ESATTAMENTE
-    //            all'intrinseco, sia long sia short, senza alcuna guardia. L'opzione si
-    //            muove uno-a-uno con il sottostante (kink allo strike), niente vega/gamma fittizia.
-    //  - isNetted → modalità "hold to expiry" per le gambe corte (Ex CC e NP).
-    const atIntrinsic = l.fl || isNetted;
-    if (atIntrinsic) {
-      const S1 = S0 * Math.max(0.02, 1 + (beta * d) / 100);
-      p0eff = isCall ? Math.max(0, S0 - l.K) : Math.max(0, l.K - S0);
-      p1eff = isCall ? Math.max(0, S1 - l.K) : Math.max(0, l.K - S1);
+    let netted = false;
+    let atIntrinsic = false;
+    const S1 = S0 * Math.max(0.02, 1 + (beta * d) / 100);
+    const intrAt = (S: number) => (isCall ? Math.max(0, S - l.K) : Math.max(0, l.K - S));
+
+    if (netting) {
+      // Ex CC e NP: intrinseco sul lato "vivo" per la direzione, zero sull'altro.
+      netted = true;
+      atIntrinsic = true;
+      const up = d > 0;
+      const legLive = up ? isCall : !isCall;
+      if (legLive) {
+        p0eff = intrAt(S0);
+        p1eff = intrAt(S1);
+      } else {
+        // lato spento: P&L nullo (incasso/spesa già contabilizzati nel base dashboard)
+        p0eff = 0;
+        p1eff = 0;
+      }
+    } else if (l.fl) {
+      // Prezzo di riferimento (mid/bid) sotto l'intrinseco (deep-ITM americana): si quota
+      // ESATTAMENTE all'intrinseco, sia long sia short. Delta 1, niente vega/gamma fittizia.
+      atIntrinsic = true;
+      p0eff = intrAt(S0);
+      p1eff = intrAt(S1);
     }
 
     // Tutti i derivati quotano in USD nel modello
@@ -372,7 +392,7 @@ export function runScenario(
       p1: p1eff,
       dIV: (str.sig - base.sig) * 100,
       T: l.T,
-      netted: isNetted,
+      netted,
       atIntrinsic,
     });
   }
