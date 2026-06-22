@@ -329,7 +329,8 @@ function StressLabContent() {
   const [ivScan, setIvScan] = useState(0.4);
   const [nakedPct, setNakedPct] = useState(0.2);
 
-  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree } = data;
+  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree, patrimonyBreakdown } = data;
+  const bondCashBase = (patrimonyBreakdown?.bondsEUR ?? 0) + (patrimonyBreakdown?.cashEUR ?? 0);
   const r = riskFree;
 
   // Sottostanti per lo SCENARIO attivo: in modalità 'titoli' i nomi si muovono
@@ -717,7 +718,7 @@ function StressLabContent() {
 
       {/* HEADER */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 12, marginBottom: 16 }}>
-        <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: -0.3 }}>
+        <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: -0.3, color: C.blue }}>
           STRESS LAB
         </div>
         <div style={{ fontSize: 12, color: C.mut, fontFamily: MONO }}>
@@ -1329,44 +1330,44 @@ function StressLabContent() {
               style={{
                 padding: '14px 16px',
                 border: `1px solid ${
-                  ptfBaseMTM > 0 &&
-                  marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1) >
-                    (marNow.total / ptfBaseMTM) * 1.2
+                  bondCashBase > 0 &&
+                  marScen.total / Math.max(bondCashBase, 1) >
+                    (marNow.total / bondCashBase) * 1.2
                     ? C.dn
                     : C.border
                 }`,
               }}
             >
               <div style={{ ...lbl, display: 'flex', alignItems: 'center' }}>
-                Incidenza patrimonio
+                Incidenza su bond+cash
                 <Info title="La metrica del margin call" w={360} right>
-                  Margine richiesto / valore del portafoglio a mark-to-market. È il rapporto che fa scattare la
-                  richiesta di reintegro: nel crash il numeratore cresce e il denominatore cala, quindi
-                  l'incidenza accelera verso l'alto.
+                  Margine richiesto / valore di bond + cash (escluso cash GP). È il rapporto che fa scattare la
+                  richiesta di reintegro: nel crash il numeratore cresce mentre bond e cash restano stabili,
+                  quindi l'incidenza accelera verso l'alto.
                 </Info>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, margin: '6px 0 2px' }}>
                 <span style={{ color: C.mut, fontSize: 15 }}>
-                  {ptfBaseMTM > 0 ? fmtN((marNow.total / ptfBaseMTM) * 100, 0) : '—'}% →{' '}
+                  {bondCashBase > 0 ? fmtN((marNow.total / bondCashBase) * 100, 0) : '—'}% →{' '}
                 </span>
                 <span
                   style={{
                     color:
-                      ptfBaseMTM > 0 &&
-                      marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1) >
-                        (marNow.total / ptfBaseMTM) * 1.2
+                      bondCashBase > 0 &&
+                      marScen.total / Math.max(bondCashBase, 1) >
+                        (marNow.total / bondCashBase) * 1.2
                         ? C.dn
                         : C.text,
                   }}
                 >
-                  {ptfBaseMTM > 0
-                    ? fmtN((marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1)) * 100, 0)
+                  {bondCashBase > 0
+                    ? fmtN((marScen.total / Math.max(bondCashBase, 1)) * 100, 0)
                     : '—'}
                   %
                 </span>
               </div>
               <div style={{ fontSize: 10.5, color: C.mut }}>
-                margine / patrimonio (MTM) · soglia margin call
+                margine / bond + cash · soglia margin call
               </div>
             </Panel>
           </div>
@@ -1724,11 +1725,11 @@ function StressLabContent() {
             </span>
           </span>
           <span style={{ color: C.mut }}>
-            incidenza{' '}
+            incidenza su bond+cash{' '}
             <span style={{ color: C.text, fontWeight: 700 }}>
-              {ptfBaseMTM > 0 ? fmtN((marNow.total / ptfBaseMTM) * 100, 0) : '—'}% →{' '}
-              {ptfBaseMTM > 0
-                ? fmtN((marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1)) * 100, 0)
+              {bondCashBase > 0 ? fmtN((marNow.total / bondCashBase) * 100, 0) : '—'}% →{' '}
+              {bondCashBase > 0
+                ? fmtN((marScen.total / Math.max(bondCashBase, 1)) * 100, 0)
                 : '—'}
               %
             </span>
