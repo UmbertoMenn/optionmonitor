@@ -1725,11 +1725,11 @@ function StressLabContent() {
             </span>
           </span>
           <span style={{ color: C.mut }}>
-            incidenza{' '}
+            incidenza su bond+cash{' '}
             <span style={{ color: C.text, fontWeight: 700 }}>
-              {ptfBaseMTM > 0 ? fmtN((marNow.total / ptfBaseMTM) * 100, 0) : '—'}% →{' '}
-              {ptfBaseMTM > 0
-                ? fmtN((marScen.total / Math.max(ptfBaseMTM + marPnlMTM, 1)) * 100, 0)
+              {bondCashBase > 0 ? fmtN((marNow.total / bondCashBase) * 100, 0) : '—'}% →{' '}
+              {bondCashBase > 0
+                ? fmtN((marScen.total / Math.max(bondCashBase, 1)) * 100, 0)
                 : '—'}
               %
             </span>
