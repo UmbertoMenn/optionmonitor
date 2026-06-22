@@ -11,7 +11,8 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-import { useGPHoldings } from '@/hooks/useGPHoldings';
+import { useGPHoldings, GPHoldingRow } from '@/hooks/useGPHoldings';
+import { resolveUnderlyingIdentity, buildDynamicAliasMap } from '@/lib/tickerIdentity';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
 import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
@@ -256,6 +257,35 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     [resolveUnderlying],
   );
 
+  // Alias dinamici dai mappings backend (come il Risk Analyzer), per risolvere i nomi GP.
+  const gpDynamicAliases = useMemo(
+    () => buildDynamicAliasMap(mappingsQuery.data?.mappings ?? []),
+    [mappingsQuery.data],
+  );
+
+  // Risolve il TICKER CANONICO di un'azione GP, così lo stesso strumento detenuto in GP e in
+  // deposito finisce sotto la stessa chiave (si raggruppa) e mostra il ticker, mai un codice
+  // numerico. Catena: ticker_code alfabetico → mappings → descrizione via mappings → alias
+  // canonici (statici + dinamici). Coerente con come book e opzioni risolvono il sottostante.
+  const resolveGpTicker = useCallback(
+    (h: GPHoldingRow): string => {
+      const tc = normTick(h.ticker_code);
+      if (tc && /[A-Z]/.test(tc)) {
+        const viaMap = resolveUnderlying(tc);
+        return viaMap && /[A-Z]/.test(viaMap) ? viaMap : tc;
+      }
+      const viaDesc = resolveUnderlying(h.description);
+      if (viaDesc && /[A-Z]/.test(viaDesc)) return viaDesc;
+      const id = resolveUnderlyingIdentity(
+        { rawTicker: h.ticker_code, description: h.description },
+        { dynamicAliases: gpDynamicAliases },
+      );
+      if (id.displayTicker && /[A-Z]/.test(id.displayTicker)) return normTick(id.displayTicker);
+      return tc;
+    },
+    [resolveUnderlying, gpDynamicAliases],
+  );
+
   /* ---------- 3. Tickers che ci servono: derivati + equity ---------- */
 
   const allTickers = useMemo(() => {
@@ -448,7 +478,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
-          const t = normTick(h.ticker_code);
+          const t = resolveGpTicker(h);
           const px = h.price;
           if (!t || m[t]) return;
           if (typeof px === 'number' && px > 0) {
@@ -461,7 +491,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
-  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.patrimonyScope, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey]);
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.patrimonyScope, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey, resolveGpTicker]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -536,11 +566,11 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
-          const t = normTick(h.ticker_code);
+          const t = resolveGpTicker(h);
           const px = h.price;
           if (typeof px !== 'number' || px <= 0) return;
           out.push({
-            nm: h.description || t || 'GP',
+            nm: t || h.description || 'GP',
             ccy: (h.currency || 'EUR').toUpperCase(),
             px,
             q: h.quantity,
@@ -552,7 +582,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         });
     }
     return out;
-  }, [stocks, etfs, gpHoldings, betaMap, inputs.patrimonyScope, inputs.gpEquity]);
+  }, [stocks, etfs, gpHoldings, betaMap, inputs.patrimonyScope, inputs.gpEquity, resolveGpTicker]);
 
   /* ---------- 11. Patrimonio MTM (totale, per il rapporto di margine) ---------- */
 
