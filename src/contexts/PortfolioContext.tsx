@@ -136,13 +136,38 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   // Auto-selezione robusta - PRIORITÀ: selectedId attuale > localStorage > fallback
   useEffect(() => {
     if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
-    if (portfolios.length === 0) return;
     
     // Skip auto-selection when in admin mode (viewing another user's portfolio)
     if (adminViewUserId !== null && adminViewUserId !== user?.id) {
       if (!hasInitialized) setHasInitialized(true);
       return;
     }
+    
+    // ADMIN LANDING: al primo bootstrap, se l'admin non ha già una vista admin attiva
+    // in sessionStorage, atterra automaticamente sull'ultimo portafoglio cliente aggiornato.
+    if (
+      !hasInitialized &&
+      isAdmin &&
+      !sessionStorage.getItem(ADMIN_VIEW_PORTFOLIO_KEY) &&
+      !latestClientPortfolioQuery.isLoading
+    ) {
+      const latest = latestClientPortfolioQuery.data;
+      if (latest) {
+        setAdminViewUserId(latest.user_id);
+        setSelectedId(latest.id);
+        sessionStorage.setItem(ADMIN_VIEW_USER_KEY, latest.user_id);
+        sessionStorage.setItem(ADMIN_VIEW_PORTFOLIO_KEY, latest.id);
+        queryClient.invalidateQueries({ queryKey: ['positions'] });
+        queryClient.invalidateQueries({ queryKey: ['deposits'] });
+        queryClient.invalidateQueries({ queryKey: ['historicalData'] });
+        queryClient.invalidateQueries({ queryKey: ['derivativeOverrides'] });
+        setHasInitialized(true);
+        return;
+      }
+      // Se non ci sono portafogli clienti, prosegue col fallback personale
+    }
+    
+    if (portfolios.length === 0) return;
     
     // Se è selezionato un aggregato, non resettare - è una selezione valida
     if (isAnyAggregatedId(selectedId)) {
@@ -176,7 +201,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
     
     setHasInitialized(true);
-  }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized, adminViewUserId, user?.id]);
+  }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized, adminViewUserId, user?.id, isAdmin, latestClientPortfolioQuery.isLoading, latestClientPortfolioQuery.data, queryClient]);
 
   // Selected portfolio: use admin query if in admin mode, otherwise use own portfolios
   const selectedPortfolio = isAdminMode 
