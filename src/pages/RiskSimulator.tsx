@@ -509,7 +509,9 @@ function StressLabContent() {
       o.beta = e.beta;
       o.ctv += e.ctv || 0;
       o.pnlEq += e.pnl;
-      o.nm = e.tick || e.nm;
+      // Mostra il ticker se è un vero ticker (ha almeno una lettera); altrimenti la
+      // descrizione (es. azioni GP con ticker_code numerico → niente numeri in tabella).
+      o.nm = e.tick && /[A-Za-z]/.test(e.tick) ? e.tick : e.nm || e.tick;
       if (e.tick && undersActive[e.tick]) o.spot = undersActive[e.tick].S;
     });
     scen.rows.forEach((rr) => {
