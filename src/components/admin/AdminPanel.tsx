@@ -21,6 +21,7 @@ import { TickerMappingManager } from './TickerMappingManager';
 import { AdminNotificationSettings } from './AdminNotificationSettings';
 import { ResolutionDiagnostics } from './ResolutionDiagnostics';
 import { BetaRefreshPanel } from './BetaRefreshPanel';
+import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 
 interface UserWithRole {
   id: string;
