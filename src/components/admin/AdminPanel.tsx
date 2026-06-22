@@ -222,7 +222,7 @@ export function AdminPanel() {
       {/* Header */}
       <header className="border-b border-border bg-background-secondary/50 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 shrink-0">
               <div className="p-2 rounded-lg bg-primary/10">
                 <IronCondorIcon size={24} className="text-primary" />
@@ -233,117 +233,26 @@ export function AdminPanel() {
               </div>
             </div>
 
-            {/* Mobile: Indice dropdown */}
-            <div className="sm:hidden">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    Indice <Menu className="ml-2 h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => navigate('/')}>
-                    <ArrowLeft className="w-4 h-4 mr-2" /> Dashboard
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate('/derivatives')}>
-                    <TrendingUp className="w-4 h-4 mr-2" /> Strategie Derivati
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate('/risk-analyzer')}>
-                    <ShieldAlert className="w-4 h-4 mr-2" /> Risk Analyzer
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setShowAddDialog(true)}>
-                    <UserPlus className="w-4 h-4 mr-2" /> Aggiungi Utente
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={signOut}>
-                    <LogOut className="w-4 h-4 mr-2" /> Esci
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-            
-            {/* Desktop: full button bar */}
-            <div className="hidden sm:flex items-center gap-2">
-              <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/">
-                  <ArrowLeft className="w-4 h-4" />
-                  <span className="ml-2">Dashboard</span>
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/derivatives">
-                  <TrendingUp className="w-4 h-4" />
-                  <span className="ml-2">Strategie Derivati</span>
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild className="shrink-0">
-                <Link to="/risk-analyzer">
-                  <ShieldAlert className="w-4 h-4" />
-                  <span className="ml-2">Risk Analyzer</span>
-                </Link>
-              </Button>
-              <Button variant="ghost" size="sm" onClick={signOut} className="shrink-0">
-                <LogOut className="w-4 h-4" />
-                <span className="ml-2">Esci</span>
-              </Button>
-              
+            <div className="flex items-center gap-2">
               <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
                 <DialogTrigger asChild>
-                  <Button className="bg-primary hover:bg-primary-glow">
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Aggiungi Utente
+                  <Button size="sm" className="bg-primary hover:bg-primary-glow">
+                    <UserPlus className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Aggiungi Utente</span>
                   </Button>
                 </DialogTrigger>
-              <DialogContent className="bg-card border-border">
-                <DialogHeader>
-                  <DialogTitle>Nuovo Utente</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleAddUser} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Nome completo</Label>
-                    <Input
-                      id="name"
-                      value={newUserName}
-                      onChange={(e) => setNewUserName(e.target.value)}
-                      className="bg-background-secondary border-border"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="username">Nome utente</Label>
-                    <Input
-                      id="username"
-                      type="text"
-                      placeholder="mario_rossi"
-                      value={newUserUsername}
-                      onChange={(e) => setNewUserUsername(e.target.value)}
-                      className="bg-background-secondary border-border"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      value={newUserPassword}
-                      onChange={(e) => setNewUserPassword(e.target.value)}
-                      className="bg-background-secondary border-border"
-                      minLength={6}
-                      required
-                    />
-                  </div>
-                  <Button type="submit" className="w-full bg-primary hover:bg-primary-glow">
-                    Crea Utente
-                  </Button>
-                </form>
-              </DialogContent>
-            </Dialog>
+                <DialogContent className="bg-card border-border">
+                  <DialogHeader>
+                    <DialogTitle>Nuovo Utente</DialogTitle>
+                  </DialogHeader>
+                </DialogContent>
+              </Dialog>
+              <AppHeaderMenu includePortfolioSelector={false} />
             </div>
           </div>
         </div>
       </header>
+
 
       <main className="container mx-auto px-4 py-8">
         <Tabs defaultValue="users" className="space-y-6">
