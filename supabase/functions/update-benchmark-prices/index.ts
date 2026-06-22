@@ -94,29 +94,12 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Auth gate: allow CRON_SECRET header OR a valid authenticated JWT.
-  {
-    const cronSecret = Deno.env.get("CRON_SECRET");
-    const providedSecret = req.headers.get("x-cron-secret");
-    const isCron = !!cronSecret && providedSecret === cronSecret;
-    let isAuthed = false;
-    const authHeader = req.headers.get("Authorization");
-    if (!isCron && authHeader?.startsWith("Bearer ")) {
-      try {
-        const sbAuth = createClient(
-          Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_ANON_KEY")!,
-        );
-        const { data: claimsData } = await sbAuth.auth.getClaims(authHeader.replace("Bearer ", ""));
-        isAuthed = !!claimsData?.claims?.sub;
-      } catch (_) { /* ignore */ }
-    }
-    if (!isCron && !isAuthed) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+  // Auth gate: allow shared cron secret OR a valid authenticated JWT.
+  if (!(await isCronAuthorized(req)) && !(await getAuthenticatedUserId(req))) {
+    return new Response(
+      JSON.stringify({ error: "Unauthorized" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   try {
