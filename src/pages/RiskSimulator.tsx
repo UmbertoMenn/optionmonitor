@@ -658,7 +658,7 @@ function StressLabContent() {
     {
       l: 'P&L Opzioni',
       v: scen.optEUR,
-      sub: netting ? '⚠ netting attivo: opzioni a intrinseco (hold to expiry)' : 'full revaluation sticky-delta',
+      sub: netting ? '⚠ netting attivo: opzioni a intrinseco (hold to expiry)' : 'rivalutazione completa Black-Scholes',
     },
   ];
 
@@ -718,7 +718,7 @@ function StressLabContent() {
       {/* HEADER */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 12, marginBottom: 16 }}>
         <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: -0.3 }}>
-          STRESS LAB <span style={{ color: C.blue }}>· STICKY-DELTA</span>
+          STRESS LAB
         </div>
         <div style={{ fontSize: 12, color: C.mut, fontFamily: MONO }}>
           {legs.length} gambe opzioni · {eq.length} titoli · {fmtEUR(ptfBase)}
@@ -729,8 +729,8 @@ function StressLabContent() {
           )}
         </div>
         <Info title="Cosa fa questo strumento" w={380}>
-          Riprezza <b>ogni singola opzione</b> del portafoglio (full revaluation Black-Scholes) sotto uno shock
-          congiunto di mercato e volatilità. Lo smile si muove con il prezzo (regime <b>sticky-delta</b>) e la
+          Riprezza <b>ogni singola opzione</b> del portafoglio (rivalutazione completa Black-Scholes) sotto
+          uno shock congiunto di mercato e volatilità. Lo smile si muove insieme al prezzo e la
           superficie viene deformata in modo non-parallelo: le scadenze brevi si gonfiano più delle lunghe e lo
           skew si irripidisce, come osservato empiricamente nei crash (2008, ago-2015, feb-2018, mar-2020).
           Le azioni si muovono linearmente via beta. Bond e oro sono esclusi dallo shock azionario (beta 0):
@@ -1253,6 +1253,23 @@ function StressLabContent() {
                       si imposta dalla card <b>Scenario</b>.
                     </>
                   )}
+                  <br />
+                  <br />
+                  <b>Come leggerlo in base alla posizione</b>
+                  <br />• <b>Venditore netto di PUT</b> (poche/nessuna azione): delta <b>basso</b>. Le put
+                  vendute sono a strike più bassi (OTM), quindi ognuna ha delta piccolo e il portafoglio si
+                  muove poco con il sottostante.
+                  <br />• <b>Venditore netto di CALL con titoli in pancia</b> (covered call): delta/beta
+                  <b> alto</b>. Le azioni hanno delta pieno e dominano; le call vendute OTM le frenano poco.
+                  <br />
+                  <br />
+                  <b>Con Netting Ex CC e NP attivo</b> (opzioni valutate solo a intrinseco):
+                  <br />• <b>Venditore di CALL</b>: in un ribasso le call OTM non danno intrinseco, quindi
+                  <b> non fanno cuscinetto</b> (sparisce il guadagno di time-value che avrebbero in MTM) → le
+                  azioni perdono piene → <b>delta/beta aumenta</b>.
+                  <br />• <b>Venditore di PUT</b>: la perdita è misurata <b>solo sull'intrinseco</b>, senza il
+                  rigonfiamento di volatilità e time-value che un crash produce davvero → <b>delta/beta si
+                  riduce</b>. (Attenzione: è un effetto di misura, non un rischio minore reale.)
                 </Info>
               </div>
               {(() => {
@@ -2023,17 +2040,47 @@ function StressLabContent() {
                 const betaL = und ? und.beta : 0;
                 const moveP = betaL * d;
                 const S1 = S0 != null ? S0 * Math.max(0.02, 1 + moveP / 100) : null;
+                const isCall = l.cp === 'C';
+                const kFmt = fmtN(l.K, l.K < 5 ? 3 : 2);
                 const sEUR = (x: number) => (x > 0 ? '+' : '') + fmtN(x, 0);
+                const header = `${l.u} ${isCall ? 'CALL' : 'PUT'} K${fmtN(l.K, l.K < 5 ? 3 : 0)} ${expS[1]}/${expS[0]} · q ${l.q}`;
+                const spotLine =
+                  S0 != null
+                    ? `Spot ${fmtN(S0, 2)} → ${fmtN(S1 as number, 2)}  (β ${fmtN(betaL, 2)} × ${sgn(d, 1)}% = ${sgn(moveP, 2)}%)`
+                    : '';
+                const intr = (S: number) =>
+                  isCall ? `max(0, ${fmtN(S, 2)} − ${kFmt})` : `max(0, ${kFmt} − ${fmtN(S, 2)})`;
+                let valBlock: string;
+                let pxLabel: string;
+                if (rr.atIntrinsic) {
+                  pxLabel = 'intrinseco';
+                  const why = rr.netted
+                    ? 'NETTING EX CC E NP: valore = INTRINSECO a scadenza, NON il prezzo di mercato (niente time-value né vol).'
+                    : 'Prezzo di riferimento sotto l\'intrinseco: gamba quotata a INTRINSECO (delta 1).';
+                  const interp = isCall
+                    ? l.q < 0
+                      ? 'Call venduta: scendendo l\'intrinseco cala → guadagno, che compensa i titoli FINCHÉ si resta sopra lo strike.'
+                      : 'Call comprata: l\'intrinseco esiste solo sopra lo strike.'
+                    : l.q < 0
+                      ? 'Put venduta: l\'intrinseco cresce solo SOTTO lo strike → è lì che iniziano le perdite.'
+                      : 'Put comprata: protegge sotto lo strike (l\'intrinseco cresce).';
+                  valBlock =
+                    `${why}\n` +
+                    `Intrinseco ${isCall ? 'CALL = max(0, spot − K)' : 'PUT = max(0, K − spot)'}\n` +
+                    `  base: ${S0 != null ? intr(S0) : '—'} = ${fmtN(rr.p0, 2)}\n` +
+                    `  scen: ${S1 != null ? intr(S1 as number) : '—'} = ${fmtN(rr.p1, 2)}\n` +
+                    `${interp}`;
+                } else {
+                  pxLabel = 'Px';
+                  valBlock =
+                    `IV ${fmtN(rr.sig0 * 100, 1)}% → ${fmtN(rr.sig1 * 100, 1)}%   T ${fmtN(l.T, 3)} anni   r ${fmtN(r * 100, 2)}%\n` +
+                    `Prezzo opzione Black-Scholes (USD): ${fmtN(rr.p0, 4)} → ${fmtN(rr.p1, 4)}`;
+                }
                 const tip =
-                  `${l.u} ${l.cp === 'C' ? 'CALL' : 'PUT'} K${fmtN(l.K, l.K < 5 ? 3 : 0)} ${expS[1]}/${expS[0]}\n` +
-                  (S0 != null
-                    ? `Spot ${fmtN(S0, 2)} → ${fmtN(S1 as number, 2)}  (mossa β ${fmtN(betaL, 2)} × ${sgn(d, 1)}% = ${sgn(moveP, 2)}%)\n`
-                    : '') +
-                  (rr.atIntrinsic
-                    ? `Valutazione a INTRINSECO (delta 1)\n`
-                    : `IV ${fmtN(rr.sig0 * 100, 1)}% → ${fmtN(rr.sig1 * 100, 1)}%   T ${fmtN(l.T, 3)} anni   r ${fmtN(r * 100, 2)}%\n`) +
-                  `Prezzo opzione (USD): ${fmtN(rr.p0, 4)} → ${fmtN(rr.p1, 4)}\n` +
-                  `P&L = q(${l.q}) × ${l.mult} × (Px_scen − Px_base) / EURUSD(${fmtN(fx.USD, 4)})\n` +
+                  `${header}\n` +
+                  (spotLine ? `${spotLine}\n` : '') +
+                  `${valBlock}\n` +
+                  `P&L = q(${l.q}) × ${l.mult} × (${pxLabel}_scen − ${pxLabel}_base) / EURUSD(${fmtN(fx.USD, 4)})\n` +
                   `    = ${l.q} × ${l.mult} × (${fmtN(rr.p1, 4)} − ${fmtN(rr.p0, 4)}) / ${fmtN(fx.USD, 4)} = ${sEUR(rr.pnlEUR)} €`;
                 return (
                   <tr key={rr.i} title={tip} style={{ cursor: 'help' }}>
