@@ -282,10 +282,8 @@ serve(async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Internal-only endpoint: require shared CRON_SECRET (used by db trigger / check-alerts)
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  const provided = req.headers.get("x-cron-secret");
-  if (!cronSecret || provided !== cronSecret) {
+  // Internal-only endpoint: require shared cron secret (vault).
+  if (!(await isCronAuthorized(req))) {
     return new Response(
       JSON.stringify({ error: "Unauthorized" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
