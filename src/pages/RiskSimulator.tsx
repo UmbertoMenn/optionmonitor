@@ -272,19 +272,21 @@ function Panel({
 
 function StressLabContent() {
   /* ---------- Ambito del patrimonio di riferimento ----------
-   * total = patrimonio totale (netting completo)
-   * equity = solo equity (netting − bond − cash − oro/commodity)
-   * equityGP = solo equity + esposizione equity della Gestione Patrimoniale
-   * I tre sono mutuamente esclusivi. Si combinano col toggle "Netting Ex CC e NP". */
-  const [patrimonyScope, setPatrimonyScope] = useState<'total' | 'equity' | 'equityGP'>('total');
+   * total  = patrimonio totale (netting completo della dashboard, GP inclusa)
+   * equity = Solo Equity = esposizione equity del Risk Analyzer (tutti i toggle ON);
+   *          col sotto-toggle gpEquity si aggiungono le azioni della GP. */
+  const [patrimonyScope, setPatrimonyScope] = useState<'total' | 'equity'>('total');
+  // Sotto-toggle della card "Solo Equity": include le azioni GP (come il toggle GP del
+  // Risk Analyzer). Rilevante solo quando patrimonyScope === 'equity'.
+  const [gpEquity, setGpEquity] = useState(false);
 
   // Ordinamento delle tabelle di dettaglio (click sull'intestazione di colonna)
   const [undSort, setUndSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'nm', dir: 'asc' });
   const [legSort, setLegSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'ticker', dir: 'asc' });
 
   const inputs: StressLabInputs = useMemo(
-    () => ({ patrimonyScope }),
-    [patrimonyScope],
+    () => ({ patrimonyScope, gpEquity }),
+    [patrimonyScope, gpEquity],
   );
 
   const data = useStressLab(inputs);
@@ -650,7 +652,7 @@ function StressLabContent() {
     {
       l: 'P&L Opzioni',
       v: scen.optEUR,
-      sub: netting ? '⚠ netting attivo: gambe corte a intrinseco' : 'full revaluation sticky-delta',
+      sub: netting ? '⚠ netting attivo: intrinseco direzionale (giù PUT · su CALL)' : 'full revaluation sticky-delta',
     },
   ];
 
@@ -715,7 +717,7 @@ function StressLabContent() {
         <div style={{ fontSize: 12, color: C.mut, fontFamily: MONO }}>
           {legs.length} gambe opzioni · {eq.length} titoli · {fmtEUR(ptfBase)}
           {netting ? (
-            <span style={{ color: C.amber }}> (netting: corte a intrinseco)</span>
+            <span style={{ color: C.amber }}> (netting: intrinseco direzionale)</span>
           ) : (
             ''
           )}
@@ -777,20 +779,19 @@ function StressLabContent() {
         title="Patrimonio di riferimento"
         info={
           <Info title="Ambito del patrimonio (denominatore di P&L% e beta)" w={360}>
-            <b>Patrimonio Totale</b>: netting completo (equity + bond + cash + oro + derivati nettati)
-            + Gestione Patrimoniale (cassa + azioni + bond GP). Coincide col netting totale della dashboard.
+            <b>Patrimonio Totale</b>: netting completo della dashboard (equity + bond + cash + oro +
+            derivati nettati + Gestione Patrimoniale). Col toggle <b>Netting Ex CC e NP</b> qui a fianco
+            la base passa al netting ex CC e NP.
             <br />
             <br />
-            <b>Solo Equity</b>: tolti bond, cash e oro/commodity del book e tutta la GP → resta
-            l'esposizione azionaria + derivati nettati.
+            <b>Solo Equity</b>: l'esposizione equity del <b>Risk Analyzer</b> (azioni + ETF nette
+            protezioni + commodity + naked put + LEAP + strategie + sintetiche), cioè con tutti i suoi
+            toggle attivi.
             <br />
             <br />
-            <b>Solo Equity + Equity GP</b>: aggiunge l'esposizione equity (solo azioni) della Gestione
-            Patrimoniale, che viene anche shockata nello scenario.
-            <br />
-            <br />
-            Si combina col toggle <b>Netting Ex CC e NP</b> qui a fianco: se attivo, la base di partenza è
-            il netting ex CC e NP invece del netting totale.
+            <b>Includi azioni GP</b> (sotto-toggle di Solo Equity): aggiunge l'esposizione azionaria
+            della Gestione Patrimoniale, che viene anche shockata nello scenario. Equivale al toggle GP
+            del Risk Analyzer.
           </Info>
         }
         headerRight={
@@ -865,31 +866,31 @@ function StressLabContent() {
         {(() => {
           const pb = data.patrimonyBreakdown;
           const baseRaw = netting ? data.nettingExCCAndNPRaw : data.nettingTotalRaw;
-          const vEquity = baseRaw - pb.bondsEUR - pb.cashEUR - pb.commodityEUR - pb.gpTotalEUR;
-          const scopeOpts: { k: 'total' | 'equity' | 'equityGP'; label: string; val: number }[] = [
+          const eqNoGP = data.equityExposureNoGP;
+          const eqVal = eqNoGP + (gpEquity ? pb.gpEquityEUR : 0);
+          const cards: { k: 'total' | 'equity'; label: string; val: number }[] = [
             { k: 'total', label: 'Patrimonio Totale', val: baseRaw },
-            { k: 'equity', label: 'Solo Equity', val: vEquity },
-            { k: 'equityGP', label: 'Solo Equity + Equity GP', val: vEquity + pb.gpEquityEUR },
+            { k: 'equity', label: 'Solo Equity', val: eqVal },
           ];
+          const eqScope = patrimonyScope === 'equity';
           return (
             <>
               <div style={{ display: 'flex', gap: 0, flexWrap: 'wrap' }}>
-                {scopeOpts.map((o, i) => {
+                {cards.map((o, i) => {
                   const act = patrimonyScope === o.k;
                   return (
                     <button
                       key={o.k}
                       onClick={() => setPatrimonyScope(o.k)}
                       style={{
-                        flex: '1 1 170px',
+                        flex: '1 1 200px',
                         padding: '10px 12px',
                         cursor: 'pointer',
                         textAlign: 'left',
                         background: act ? `${C.cyan}14` : C.panel2,
                         border: `1px solid ${act ? C.cyan : C.border2}`,
                         borderLeft: i > 0 ? 'none' : `1px solid ${act ? C.cyan : C.border2}`,
-                        borderRadius:
-                          i === 0 ? '7px 0 0 7px' : i === scopeOpts.length - 1 ? '0 7px 7px 0' : 0,
+                        borderRadius: i === 0 ? '7px 0 0 7px' : '0 7px 7px 0',
                         fontFamily: SANS,
                       }}
                     >
@@ -919,12 +920,63 @@ function StressLabContent() {
                   );
                 })}
               </div>
+
+              {/* Sotto-toggle GP della card "Solo Equity" (= toggle GP del Risk Analyzer) */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginTop: 9,
+                  opacity: eqScope ? 1 : 0.4,
+                }}
+              >
+                <button
+                  onClick={() => eqScope && setGpEquity((v) => !v)}
+                  disabled={!eqScope}
+                  style={{
+                    width: 42,
+                    height: 22,
+                    borderRadius: 11,
+                    border: `1px solid ${gpEquity && eqScope ? C.cyan : C.border2}`,
+                    background: gpEquity && eqScope ? 'rgba(0,200,255,.25)' : C.panel,
+                    cursor: eqScope ? 'pointer' : 'default',
+                    position: 'relative',
+                    padding: 0,
+                    flexShrink: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      left: gpEquity ? 22 : 2,
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: gpEquity && eqScope ? C.cyan : C.mut,
+                      transition: 'left .15s',
+                    }}
+                  />
+                </button>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.5,
+                    color: gpEquity && eqScope ? C.cyan : C.mut,
+                  }}
+                >
+                  Includi azioni GP
+                  {pb.gpEquityEUR > 0 ? ` (+${fmtN(pb.gpEquityEUR / 1000, 0)}k)` : ''}
+                </span>
+              </div>
+
               <div style={{ marginTop: 8, fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
-                Equity (az+ETF) {fmtN((pb.stocksEUR + pb.etfEUR) / 1000, 0)}k · Bond{' '}
-                {fmtN(pb.bondsEUR / 1000, 0)}k · Cash {fmtN(pb.cashEUR / 1000, 0)}k · Oro{' '}
-                {fmtN(pb.commodityEUR / 1000, 0)}k · Equity GP {fmtN(pb.gpEquityEUR / 1000, 0)}k · GP tot{' '}
-                {fmtN(pb.gpTotalEUR / 1000, 0)}k
-                {netting ? ' · base: netting Ex CC e NP' : ' · base: netting totale'}
+                {patrimonyScope === 'total'
+                  ? `Netting ${netting ? 'Ex CC e NP' : 'totale'} (GP inclusa) · equity book ${fmtN((pb.stocksEUR + pb.etfEUR) / 1000, 0)}k · bond ${fmtN(pb.bondsEUR / 1000, 0)}k · cash ${fmtN(pb.cashEUR / 1000, 0)}k · oro ${fmtN(pb.commodityEUR / 1000, 0)}k`
+                  : `Esposizione equity Risk Analyzer ${fmtN(eqNoGP / 1000, 0)}k${gpEquity ? ` + azioni GP ${fmtN(pb.gpEquityEUR / 1000, 0)}k = ${fmtN(eqVal / 1000, 0)}k` : ''}`}
               </div>
             </>
           );

@@ -13,6 +13,7 @@ import { usePortfolio } from '@/hooks/usePortfolio';
 import { useUnderlyingPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { useGPHoldings } from '@/hooks/useGPHoldings';
 import { useHistoricalData } from '@/hooks/useHistoricalData';
+import { useRiskAnalysis } from '@/hooks/useRiskAnalysis';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
@@ -48,11 +49,14 @@ const DEFAULT_USD_RATE = 1.15; // USD per 1 EUR (fallback se nessuna posizione U
 
 export interface StressLabInputs {
   /** Ambito del patrimonio di riferimento (denominatore di P&L% e beta, e valore mostrato):
-   *  'total'    = patrimonio totale = netting completo (equity+etf+bond+cash+oro+derivati
-   *               nettati) + Gestione Patrimoniale (cassa+azioni+bond GP). = netting dashboard.
-   *  'equity'   = solo equity (netting − bond − cash − oro/commodity del book − tutta la GP)
-   *  'equityGP' = solo equity + sole azioni della Gestione Patrimoniale (gpEquityEUR) */
-  patrimonyScope: 'total' | 'equity' | 'equityGP';
+   *  'total'  = patrimonio totale = netting completo (equity+etf+bond+cash+oro+derivati
+   *             nettati) + Gestione Patrimoniale (cassa+azioni+bond GP). = netting dashboard.
+   *  'equity' = Solo Equity = esposizione equity del Risk Analyzer (tutti i toggle ON =
+   *             analysis.grandTotal). Col sotto-toggle gpEquity si aggiungono le azioni GP. */
+  patrimonyScope: 'total' | 'equity';
+  /** Solo per 'equity': include l'esposizione azionaria della Gestione Patrimoniale
+   *  (equivale al toggle GP del Risk Analyzer). Ignorato in 'total' (la GP è già inclusa). */
+  gpEquity: boolean;
 }
 
 export interface BetaRow {
@@ -80,6 +84,9 @@ export interface StressLabData {
   /** Netting GREZZO (ambito 'total', senza ritaglio), per etichettare le opzioni di ambito */
   nettingTotalRaw: number;
   nettingExCCAndNPRaw: number;
+  /** Esposizione equity del Risk Analyzer (analysis.grandTotal, tutti i toggle ON, GP esclusa).
+   *  Base della card "Solo Equity"; +gpEquityEUR quando il sotto-toggle GP è attivo. */
+  equityExposureNoGP: number;
   /** Risk-free aggregato (default 4%) */
   riskFree: number;
   /** Numero di gambe per cui non è stato possibile calcolare l'IV */
@@ -140,6 +147,8 @@ function getOptionCurrency(p: Position): string {
 export function useStressLab(inputs: StressLabInputs): StressLabData {
   const { positions, portfolio, summary, isLoading: isLoadingPortfolio } = usePortfolio();
   const { gpHoldings, gpSummary } = useGPHoldings();
+  // Esposizione equity del Risk Analyzer: grandTotal = tutti i toggle ON, GP esclusa.
+  const riskAnalysis = useRiskAnalysis();
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs } = useStrategyConfigurations();
 
@@ -431,11 +440,11 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       }
     });
 
-    // b2) Azioni della GP (solo ambiti che le shockano: 'total' e 'equityGP'). Vanno in
+    // b2) Azioni della GP: entrano nello shock negli ambiti che le contano nel patrimonio,
+    //     cioè 'total' (GP sempre inclusa) e 'equity' con sotto-toggle gpEquity ON. Vanno in
     //     mappa così runScenario usa il beta da unders (mercato) e il remap beta=1 della
-    //     modalità "titoli" le raggiunge. Guardia !m[t]: non sovrascrive mai book/opzioni
-    //     (se il ticker coincide, vince l'entry già presente e si somma il controvalore).
-    if (inputs.patrimonyScope !== 'equity') {
+    //     modalità "titoli" le raggiunge. Guardia !m[t]: non sovrascrive mai book/opzioni.
+    if (inputs.patrimonyScope === 'total' || inputs.gpEquity) {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
@@ -452,7 +461,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
-  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.patrimonyScope, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey]);
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.patrimonyScope, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -521,9 +530,9 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       if (e) out.push(e);
     });
     // GP: l'esposizione equity della Gestione Patrimoniale entra nello shock dello scenario
-    // in OGNI ambito che la conta nel patrimonio: 'total' e 'equityGP' (non 'equity', dove la
-    // GP è interamente esclusa). Solo le azioni; le obbligazioni GP restano fuori dallo shock.
-    if (inputs.patrimonyScope !== 'equity') {
+    // negli ambiti che la contano nel patrimonio: 'total' (sempre) e 'equity' con gpEquity ON.
+    // Solo le azioni; le obbligazioni GP restano fuori dallo shock.
+    if (inputs.patrimonyScope === 'total' || inputs.gpEquity) {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
@@ -543,7 +552,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         });
     }
     return out;
-  }, [stocks, etfs, gpHoldings, betaMap, inputs.patrimonyScope]);
+  }, [stocks, etfs, gpHoldings, betaMap, inputs.patrimonyScope, inputs.gpEquity]);
 
   /* ---------- 11. Patrimonio MTM (totale, per il rapporto di margine) ---------- */
 
@@ -597,10 +606,10 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
    *   2) netting su PREZZI CONGELATI dello snapshot (snapshot_underlying_prices), non sui
    *      prezzi live: gli stessi che usa la dashboard, così il contributo intrinseco di
    *      covered call / naked put orfane coincide e non si muove al remount (cfr. §10).
-   * L'AMBITO (patrimonyScope) ritaglia poi il base partendo da questo totale-con-GP:
-   *  - 'total'    → netting completo CON GP
-   *  - 'equity'   → − bond/cassa/commodity del book − TUTTA la GP (cassa+azioni+bond GP)
-   *  - 'equityGP' → 'equity' + sole azioni GP (gpEquityEUR)
+   * L'AMBITO (patrimonyScope) decide il base:
+   *  - 'total'  → netting completo CON GP (= netting totale della dashboard)
+   *  - 'equity' → esposizione equity del Risk Analyzer (analysis.grandTotal, tutti i toggle
+   *               ON), + azioni GP se il sotto-toggle gpEquity è ON. NON dipende dal netting.
    */
   const nettingPositions = useMemo(() => positions || [], [positions]);
   const nettingOverrides = useMemo(() => overrides || [], [overrides]);
@@ -638,23 +647,26 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     nettingConfigs,
   );
 
+  // Solo Equity = esposizione equity del Risk Analyzer con tutti i toggle ON (= grandTotal).
+  const equityExposureNoGP = riskAnalysis.grandTotal ?? 0;
+
   const { nettingTotal, nettingExCCAndNP } = useMemo(() => {
-    let adj = 0;
-    if (inputs.patrimonyScope !== 'total') {
-      // Solo Equity: togli bond/cassa/commodity del book E tutta la GP fusa sopra.
-      adj -= patrimonyBreakdown.bondsEUR + patrimonyBreakdown.cashEUR + patrimonyBreakdown.commodityEUR;
-      adj -= patrimonyBreakdown.gpTotalEUR;
-      // Solo Equity + Equity GP: riaggiungi SOLO le azioni della GP.
-      if (inputs.patrimonyScope === 'equityGP') adj += patrimonyBreakdown.gpEquityEUR;
+    if (inputs.patrimonyScope === 'equity') {
+      // base = esposizione equity RA (+ azioni GP se gpEquity ON). Indipendente dal netting.
+      const base = equityExposureNoGP + (inputs.gpEquity ? patrimonyBreakdown.gpEquityEUR : 0);
+      return { nettingTotal: base, nettingExCCAndNP: base };
     }
+    // 'total': netting completo con GP (come la dashboard).
     return {
-      nettingTotal: liveNetting.nettingTotal + adj,
-      nettingExCCAndNP: liveNetting.nettingExCCAndNP + adj,
+      nettingTotal: liveNetting.nettingTotal,
+      nettingExCCAndNP: liveNetting.nettingExCCAndNP,
     };
   }, [
     liveNetting.nettingTotal,
     liveNetting.nettingExCCAndNP,
     inputs.patrimonyScope,
+    inputs.gpEquity,
+    equityExposureNoGP,
     patrimonyBreakdown,
   ]);
 
@@ -671,6 +683,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     nettingExCCAndNP,
     nettingTotalRaw: liveNetting.nettingTotal,
     nettingExCCAndNPRaw: liveNetting.nettingExCCAndNP,
+    equityExposureNoGP,
     riskFree,
     ivWarnings,
     missingBetaTickers,
