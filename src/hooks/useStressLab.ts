@@ -49,15 +49,16 @@ const DEFAULT_USD_RATE = 1.15; // USD per 1 EUR (fallback se nessuna posizione U
  * ========================================================================= */
 
 export interface StressLabInputs {
-  /** Ambito del patrimonio di riferimento (denominatore di P&L% e beta, e valore mostrato):
-   *  'total'  = patrimonio totale = netting completo (equity+etf+bond+cash+oro+derivati
-   *             nettati) + Gestione Patrimoniale (cassa+azioni+bond GP). = netting dashboard.
-   *  'equity' = Solo Equity = esposizione equity del Risk Analyzer (tutti i toggle ON =
-   *             analysis.grandTotal). Col sotto-toggle gpEquity si aggiungono le azioni GP. */
-  patrimonyScope: 'total' | 'equity';
-  /** Solo per 'equity': include l'esposizione azionaria della Gestione Patrimoniale
-   *  (equivale al toggle GP del Risk Analyzer). Ignorato in 'total' (la GP è già inclusa). */
+  /** Il denominatore di P&L%/beta/delta è SEMPRE l'"Esposizione Potenziale in Equity"
+   *  (esposizione equity del Risk Analyzer, analysis.grandTotal, coi sotto-toggle qui sotto).
+   *  Il valore patrimoniale assoluto mostrato ("stressato") è invece sempre patrimonio
+   *  totale + P&L (gestito nella pagina). */
+  /** Include l'esposizione azionaria della Gestione Patrimoniale (= toggle GP del Risk
+   *  Analyzer): entra sia nel denominatore sia nello shock dello scenario. */
   gpEquity: boolean;
+  /** Include ETF e commodity/ETC. Se OFF, il denominatore e lo shock si basano SOLO sui
+   *  singoli titoli (+ opzioni): ETF/ETC/commodity escono da esposizione e scenario. */
+  includeEtfCommodity: boolean;
 }
 
 export interface BetaRow {
@@ -85,9 +86,13 @@ export interface StressLabData {
   /** Netting GREZZO (ambito 'total', senza ritaglio), per etichettare le opzioni di ambito */
   nettingTotalRaw: number;
   nettingExCCAndNPRaw: number;
-  /** Esposizione equity del Risk Analyzer (analysis.grandTotal, tutti i toggle ON, GP esclusa).
-   *  Base della card "Solo Equity"; +gpEquityEUR quando il sotto-toggle GP è attivo. */
-  equityExposureNoGP: number;
+  /** Esposizione Potenziale in Equity (denominatore di P&L%/beta/delta), coi due sotto-toggle
+   *  ETF/commodity e GP già applicati. */
+  equityExposure: number;
+  /** Componenti per breakdown/tooltip dell'esposizione equity. */
+  equityGrandTotal: number;
+  equityEtfEUR: number;
+  equityCommodityEUR: number;
   /** Risk-free aggregato (default 4%) */
   riskFree: number;
   /** Numero di gambe per cui non è stato possibile calcolare l'IV */
@@ -498,11 +503,10 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       }
     });
 
-    // b2) Azioni della GP: entrano nello shock negli ambiti che le contano nel patrimonio,
-    //     cioè 'total' (GP sempre inclusa) e 'equity' con sotto-toggle gpEquity ON. Vanno in
-    //     mappa così runScenario usa il beta da unders (mercato) e il remap beta=1 della
-    //     modalità "titoli" le raggiunge. Guardia !m[t]: non sovrascrive mai book/opzioni.
-    if (inputs.patrimonyScope === 'total' || inputs.gpEquity) {
+    // b2) Azioni della GP: entrano in mappa solo se il sotto-toggle gpEquity è ON (così
+    //     runScenario usa il beta da unders in modalità mercato e il remap beta=1 in titoli).
+    //     Guardia !m[t]: non sovrascrive mai book/opzioni.
+    if (inputs.gpEquity) {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
@@ -519,7 +523,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
-  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.patrimonyScope, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey, resolveGpTicker]);
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey, resolveGpTicker]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -583,14 +587,16 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     };
 
     const out: StressEquity[] = [];
-    [...stocks, ...etfs].forEach((p) => {
+    // Singoli titoli sempre; ETF solo se il toggle "Includi ETF e Commodities" è ON. Le
+    // commodity non sono mai nello shock (restano statiche). Così con il toggle OFF lo
+    // scenario analizza SOLO i singoli titoli (+ opzioni).
+    [...stocks, ...(inputs.includeEtfCommodity ? etfs : [])].forEach((p) => {
       const e = buildFromPosition(p);
       if (e) out.push(e);
     });
-    // GP: l'esposizione equity della Gestione Patrimoniale entra nello shock dello scenario
-    // negli ambiti che la contano nel patrimonio: 'total' (sempre) e 'equity' con gpEquity ON.
-    // Solo le azioni; le obbligazioni GP restano fuori dallo shock.
-    if (inputs.patrimonyScope === 'total' || inputs.gpEquity) {
+    // GP: l'esposizione azionaria della Gestione Patrimoniale entra nello shock solo se il
+    // sotto-toggle gpEquity è ON. Solo le azioni; le obbligazioni GP restano fuori.
+    if (inputs.gpEquity) {
       (gpHoldings || [])
         .filter((h) => h.asset_type === 'stock')
         .forEach((h) => {
@@ -610,7 +616,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         });
     }
     return out;
-  }, [stocks, etfs, gpHoldings, betaMap, inputs.patrimonyScope, inputs.gpEquity, resolveGpTicker]);
+  }, [stocks, etfs, gpHoldings, betaMap, inputs.includeEtfCommodity, inputs.gpEquity, resolveGpTicker]);
 
   /* ---------- 11. Patrimonio MTM (totale, per il rapporto di margine) ---------- */
 
@@ -705,26 +711,28 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     nettingConfigs,
   );
 
-  // Solo Equity = esposizione equity del Risk Analyzer con tutti i toggle ON (= grandTotal).
-  const equityExposureNoGP = riskAnalysis.grandTotal ?? 0;
+  // ESPOSIZIONE POTENZIALE IN EQUITY = esposizione equity del Risk Analyzer (grandTotal),
+  // con i due sotto-toggle:
+  //  - includeEtfCommodity OFF → togli ETF e commodity (resta: singoli titoli + naked put +
+  //    LEAP + strategie + sintetiche), per analizzare solo i singoli titoli + opzioni;
+  //  - gpEquity ON → aggiungi le azioni della GP.
+  // È il denominatore di P&L%/beta/delta. Il "patrimonio stressato" assoluto è invece sempre
+  // patrimonio totale + P&L (gestito nella pagina via nettingTotalRaw/ExCCAndNPRaw).
+  const grandTotal = riskAnalysis.grandTotal ?? 0;
+  const etfRiskEUR = riskAnalysis.totalETFRisk ?? 0;
+  const commodityRiskEUR = riskAnalysis.totalCommodityRisk ?? 0;
 
-  const { nettingTotal, nettingExCCAndNP } = useMemo(() => {
-    if (inputs.patrimonyScope === 'equity') {
-      // base = esposizione equity RA (+ azioni GP se gpEquity ON). Indipendente dal netting.
-      const base = equityExposureNoGP + (inputs.gpEquity ? patrimonyBreakdown.gpEquityEUR : 0);
-      return { nettingTotal: base, nettingExCCAndNP: base };
-    }
-    // 'total': netting completo con GP (come la dashboard).
-    return {
-      nettingTotal: liveNetting.nettingTotal,
-      nettingExCCAndNP: liveNetting.nettingExCCAndNP,
-    };
+  const { nettingTotal, nettingExCCAndNP, equityExposure } = useMemo(() => {
+    let base = grandTotal;
+    if (!inputs.includeEtfCommodity) base -= etfRiskEUR + commodityRiskEUR;
+    if (inputs.gpEquity) base += patrimonyBreakdown.gpEquityEUR;
+    return { nettingTotal: base, nettingExCCAndNP: base, equityExposure: base };
   }, [
-    liveNetting.nettingTotal,
-    liveNetting.nettingExCCAndNP,
-    inputs.patrimonyScope,
+    grandTotal,
+    etfRiskEUR,
+    commodityRiskEUR,
+    inputs.includeEtfCommodity,
     inputs.gpEquity,
-    equityExposureNoGP,
     patrimonyBreakdown,
   ]);
 
@@ -741,7 +749,10 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     nettingExCCAndNP,
     nettingTotalRaw: liveNetting.nettingTotal,
     nettingExCCAndNPRaw: liveNetting.nettingExCCAndNP,
-    equityExposureNoGP,
+    equityExposure,
+    equityGrandTotal: grandTotal,
+    equityEtfEUR: etfRiskEUR,
+    equityCommodityEUR: commodityRiskEUR,
     riskFree,
     ivWarnings,
     missingBetaTickers,

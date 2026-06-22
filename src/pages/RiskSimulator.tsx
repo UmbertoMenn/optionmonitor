@@ -273,20 +273,22 @@ function Panel({
 function StressLabContent() {
   /* ---------- Ambito del patrimonio di riferimento ----------
    * total  = patrimonio totale (netting completo della dashboard, GP inclusa)
-   * equity = Solo Equity = esposizione equity del Risk Analyzer (tutti i toggle ON);
-   *          col sotto-toggle gpEquity si aggiungono le azioni della GP. */
-  const [patrimonyScope, setPatrimonyScope] = useState<'total' | 'equity'>('total');
-  // Sotto-toggle della card "Solo Equity": include le azioni GP (come il toggle GP del
-  // Risk Analyzer). Rilevante solo quando patrimonyScope === 'equity'.
+  /* ---------- Esposizione di riferimento ----------
+   * Il denominatore di P&L%/beta/delta è SEMPRE l'Esposizione Potenziale in Equity
+   * (esposizione equity del Risk Analyzer), coi due sotto-toggle qui sotto. Il patrimonio
+   * assoluto "stressato" mostrato è invece sempre patrimonio totale + P&L. */
+  // Include le azioni della Gestione Patrimoniale (= toggle GP del Risk Analyzer).
   const [gpEquity, setGpEquity] = useState(false);
+  // Include ETF e commodity/ETC. OFF → esposizione e shock solo su singoli titoli (+ opzioni).
+  const [includeEtfCommodity, setIncludeEtfCommodity] = useState(true);
 
   // Ordinamento delle tabelle di dettaglio (click sull'intestazione di colonna)
   const [undSort, setUndSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'nm', dir: 'asc' });
   const [legSort, setLegSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'ticker', dir: 'asc' });
 
   const inputs: StressLabInputs = useMemo(
-    () => ({ patrimonyScope, gpEquity }),
-    [patrimonyScope, gpEquity],
+    () => ({ gpEquity, includeEtfCommodity }),
+    [gpEquity, includeEtfCommodity],
   );
 
   const data = useStressLab(inputs);
@@ -327,7 +329,7 @@ function StressLabContent() {
   const [ivScan, setIvScan] = useState(0.4);
   const [nakedPct, setNakedPct] = useState(0.2);
 
-  const { legs, eq, fx, effIV, ptfBaseMTM, nettingTotal, nettingExCCAndNP, riskFree } = data;
+  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree } = data;
   const r = riskFree;
 
   // Sottostanti per lo SCENARIO attivo: in modalità 'titoli' i nomi si muovono
@@ -355,13 +357,15 @@ function StressLabContent() {
     [legs, eq, undersActive, effIV, d, dV1M, prm],
   );
 
-  /* ---------- Patrimonio di riferimento = NETTING della dashboard ----------
-   * Il patrimonio (denominatore di P&L% e beta, e valore mostrato) è il NETTING
-   * TOTALE quando il toggle è spento, il NETTING EX CC E NP quando è acceso.
-   * Stessa identica metrica e stesso motore della dashboard, così i numeri
-   * coincidono ovunque. ptfBaseMTM resta disponibile solo per riferimento/debug.
+  /* ---------- Esposizione di riferimento vs patrimonio stressato ----------
+   * DENOMINATORE di P&L% / beta / delta = Esposizione Potenziale in Equity (esposizione
+   * equity del Risk Analyzer, coi sotto-toggle ETF/commodity e GP applicati nell'hook).
+   * PATRIMONIO STRESSATO assoluto = patrimonio TOTALE (netting dashboard, con GP) + P&L:
+   * è il numero che interessa davvero, indipendente dall'ambito di analisi. Il toggle
+   * Netting Ex CC e NP sceglie la metrica del totale (e la valutazione opzioni nel P&L).
    */
-  const ptfBase = netting ? nettingExCCAndNP : nettingTotal;
+  const ptfBase = equityExposure;
+  const totalPatrimony = netting ? data.nettingExCCAndNPRaw : data.nettingTotalRaw;
 
   const volAt = (x: number) => (volMode === 'auto' ? coupledDV1M(x) : dVman);
 
@@ -649,7 +653,7 @@ function StressLabContent() {
   }, [scen, legs, legSort, undersActive]);
 
   const kpi = [
-    { l: 'P&L Totale', v: scen.totEUR, sub: `valore stressato ${fmtEUR(ptfBase + scen.totEUR)}` },
+    { l: 'P&L Totale', v: scen.totEUR, sub: `patrimonio stressato ${fmtEUR(totalPatrimony + scen.totEUR)}` },
     { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: shockMode === 'titoli' ? 'shock diretto (β=1)' : 'lineare via beta' },
     {
       l: 'P&L Opzioni',
@@ -778,22 +782,25 @@ function StressLabContent() {
 
       {/* PATRIMONIO — AMBITO */}
       <Panel
-        title="Patrimonio di riferimento"
+        title="Esposizione di riferimento"
         info={
-          <Info title="Ambito del patrimonio (denominatore di P&L% e beta)" w={360}>
-            <b>Patrimonio Totale</b>: netting completo della dashboard (equity + bond + cash + oro +
-            derivati nettati + Gestione Patrimoniale). Col toggle <b>Netting Ex CC e NP</b> qui a fianco
-            la base passa al netting ex CC e NP.
+          <Info title="Esposizione Potenziale in Equity" w={360}>
+            È il <b>denominatore</b> di P&L%, beta e delta a scenario: l'esposizione equity del
+            <b> Risk Analyzer</b> (singoli titoli + ETF nette protezioni + commodity + naked put + LEAP +
+            strategie + sintetiche).
             <br />
             <br />
-            <b>Solo Equity</b>: l'esposizione equity del <b>Risk Analyzer</b> (azioni + ETF nette
-            protezioni + commodity + naked put + LEAP + strategie + sintetiche), cioè con tutti i suoi
-            toggle attivi.
+            Il <b>patrimonio stressato</b> mostrato (sotto la card P&L Totale) è invece sempre
+            <b> patrimonio totale + P&L</b>: è il valore assoluto del tuo patrimonio dopo lo shock.
             <br />
             <br />
-            <b>Includi azioni GP</b> (sotto-toggle di Solo Equity): aggiunge l'esposizione azionaria
-            della Gestione Patrimoniale, che viene anche shockata nello scenario. Equivale al toggle GP
-            del Risk Analyzer.
+            <b>Includi azioni GP</b>: aggiunge l'esposizione azionaria della Gestione Patrimoniale
+            (anche allo shock). <b>Includi ETF e Commodities</b>: se spento, esposizione e shock si
+            basano solo sui singoli titoli (+ opzioni), togliendo ETF/ETC/commodity.
+            <br />
+            <br />
+            Il toggle <b>Netting Ex CC e NP</b> qui a fianco sceglie la metrica del totale e la
+            valutazione delle opzioni sotto shock (intrinseco hold-to-expiry).
           </Info>
         }
         headerRight={
@@ -869,118 +876,115 @@ function StressLabContent() {
       >
         {(() => {
           const pb = data.patrimonyBreakdown;
-          const baseRaw = netting ? data.nettingExCCAndNPRaw : data.nettingTotalRaw;
-          const eqNoGP = data.equityExposureNoGP;
-          const eqVal = eqNoGP + (gpEquity ? pb.gpEquityEUR : 0);
-          const cards: { k: 'total' | 'equity'; label: string; val: number }[] = [
-            { k: 'total', label: 'Patrimonio Totale', val: baseRaw },
-            { k: 'equity', label: 'Solo Equity', val: eqVal },
-          ];
-          const eqScope = patrimonyScope === 'equity';
+          const tog = (on: boolean, onClick: () => void) => (
+            <button
+              onClick={onClick}
+              style={{
+                width: 42,
+                height: 22,
+                borderRadius: 11,
+                border: `1px solid ${on ? C.cyan : C.border2}`,
+                background: on ? 'rgba(0,200,255,.25)' : C.panel,
+                cursor: 'pointer',
+                position: 'relative',
+                padding: 0,
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  left: on ? 22 : 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: on ? C.cyan : C.mut,
+                  transition: 'left .15s',
+                }}
+              />
+            </button>
+          );
           return (
             <>
-              <div style={{ display: 'flex', gap: 0, flexWrap: 'wrap' }}>
-                {cards.map((o, i) => {
-                  const act = patrimonyScope === o.k;
-                  return (
-                    <button
-                      key={o.k}
-                      onClick={() => setPatrimonyScope(o.k)}
-                      style={{
-                        flex: '1 1 200px',
-                        padding: '10px 12px',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        background: act ? `${C.cyan}14` : C.panel2,
-                        border: `1px solid ${act ? C.cyan : C.border2}`,
-                        borderLeft: i > 0 ? 'none' : `1px solid ${act ? C.cyan : C.border2}`,
-                        borderRadius: i === 0 ? '7px 0 0 7px' : '0 7px 7px 0',
-                        fontFamily: SANS,
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: 0.4,
-                          color: act ? C.cyan : C.mut,
-                        }}
-                      >
-                        {o.label}
-                      </div>
-                      <div
-                        style={{
-                          fontFamily: MONO,
-                          fontSize: 16,
-                          fontWeight: 800,
-                          color: act ? C.text : C.mut,
-                          marginTop: 3,
-                        }}
-                      >
-                        {fmtEUR(o.val)}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Sotto-toggle GP della card "Solo Equity" (= toggle GP del Risk Analyzer) */}
+              {/* Card unica: Esposizione Potenziale in Equity (denominatore P&L%/beta/delta) */}
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  marginTop: 9,
-                  opacity: eqScope ? 1 : 0.4,
+                  padding: '10px 12px',
+                  background: `${C.cyan}14`,
+                  border: `1px solid ${C.cyan}`,
+                  borderRadius: 7,
                 }}
               >
-                <button
-                  onClick={() => eqScope && setGpEquity((v) => !v)}
-                  disabled={!eqScope}
+                <div
                   style={{
-                    width: 42,
-                    height: 22,
-                    borderRadius: 11,
-                    border: `1px solid ${gpEquity && eqScope ? C.cyan : C.border2}`,
-                    background: gpEquity && eqScope ? 'rgba(0,200,255,.25)' : C.panel,
-                    cursor: eqScope ? 'pointer' : 'default',
-                    position: 'relative',
-                    padding: 0,
-                    flexShrink: 0,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.4,
+                    color: C.cyan,
                   }}
                 >
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: 2,
-                      left: gpEquity ? 22 : 2,
-                      width: 16,
-                      height: 16,
-                      borderRadius: '50%',
-                      background: gpEquity && eqScope ? C.cyan : C.mut,
-                      transition: 'left .15s',
-                    }}
-                  />
-                </button>
+                  Esposizione Potenziale in Equity
+                </div>
+                <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 800, color: C.text, marginTop: 3 }}>
+                  {fmtEUR(ptfBase)}
+                </div>
+              </div>
+
+              {/* Toggle: Includi ETF e Commodities */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                {tog(includeEtfCommodity, () => setIncludeEtfCommodity((v) => !v))}
                 <span
                   style={{
                     fontSize: 11,
                     fontWeight: 700,
                     textTransform: 'uppercase',
                     letterSpacing: 0.5,
-                    color: gpEquity && eqScope ? C.cyan : C.mut,
+                    color: includeEtfCommodity ? C.cyan : C.mut,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  Includi ETF e Commodities
+                  <Info title="Includi ETF e Commodities" w={340}>
+                    Se <b>spento</b>, l'Esposizione Potenziale in Equity e lo shock (beta/delta, P&L, tabelle)
+                    <b> escludono ETF, ETC e commodity</b> e si basano <b>solo sui singoli titoli</b> (più le
+                    opzioni). Serve ad analizzare gli effetti dello shock solo sul portafoglio gestito in
+                    opzioni e singoli titoli. Il patrimonio stressato assoluto resta comunque totale + P&L.
+                  </Info>
+                </span>
+              </div>
+
+              {/* Toggle: Includi azioni GP */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                {tog(gpEquity, () => setGpEquity((v) => !v))}
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.5,
+                    color: gpEquity ? C.cyan : C.mut,
+                    display: 'inline-flex',
+                    alignItems: 'center',
                   }}
                 >
                   Includi azioni GP
                   {pb.gpEquityEUR > 0 ? ` (+${fmtN(pb.gpEquityEUR / 1000, 0)}k)` : ''}
+                  <Info title="Includi azioni GP" w={320}>
+                    Aggiunge l'esposizione azionaria della <b>Gestione Patrimoniale</b> all'esposizione di
+                    riferimento e allo shock dello scenario (equivale al toggle GP del Risk Analyzer).
+                  </Info>
                 </span>
               </div>
 
-              <div style={{ marginTop: 8, fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
-                {patrimonyScope === 'total'
-                  ? `Netting ${netting ? 'Ex CC e NP' : 'totale'} (GP inclusa) · equity book ${fmtN((pb.stocksEUR + pb.etfEUR) / 1000, 0)}k · bond ${fmtN(pb.bondsEUR / 1000, 0)}k · cash ${fmtN(pb.cashEUR / 1000, 0)}k · oro ${fmtN(pb.commodityEUR / 1000, 0)}k`
-                  : `Esposizione equity Risk Analyzer ${fmtN(eqNoGP / 1000, 0)}k${gpEquity ? ` + azioni GP ${fmtN(pb.gpEquityEUR / 1000, 0)}k = ${fmtN(eqVal / 1000, 0)}k` : ''}`}
+              <div style={{ marginTop: 9, fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
+                Risk Analyzer {fmtN(data.equityGrandTotal / 1000, 0)}k
+                {!includeEtfCommodity
+                  ? ` − ETF ${fmtN(data.equityEtfEUR / 1000, 0)}k − commodity ${fmtN(data.equityCommodityEUR / 1000, 0)}k`
+                  : ''}
+                {gpEquity ? ` + azioni GP ${fmtN(pb.gpEquityEUR / 1000, 0)}k` : ''} = {fmtN(ptfBase / 1000, 0)}k
               </div>
             </>
           );
