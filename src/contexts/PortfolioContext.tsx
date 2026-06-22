@@ -44,7 +44,7 @@ interface PortfolioContextType {
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     // Se c'è una vista admin attiva in sessione, ripristina il portfolio admin
@@ -99,6 +99,27 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     enabled: isAdminMode && !!selectedId && !isAnyAggregatedId(selectedId),
   });
 
+  // Admin-only: most recently updated CLIENT portfolio (escluso quello dell'admin),
+  // usato come landing iniziale all'apertura dell'app per gli admin.
+  const latestClientPortfolioQuery = useQuery({
+    queryKey: ['admin-latest-client-portfolio', user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from('portfolios')
+        .select('id, user_id, last_updated, created_at')
+        .neq('user_id', user.id)
+        .order('last_updated', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { id: string; user_id: string } | null;
+    },
+    enabled: !!user && isAdmin,
+    staleTime: 60000,
+  });
+
   const portfolios = portfoliosQuery.data || [];
 
   // Reset quando user cambia (logout)
@@ -115,13 +136,38 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   // Auto-selezione robusta - PRIORITÀ: selectedId attuale > localStorage > fallback
   useEffect(() => {
     if (portfoliosQuery.isLoading || portfoliosQuery.isFetching) return;
-    if (portfolios.length === 0) return;
     
     // Skip auto-selection when in admin mode (viewing another user's portfolio)
     if (adminViewUserId !== null && adminViewUserId !== user?.id) {
       if (!hasInitialized) setHasInitialized(true);
       return;
     }
+    
+    // ADMIN LANDING: al primo bootstrap, se l'admin non ha già una vista admin attiva
+    // in sessionStorage, atterra automaticamente sull'ultimo portafoglio cliente aggiornato.
+    if (
+      !hasInitialized &&
+      isAdmin &&
+      !sessionStorage.getItem(ADMIN_VIEW_PORTFOLIO_KEY) &&
+      !latestClientPortfolioQuery.isLoading
+    ) {
+      const latest = latestClientPortfolioQuery.data;
+      if (latest) {
+        setAdminViewUserId(latest.user_id);
+        setSelectedId(latest.id);
+        sessionStorage.setItem(ADMIN_VIEW_USER_KEY, latest.user_id);
+        sessionStorage.setItem(ADMIN_VIEW_PORTFOLIO_KEY, latest.id);
+        queryClient.invalidateQueries({ queryKey: ['positions'] });
+        queryClient.invalidateQueries({ queryKey: ['deposits'] });
+        queryClient.invalidateQueries({ queryKey: ['historicalData'] });
+        queryClient.invalidateQueries({ queryKey: ['derivativeOverrides'] });
+        setHasInitialized(true);
+        return;
+      }
+      // Se non ci sono portafogli clienti, prosegue col fallback personale
+    }
+    
+    if (portfolios.length === 0) return;
     
     // Se è selezionato un aggregato, non resettare - è una selezione valida
     if (isAnyAggregatedId(selectedId)) {
@@ -155,7 +201,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
     
     setHasInitialized(true);
-  }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized, adminViewUserId, user?.id]);
+  }, [portfolios, portfoliosQuery.isLoading, portfoliosQuery.isFetching, selectedId, hasInitialized, adminViewUserId, user?.id, isAdmin, latestClientPortfolioQuery.isLoading, latestClientPortfolioQuery.data, queryClient]);
 
   // Selected portfolio: use admin query if in admin mode, otherwise use own portfolios
   const selectedPortfolio = isAdminMode 
