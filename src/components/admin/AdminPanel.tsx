@@ -245,6 +245,45 @@ export function AdminPanel() {
                   <DialogHeader>
                     <DialogTitle>Nuovo Utente</DialogTitle>
                   </DialogHeader>
+                  <form onSubmit={handleAddUser} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Nome completo</Label>
+                      <Input
+                        id="name"
+                        value={newUserName}
+                        onChange={(e) => setNewUserName(e.target.value)}
+                        className="bg-background-secondary border-border"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="username">Nome utente</Label>
+                      <Input
+                        id="username"
+                        type="text"
+                        placeholder="mario_rossi"
+                        value={newUserUsername}
+                        onChange={(e) => setNewUserUsername(e.target.value)}
+                        className="bg-background-secondary border-border"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password</Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        value={newUserPassword}
+                        onChange={(e) => setNewUserPassword(e.target.value)}
+                        className="bg-background-secondary border-border"
+                        minLength={6}
+                        required
+                      />
+                    </div>
+                    <Button type="submit" className="w-full bg-primary hover:bg-primary-glow">
+                      Crea Utente
+                    </Button>
+                  </form>
                 </DialogContent>
               </Dialog>
               <AppHeaderMenu includePortfolioSelector={false} />
