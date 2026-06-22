@@ -329,7 +329,8 @@ function StressLabContent() {
   const [ivScan, setIvScan] = useState(0.4);
   const [nakedPct, setNakedPct] = useState(0.2);
 
-  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree } = data;
+  const { legs, eq, fx, effIV, ptfBaseMTM, equityExposure, riskFree, patrimonyBreakdown } = data;
+  const bondCashBase = (patrimonyBreakdown?.bondsEUR ?? 0) + (patrimonyBreakdown?.cashEUR ?? 0);
   const r = riskFree;
 
   // Sottostanti per lo SCENARIO attivo: in modalità 'titoli' i nomi si muovono
