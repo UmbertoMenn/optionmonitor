@@ -9,12 +9,7 @@ let CACHED_CRON_SECRET: string | null = null;
 export async function getCronSecret(): Promise<string | null> {
   if (CACHED_CRON_SECRET) return CACHED_CRON_SECRET;
 
-  // Allow an env override (useful for local dev) but prefer the vault value.
-  const envValue = Deno.env.get("CRON_SECRET");
-  if (envValue) {
-    CACHED_CRON_SECRET = envValue;
-    return envValue;
-  }
+
 
   try {
     const supabase = createClient(

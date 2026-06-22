@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isCronAuthorized, getAuthenticatedUserId } from "../_shared/cronAuth.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -271,29 +273,12 @@ const MONTH_MS = 30 * DAY_MS;
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  // Auth gate: allow CRON_SECRET header OR a valid authenticated JWT.
-  {
-    const cronSecret = Deno.env.get("CRON_SECRET");
-    const providedSecret = req.headers.get("x-cron-secret");
-    const isCron = !!cronSecret && providedSecret === cronSecret;
-    let isAuthed = false;
-    const authHeader = req.headers.get("Authorization");
-    if (!isCron && authHeader?.startsWith("Bearer ")) {
-      try {
-        const sbAuth = createClient(
-          Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_ANON_KEY")!,
-        );
-        const { data: claimsData } = await sbAuth.auth.getClaims(authHeader.replace("Bearer ", ""));
-        isAuthed = !!claimsData?.claims?.sub;
-      } catch (_) { /* ignore */ }
-    }
-    if (!isCron && !isAuthed) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+  // Auth gate: allow shared cron secret OR a valid authenticated JWT.
+  if (!(await isCronAuthorized(req)) && !(await getAuthenticatedUserId(req))) {
+    return new Response(
+      JSON.stringify({ error: "Unauthorized" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   try {
