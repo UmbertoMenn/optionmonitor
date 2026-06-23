@@ -182,8 +182,18 @@
     --shadow-glow-primary: 0 0 15px hsl(217 91% 60% / 0.15);
     --shadow-glow-profit: 0 0 15px hsl(142 71% 35% / 0.15);
     --shadow-glow-loss: 0 0 15px hsl(0 84% 50% / 0.15);
+
+    /* Stress Lab palette (light) */
+    --stress-bg: 0 0% 100%;
+    --stress-panel: 220 14% 98%;
+    --stress-panel2: 220 14% 95%;
+    --stress-border: 220 13% 87%;
+    --stress-border2: 220 13% 80%;
+    --stress-text: 222 47% 15%;
+    --stress-mut: 215 16% 47%;
   }
 }
+
 
 @layer base {
   * {
