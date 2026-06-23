@@ -1367,6 +1367,8 @@ export type Database = {
         | "action_leap_gain_50"
         | "price_alert_above"
         | "price_alert_below"
+        | "action_put_roll_up_otm"
+        | "distance_put_roll_up"
       app_role: "admin" | "user"
     }
     CompositeTypes: {
@@ -1516,6 +1518,8 @@ export const Constants = {
         "action_leap_gain_50",
         "price_alert_above",
         "price_alert_below",
+        "action_put_roll_up_otm",
+        "distance_put_roll_up",
       ],
       app_role: ["admin", "user"],
     },
