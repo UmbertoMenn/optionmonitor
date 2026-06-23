@@ -1,28 +1,37 @@
-## Obiettivo
-Rendere la pagina Risk / Margin Simulator (`RiskSimulator.tsx`) completamente compatibile con il tema chiaro, attualmente bloccata sui colori scuri hardcodati.
+## Stato attuale (verificato sul DB live)
 
-## Problema
-Il componente `StressLabContent` e tutte le card interne (`Panel`) usano un oggetto `C` con colori esadecimali fissi (`#0B0E14`, `#131722`, `#1E222D`, `#D1D4DC`, ecc.). Quando l'utente passa al tema chiaro:
-- Il contorno della pagina (header, container) cambia correttamente (usa classi Tailwind tematiche).
-- La sezione centrale (sfondo, card, bordi, testi) rimane scura perché gli stili sono inline.
+- Tabella `public.put_roll_flags` → **non esiste**
+- Enum `alert_type` → contiene 18 valori, **mancano** `action_put_roll_up_otm` e `distance_put_roll_up`
 
-## Piano di refactoring
+Le due migration SQL sono presenti nel repo (`supabase/migrations/20260623115900_*` e `20260623120000_*`) ma non sono mai state eseguite. Conferma: il **Publish di Lovable non applica file SQL** arrivati via push esterno — deploya solo frontend ed edge functions. Vanno eseguite esplicitamente.
 
-1. **Tema dinamico**: leggere il tema attivo da `next-themes` dentro `StressLabContent`.
+## Piano
 
-2. **Palette condizionale**: sostituire l'oggetto costante `C` con un oggetto `colors` calcolato al render in base al tema:
-   - Dark → valori attuali (terminal-style).
-   - Light → valori chiari mappati su `hsl(var(--card))`, `hsl(var(--card-foreground))`, `hsl(var(--border))`, ecc.
+Eseguire le due migration sul Lovable Cloud, in due step separati (obbligatorio: `ALTER TYPE ADD VALUE` non può girare nella stessa transazione che poi usa quei valori).
 
-3. **Componenti interni**: aggiornare `Panel`, `Info`, `StatCard` e le parti del return di `StressLabContent` per usare il nuovo oggetto `colors` invece di `C`.
+### Step 1 — Estendere l'enum `alert_type`
+```sql
+ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'action_put_roll_up_otm';
+ALTER TYPE alert_type ADD VALUE IF NOT EXISTS 'distance_put_roll_up';
+```
 
-4. **Stili globali inline**: convertire il blocco `<style>` del range/table/scrollbar per usare le variabili CSS tematiche o classi Tailwind.
+### Step 2 — Creare `put_roll_flags` con RLS + GRANT
+Stessa struttura del file nel repo (tabella keyed by `strategy_key`, UNIQUE per `portfolio_id+strategy_key`, 4 policy RLS scoped all'`auth.uid()` via `portfolios`, indice su `portfolio_id`), con due correzioni necessarie per Lovable Cloud che mancavano nel file originale di Claude:
 
-5. **Recharts**: passare i colori dinamici anche alle prop `stroke` e `fill` dei grafici.
+- Aggiungo i `GRANT` espliciti (obbligatori: senza, PostgREST risponde "permission denied" anche con RLS attiva):
+  ```sql
+  GRANT SELECT, INSERT, UPDATE, DELETE ON public.put_roll_flags TO authenticated;
+  GRANT ALL ON public.put_roll_flags TO service_role;
+  ```
+  Niente grant ad `anon` (tutte le policy sono scoped a `auth.uid()`).
+- Aggiungo trigger `update_updated_at_column` per mantenere `updated_at` (coerente col resto delle tue tabelle).
 
-6. **Verifica visiva**: scattare screenshot in entrambi i temi per confermare leggibilità.
+## Verifica post-migrazione
 
-## Considerazioni
-- Il file ha ~2400 linee con molti riferimenti a `C`; la modifica sarà estesa ma meccanica.
-- Non si tocca la logica matematica (`src/lib/stressLab.ts`, `useStressLab.ts`).
-- Si mantiene l'aspetto "terminal" nel tema scuro; nel tema chiaro si adatta alle variabili del design system.
+1. `SELECT to_regclass('public.put_roll_flags')` → deve ritornare il nome tabella.
+2. `enum_range(NULL::alert_type)` → deve includere i due nuovi valori.
+3. Tagga una PUT come "roll-up" dalla UI e controlla che la riga appaia in `put_roll_flags` e che `check-alerts` emetta i nuovi tipi senza errori enum.
+
+## Cosa NON tocco
+
+Solo database. Nessuna modifica a frontend, edge functions, o codice TS. I file in `supabase/migrations/` resteranno come storico nel repo (non li rimuovo).

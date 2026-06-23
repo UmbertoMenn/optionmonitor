@@ -1046,6 +1046,41 @@ export type Database = {
         }
         Relationships: []
       }
+      put_roll_flags: {
+        Row: {
+          created_at: string
+          id: string
+          portfolio_id: string
+          roll_up: boolean
+          strategy_key: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          portfolio_id: string
+          roll_up?: boolean
+          strategy_key: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          portfolio_id?: string
+          roll_up?: boolean
+          strategy_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "put_roll_flags_portfolio_id_fkey"
+            columns: ["portfolio_id"]
+            isOneToOne: false
+            referencedRelation: "portfolios"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       strategy_alert_toggles: {
         Row: {
           created_at: string | null
@@ -1367,6 +1402,8 @@ export type Database = {
         | "action_leap_gain_50"
         | "price_alert_above"
         | "price_alert_below"
+        | "action_put_roll_up_otm"
+        | "distance_put_roll_up"
       app_role: "admin" | "user"
     }
     CompositeTypes: {
@@ -1516,6 +1553,8 @@ export const Constants = {
         "action_leap_gain_50",
         "price_alert_above",
         "price_alert_below",
+        "action_put_roll_up_otm",
+        "distance_put_roll_up",
       ],
       app_role: ["admin", "user"],
     },
