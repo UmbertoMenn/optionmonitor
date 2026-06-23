@@ -1327,7 +1327,7 @@ function StressLabContent() {
               </Panel>
             ))}
             {/* Beta @ scenario — sensibilità al mercato */}
-            <Panel style={{ padding: '14px 16px' }}>
+            <Panel style={{ padding: '14px 16px', border: `1px solid ${C.blue}` }}>
               <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>
                 Beta @ scenario
                 <Info title="Sensibilità al mercato" w={420}>
@@ -1370,7 +1370,7 @@ function StressLabContent() {
             </Panel>
 
             {/* Delta @ scenario — quota della perdita beta-implicita che si realizza davvero */}
-            <Panel style={{ padding: '14px 16px' }}>
+            <Panel style={{ padding: '14px 16px', border: `1px solid ${C.cyan}` }}>
               <div style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>
                 Delta @ scenario
                 <Info title="Quanto realizzi della perdita teorica" w={440}>
@@ -1399,7 +1399,7 @@ function StressLabContent() {
                     : 0;
                 return (
                   <>
-                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: deltaEff >= 1 ? C.dn : deltaEff <= 0.5 ? C.up : C.text }}>
+                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: deltaEff >= 1.5 ? C.dn : deltaEff <= 0.9 ? C.up : C.text }}>
                       {fmtN(deltaEff, 2)}
                       <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}> @ {sgn(d, 1)}%</span>
                     </div>
