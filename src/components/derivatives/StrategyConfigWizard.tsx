@@ -13,6 +13,8 @@ import { Settings2, Check, Zap, Plus, X, Wand2, ChevronDown, ChevronRight, Searc
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
+import { isSoldPut } from '@/lib/strategyKeys';
 
 function formatExpiryMMY(date: string | null | undefined): string {
   if (!date) return '-';
@@ -1139,6 +1141,9 @@ export function StrategyConfigWizard({
                         {/* Strategies configured for this group */}
                         {groupStrategies.map(strategy => {
                           const showSynthetic = strategy.strategyType === 'covered_call' || strategy.strategyType === 'derisking_covered_call';
+                          const rollUpPut = strategy.strategyType === 'naked_put'
+                            ? strategy.positions.find(isSoldPut)
+                            : undefined;
                           return (
                             <div key={strategy.id} className="rounded-md border border-dashed border-border p-2.5 space-y-1.5">
                               <div className="flex items-center justify-between gap-2">
@@ -1183,6 +1188,10 @@ export function StrategyConfigWizard({
                                         <Zap className="w-3 h-3" /> Sintetica
                                       </Label>
                                     </div>
+                                  )}
+
+                                  {rollUpPut && (
+                                    <PutRollUpToggle option={rollUpPut} />
                                   )}
                                 </div>
 

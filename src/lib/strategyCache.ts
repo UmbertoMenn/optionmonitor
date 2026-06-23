@@ -9,12 +9,7 @@ import {
   GroupedOtherStrategy
 } from './derivativeStrategies';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-
-function formatExpiryKey(expiry: string | null | undefined): string {
-  if (!expiry) return 'noexp';
-  const d = new Date(expiry);
-  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
+import { formatExpiryKey, nakedPutKey } from './strategyKeys';
 
 interface StrategyRecord {
   portfolio_id: string;
@@ -119,7 +114,7 @@ export async function saveStrategyCache(
     
     records.push({
       portfolio_id: portfolioId,
-      strategy_key: `np_${underlying}_${np.option.strike_price || 0}_${formatExpiryKey(np.option.expiry_date)}`,
+      strategy_key: nakedPutKey(underlying, np.option.strike_price, np.option.expiry_date),
       strategy_type: 'Naked Put',
       underlying,
       ticker,

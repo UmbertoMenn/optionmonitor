@@ -18,6 +18,8 @@ const ALERT_TYPES = {
   DISTANCE_NAKED_PUT: 'distance_naked_put',
   ACTION_NAKED_PUT_ITM: 'action_naked_put_itm',
   ACTION_COVERED_CALL_ITM: 'action_covered_call_itm',
+  ACTION_PUT_ROLL_UP_ITM: 'action_put_roll_up_itm',
+  DISTANCE_PUT_ROLL_UP: 'distance_put_roll_up',
   ACTION_DD_IC_OOR: 'action_dd_ic_oor',
   ACTION_STRATEGY_OOB: 'action_strategy_oob',
   ACTION_LEAP_GAIN_20: 'action_leap_gain_20',
@@ -350,6 +352,22 @@ serve(async (req) => {
           console.log(`[${portfolioId}] Found ${overriddenPositions.size} position overrides`);
         }
         
+        // ============ FETCH PUT ROLL-UP FLAGS ============
+        // Naked Puts flagged "da rollare al rialzo": fire dedicated roll-up
+        // alerts and SUPPRESS the standard naked-put alerts.
+        const { data: rollFlagsData } = await supabase
+          .from('put_roll_flags')
+          .select('strategy_key, roll_up')
+          .eq('portfolio_id', portfolioId);
+        
+        const rollUpKeys = new Set<string>(
+          (rollFlagsData || []).filter((f: any) => f.roll_up).map((f: any) => f.strategy_key)
+        );
+        
+        if (rollUpKeys.size > 0) {
+          console.log(`[${portfolioId}] Found ${rollUpKeys.size} put roll-up flags`);
+        }
+        
         // ============ FETCH STRATEGY ALERT TOGGLES ============
         const { data: strategyTogglesData } = await supabase
           .from('strategy_alert_toggles')
@@ -561,31 +579,46 @@ serve(async (req) => {
             }
           }
           
-          // ============ NAKED PUT ============
+          // ============ NAKED PUT / PUT ROLL-UP ============
           if (strategyType === 'Naked Put') {
             const soldPutStrike = strategy.sold_put_strike || 0;
             if (soldPutStrike <= 0) continue;
+            
+            // Flagged "da rollare al rialzo"? → dedicated roll-up alerts,
+            // and the standard naked-put alerts are suppressed for this put.
+            const isRollUp = rollUpKeys.has(strategy.strategy_key);
+            const itmAlertType = isRollUp ? ALERT_TYPES.ACTION_PUT_ROLL_UP_ITM : ALERT_TYPES.ACTION_NAKED_PUT_ITM;
+            const distAlertType = isRollUp ? ALERT_TYPES.DISTANCE_PUT_ROLL_UP : ALERT_TYPES.DISTANCE_NAKED_PUT;
+            const itmKeyPrefix = isRollUp ? 'pru_itm_' : 'np_itm_';
+            const distKeyPrefix = isRollUp ? 'pru_dist_' : 'np_dist_';
+            const strategyLabel = isRollUp ? 'PUT roll-up' : 'Naked Put';
+            const itmMessage = isRollUp
+              ? `La PUT ${ticker} è ITM — da rollare al rialzo`
+              : `La Naked Put è ITM`;
+            const distMessage = isRollUp
+              ? `${ticker} si avvicina allo strike della PUT — valuta il roll al rialzo`
+              : `${ticker} si avvicina allo strike della put venduta`;
             
             // Calculate ITM state FIRST
             const isITM = underlyingPrice < soldPutStrike;
             
             // ITM Alert
-            const itmConfig = getEffectiveConfig(configs || [], ALERT_TYPES.ACTION_NAKED_PUT_ITM, ticker);
+            const itmConfig = getEffectiveConfig(configs || [], itmAlertType, ticker);
             if (itmConfig.enabled) {
-              const positionKey = `np_itm_${strategy.strategy_key}`;
-              const stateKey = `${positionKey}:${ALERT_TYPES.ACTION_NAKED_PUT_ITM}`;
+              const positionKey = `${itmKeyPrefix}${strategy.strategy_key}`;
+              const stateKey = `${positionKey}:${itmAlertType}`;
               const currentState = statesMap.get(stateKey);
               
               if (isITM && (!currentState || currentState.current_state === 'safe')) {
                 if (cooldownPassed(currentState?.last_alerted_at || null, itmConfig.cooldown_minutes)) {
-                  const message = `La Naked Put è ITM`;
+                  const message = itmMessage;
                   
                   await supabase.from('alerts').insert({
                     user_id: userId,
                     portfolio_id: portfolioId,
-                    alert_type: ALERT_TYPES.ACTION_NAKED_PUT_ITM,
+                    alert_type: itmAlertType,
                     ticker,
-                    strategy_type: 'Naked Put',
+                    strategy_type: strategyLabel,
                     direction: 'down',
                     current_value: underlyingPrice,
                     threshold_value: soldPutStrike,
@@ -602,7 +635,7 @@ serve(async (req) => {
                     user_id: userId,
                     portfolio_id: portfolioId,
                     position_key: positionKey,
-                    alert_type: ALERT_TYPES.ACTION_NAKED_PUT_ITM,
+                    alert_type: itmAlertType,
                     current_state: 'alerted',
                     last_alerted_at: new Date().toISOString(),
                   }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
@@ -614,12 +647,12 @@ serve(async (req) => {
                 
                 // Pre-set distance state to 'alerted' to suppress spurious alert
                 // during recovery from ITM side
-                const distPositionKey = `np_dist_${strategy.strategy_key}`;
+                const distPositionKey = `${distKeyPrefix}${strategy.strategy_key}`;
                 await supabase.from('alert_states').upsert({
                   user_id: userId,
                   portfolio_id: portfolioId,
                   position_key: distPositionKey,
-                  alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+                  alert_type: distAlertType,
                   current_state: 'alerted',
                   last_alerted_at: new Date().toISOString(),
                 }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
@@ -627,24 +660,24 @@ serve(async (req) => {
             }
             
             // Distance Alert - SUPPRESSED if already ITM
-            const distConfig = getEffectiveConfig(configs || [], ALERT_TYPES.DISTANCE_NAKED_PUT, ticker);
+            const distConfig = getEffectiveConfig(configs || [], distAlertType, ticker);
             if (distConfig.enabled && !isITM) {
               const distancePct = calcPutDistance(underlyingPrice, soldPutStrike);
               const isInDanger = distancePct < distConfig.threshold_pct;
-              const positionKey = `np_dist_${strategy.strategy_key}`;
-              const stateKey = `${positionKey}:${ALERT_TYPES.DISTANCE_NAKED_PUT}`;
+              const positionKey = `${distKeyPrefix}${strategy.strategy_key}`;
+              const stateKey = `${positionKey}:${distAlertType}`;
               const currentState = statesMap.get(stateKey);
               
               if (isInDanger && (!currentState || currentState.current_state === 'safe')) {
                 if (cooldownPassed(currentState?.last_alerted_at || null, distConfig.cooldown_minutes)) {
-                  const message = `${ticker} si avvicina allo strike della put venduta`;
+                  const message = distMessage;
                   
                   await supabase.from('alerts').insert({
                     user_id: userId,
                     portfolio_id: portfolioId,
-                    alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+                    alert_type: distAlertType,
                     ticker,
-                    strategy_type: 'Naked Put',
+                    strategy_type: strategyLabel,
                     direction: 'down',
                     current_value: distancePct,
                     threshold_value: distConfig.threshold_pct,
@@ -661,7 +694,7 @@ serve(async (req) => {
                     user_id: userId,
                     portfolio_id: portfolioId,
                     position_key: positionKey,
-                    alert_type: ALERT_TYPES.DISTANCE_NAKED_PUT,
+                    alert_type: distAlertType,
                     current_state: 'alerted',
                     last_alerted_at: new Date().toISOString(),
                   }, { onConflict: 'user_id,portfolio_id,position_key,alert_type' });
