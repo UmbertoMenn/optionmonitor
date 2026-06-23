@@ -884,30 +884,101 @@ function StressLabContent() {
           );
           return (
             <>
-              {/* Card unica: Esposizione Potenziale in Equity (denominatore P&L%/beta/delta) */}
-              <div
-                style={{
-                  padding: '10px 12px',
-                  background: `${C.cyan}14`,
-                  border: `1px solid ${C.cyan}`,
-                  borderRadius: 7,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.4,
-                    color: C.cyan,
-                  }}
-                >
-                  Esposizione Potenziale in Equity
-                </div>
-                <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 800, color: C.text, marginTop: 3 }}>
-                  {fmtEUR(ptfBase)}
-                </div>
-              </div>
+              {/* Card esposizioni: Potenziale (sempre) · Reale + Leva Reale (solo titoli) */}
+              {(() => {
+                const reale = ptfBase * deltaScen;
+                const leva = totalPatrimony ? reale / totalPatrimony : 0;
+                const showReal = shockMode === 'titoli';
+                const card = (
+                  label: string,
+                  value: string,
+                  accent: string,
+                  info: React.ReactNode,
+                ) => (
+                  <div
+                    style={{
+                      flex: '1 1 150px',
+                      padding: '10px 12px',
+                      background: `${accent}14`,
+                      border: `1px solid ${accent}`,
+                      borderRadius: 7,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.4,
+                        color: accent,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      {label}
+                      {info}
+                    </div>
+                    <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 800, color: C.text, marginTop: 3 }}>
+                      {value}
+                    </div>
+                  </div>
+                );
+                return (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {card(
+                      'Esposizione Potenziale in Equity',
+                      fmtEUR(ptfBase),
+                      C.cyan,
+                      <Info title="Esposizione Potenziale in Equity" w={340}>
+                        Esposizione equity del Risk Analyzer (coi sotto-toggle qui sotto). È il
+                        <b> denominatore</b> di P&L%, beta e delta. Rappresenta il rischio se TUTTO si muovesse
+                        a pieno (delta 1): è il "potenziale", non l'esposizione direzionale effettiva.
+                      </Info>,
+                    )}
+                    {showReal &&
+                      card(
+                        'Esposizione Reale in Equity',
+                        fmtEUR(reale),
+                        C.blue,
+                        <Info title="Esposizione Reale in Equity" w={360}>
+                          <b>Esposizione Potenziale × Delta @ scenario</b>. Il delta @ scenario misura quanta
+                          parte dell'esposizione si muove <b>davvero</b> coi tuoi sottostanti allo shock
+                          corrente (include gamma e vol lungo il tragitto), quindi <b>cambia con lo slider</b>.
+                          <br />
+                          <br />
+                          Esempio: covered call con delta netto 0,7 su 50k potenziali → 35k reali (le call
+                          coperte tagliano parte dell'upside). Put venduta OTM con delta 0,2 su 10k → 2k reali
+                          (poca direzionalità finché non va ITM).
+                          <br />
+                          <br />
+                          È un'esposizione <b>lineare</b> (delta-€): in un crash la perdita reale è maggiore,
+                          perché il gamma delle put vendute accelera. Negativa = sei net short.
+                        </Info>,
+                      )}
+                    {showReal &&
+                      card(
+                        'Leva Reale',
+                        `${fmtN(leva, 2)}×`,
+                        C.amber,
+                        <Info title="Leva Reale" w={360}>
+                          <b>Esposizione Reale ÷ Patrimonio totale</b> (netting della dashboard, coerente col
+                          toggle <b>Netting Ex CC e NP</b>: il denominatore è il netting totale o l'ex CC e NP).
+                          <br />
+                          <br />
+                          Dice quanta parte del patrimonio è <b>davvero esposta</b> alla direzione dell'equity:
+                          0,80 = l'80% del patrimonio si muove col book; 1,30 = sei in <b>leva 1,3×</b>; valori
+                          bassi = molto coperto/poco direzionale.
+                          <br />
+                          <br />
+                          Cambia con lo slider (segue il delta @ scenario) e col toggle Ex CC e NP. Negativa =
+                          net short. È leva <b>direzionale lineare</b>, non perdita massima (la coda è peggiore
+                          per il gamma).
+                        </Info>,
+                      )}
+                  </div>
+                );
+              })()}
 
               {/* Toggle: Includi ETF e Commodities */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
@@ -1285,10 +1356,13 @@ function StressLabContent() {
                   riduce</b>. (Attenzione: è un effetto di misura, non un rischio minore reale.)
                   <br />
                   <br />
-                  Il valore principale usa come denominatore l'<b>Esposizione Potenziale in Equity</b>. Sotto,
-                  in piccolo, lo stesso beta/delta riferito al <b>patrimonio totale</b> (netting completo della
-                  dashboard): è la base corretta per ponderare il rendimento del benchmark sull'equity line
-                  della dashboard.
+                  Il valore principale usa come denominatore l'<b>Esposizione Potenziale in Equity</b>.
+                  <br />• In modalità <b>mercato</b>: a fianco, in piccolo, lo stesso beta riferito al
+                  <b> patrimonio totale</b> (netting della dashboard) — base per ponderare il benchmark
+                  sull'equity line.
+                  <br />• In modalità <b>titoli</b>: la stessa idea è esposta come card <b>Esposizione Reale</b>
+                  (potenziale × delta) e <b>Leva Reale</b> (reale ÷ patrimonio totale), accanto all'Esposizione
+                  Potenziale.
                 </Info>
               </div>
               {(() => {
@@ -1323,22 +1397,24 @@ function StressLabContent() {
                           @ {sgn(d, 1)}%{shockMode === 'titoli' ? ' titoli' : ''}
                         </span>
                       </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          lineHeight: 1.15,
-                          color: C.mut,
-                          fontFamily: MONO,
-                          textAlign: 'right',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {shockMode === 'market' ? 'β' : 'δ'} vs patr. totale
-                        <br />
-                        <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                          {fmtN(headlineTot, 2)}
-                        </span>
-                      </div>
+                      {shockMode === 'market' && (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            lineHeight: 1.15,
+                            color: C.mut,
+                            fontFamily: MONO,
+                            textAlign: 'right',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          β vs patr. totale
+                          <br />
+                          <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                            {fmtN(headlineTot, 2)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
                       rif. <span style={{ color: C.dn }}>{fmtN(refDn, 2)}↓</span> ·{' '}
