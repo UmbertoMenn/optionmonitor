@@ -28,7 +28,7 @@ export function RiskViewModeSelector({ viewMode, onViewModeChange }: RiskViewMod
               className={cn(
                 'px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer',
                 active
-                  ? 'bg-primary/10 text-primary'
+                  ? 'bg-warning/10 text-warning'
                   : 'hover:bg-muted/50 text-foreground'
               )}
               aria-pressed={active}
