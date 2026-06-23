@@ -59,6 +59,10 @@ export interface StressLabInputs {
   /** Include ETF e commodity/ETC. Se OFF, il denominatore e lo shock si basano SOLO sui
    *  singoli titoli (+ opzioni): ETF/ETC/commodity escono da esposizione e scenario. */
   includeEtfCommodity: boolean;
+  /** Include le protezioni nel VALORE dell'esposizione equity (solo denominatore). Le
+   *  protezioni restano SEMPRE nello shock; cambiando questo toggle cambia solo l'esposizione
+   *  presa a riferimento (netta protezioni se ON, lorda se OFF) → variano beta/delta. */
+  includeProtections: boolean;
 }
 
 export interface BetaRow {
@@ -93,6 +97,7 @@ export interface StressLabData {
   equityGrandTotal: number;
   equityEtfEUR: number;
   equityCommodityEUR: number;
+  equityProtectionSavings: number;
   /** Risk-free aggregato (default 4%) */
   riskFree: number;
   /** Numero di gambe per cui non è stato possibile calcolare l'IV */
@@ -527,6 +532,14 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
+  // Riferimento temporale = DATA SNAPSHOT del portafoglio (non oggi): lo stress simula come
+  // se fosse il giorno dello snapshot, così le opzioni vive allo snapshot ma scadute rispetto
+  // a oggi restano nello shock (coerente col Risk Analyzer, che le conta nell'esposizione).
+  const snapshotRef = useMemo(() => {
+    const sd = portfolio?.snapshot_date;
+    return sd ? new Date(sd + 'T16:00:00Z') : new Date();
+  }, [portfolio?.snapshot_date]);
+
   const legs: StressLeg[] = useMemo(() => {
     const out: StressLeg[] = [];
     derivatives.forEach((d) => {
@@ -536,8 +549,8 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       if (!d.strike_price || !d.expiry_date || !d.option_type) return;
       const px = d.snapshot_price ?? d.current_price;
       if (typeof px !== 'number' || px <= 0) return;
-      const T = yearsToExpiry(d.expiry_date);
-      if (T <= 0) return; // gambe scadute le scartiamo
+      const T = yearsToExpiry(d.expiry_date, snapshotRef);
+      if (T <= 0) return; // scadute GIÀ allo snapshot le scartiamo
 
       const isCall = d.option_type === 'call';
       const fl = isPriceBelowIntrinsic(px, und.S, d.strike_price, isCall);
@@ -561,7 +574,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       });
     });
     return out;
-  }, [derivatives, baselineUnders, riskFree, getOptionUnderlyingKey]);
+  }, [derivatives, baselineUnders, riskFree, getOptionUnderlyingKey, snapshotRef]);
 
   const effIV = useMemo(() => effIVMap(legs), [legs]);
 
@@ -721,9 +734,23 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
   const grandTotal = riskAnalysis.grandTotal ?? 0;
   const etfRiskEUR = riskAnalysis.totalETFRisk ?? 0;
   const commodityRiskEUR = riskAnalysis.totalCommodityRisk ?? 0;
+  // Risparmio da protezioni (azioni singole + sintetiche CC/DRCC): differenza tra rischio
+  // LORDO e NETTO. grandTotal è già netto protezioni; se il toggle protezioni è OFF si
+  // riaggiunge questo risparmio per ottenere l'esposizione lorda.
+  const protectionSavings = useMemo(() => {
+    const stockDetails = riskAnalysis.stockDetails ?? [];
+    const pure = stockDetails.filter((s) => !s.isETF);
+    const grossStock = pure.reduce((sum, s) => sum + s.stockValue / s.exchangeRate, 0);
+    const netStock = pure.reduce((sum, s) => sum + s.riskEUR, 0);
+    const synth = riskAnalysis.syntheticCcDrccDetails ?? [];
+    const grossSynth = synth.reduce((sum, s) => sum + (s.riskEURWithoutProtection ?? s.riskEUR), 0);
+    const netSynth = riskAnalysis.totalSyntheticCcDrccRisk ?? 0;
+    return Math.max(0, grossStock - netStock) + Math.max(0, grossSynth - netSynth);
+  }, [riskAnalysis.stockDetails, riskAnalysis.syntheticCcDrccDetails, riskAnalysis.totalSyntheticCcDrccRisk]);
 
   const { nettingTotal, nettingExCCAndNP, equityExposure } = useMemo(() => {
     let base = grandTotal;
+    if (!inputs.includeProtections) base += protectionSavings; // esposizione lorda protezioni
     if (!inputs.includeEtfCommodity) base -= etfRiskEUR + commodityRiskEUR;
     if (inputs.gpEquity) base += patrimonyBreakdown.gpEquityEUR;
     return { nettingTotal: base, nettingExCCAndNP: base, equityExposure: base };
@@ -731,6 +758,8 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     grandTotal,
     etfRiskEUR,
     commodityRiskEUR,
+    protectionSavings,
+    inputs.includeProtections,
     inputs.includeEtfCommodity,
     inputs.gpEquity,
     patrimonyBreakdown,
@@ -753,6 +782,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     equityGrandTotal: grandTotal,
     equityEtfEUR: etfRiskEUR,
     equityCommodityEUR: commodityRiskEUR,
+    equityProtectionSavings: protectionSavings,
     riskFree,
     ivWarnings,
     missingBetaTickers,

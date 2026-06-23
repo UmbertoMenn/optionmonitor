@@ -281,14 +281,17 @@ function StressLabContent() {
   const [gpEquity, setGpEquity] = useState(true);
   // Include ETF e commodity/ETC. OFF → esposizione e shock solo su singoli titoli (+ opzioni).
   const [includeEtfCommodity, setIncludeEtfCommodity] = useState(true);
+  // Include le protezioni nel VALORE dell'esposizione equity (denominatore). Le protezioni
+  // restano sempre nello shock; cambia solo l'esposizione di riferimento → beta/delta.
+  const [includeProtections, setIncludeProtections] = useState(true);
 
   // Ordinamento delle tabelle di dettaglio (click sull'intestazione di colonna)
   const [undSort, setUndSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'nm', dir: 'asc' });
   const [legSort, setLegSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'ticker', dir: 'asc' });
 
   const inputs: StressLabInputs = useMemo(
-    () => ({ gpEquity, includeEtfCommodity }),
-    [gpEquity, includeEtfCommodity],
+    () => ({ gpEquity, includeEtfCommodity, includeProtections }),
+    [gpEquity, includeEtfCommodity, includeProtections],
   );
 
   const data = useStressLab(inputs);
@@ -417,8 +420,12 @@ function StressLabContent() {
     return pl / ptfBase / (d / 100);
   }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
 
-  /* ---------- Margine cassa ---------- */
-  const { marNow, marScen, marCurve, marPnlMTM } = useMemo(() => {
+  /* ---------- Margine cassa ----------
+   * Diviso in due memo per le performance dello slider:
+   *  - marNow (margine iniziale) e marCurve (curva margine vs shock) NON dipendono dallo
+   *    shock corrente d → si ricalcolano solo se cambiano portafoglio/override/orizzonte;
+   *  - marScen/marPnlMTM dipendono da d → poche chiamate per tick. */
+  const { marNow, marCurve } = useMemo(() => {
     const fxR = fxRange / 100;
     const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
     const bp = { r, skewB, kappa, pExp, days: 0, fx, netting: false };
@@ -426,48 +433,6 @@ function StressLabContent() {
     const sig0s: Record<number, number> = {};
     base.rows.forEach((x) => (sig0s[x.i] = x.sig0));
     const now = occMargin(legs, eq, unders, 0, sig0s, 0, marPrm);
-
-    // Diagnostica margine iniziale: scomposizione per sottostante (strategy vs scan),
-    // call coperte dai titoli, range di scan. Serve a capire DOVE il margine risulta
-    // troppo basso rispetto al broker (es. short trattata come coperta, scan azzerato).
-    try {
-      const undKeys = Object.keys(unders);
-      const spotSum = undKeys.reduce((s, k) => s + (unders[k]?.S || 0), 0);
-      console.log('[MarginDiag] Margine iniziale totale (EUR):', Math.round(now.total),
-        '| Reg-T puro:', Math.round(now.totRegT),
-        '| strategy:', Math.round(now.totStrat), '| scan:', Math.round(now.totScan),
-        '| call coperte da titoli:', now.nCov,
-        '| kScan:', kScan, '| ivScan:', ivScan, '| nakedPct:', nakedPct);
-      // Fingerprint degli input: se cambia tra una visita e l'altra a parità di
-      // slider, il problema è nei dati (spot/beta/patrimonio), non nel motore.
-      console.log('[MarginDiag] Input fingerprint:',
-        'sottostanti:', undKeys.length,
-        '| Σspot:', spotSum.toFixed(2),
-        '| patrimonio (ptfBase):', Math.round(ptfBase),
-        '| gambe:', legs.length);
-      console.table(
-        now.bd.map((b) => ({
-          sottostante: b.u,
-          margine_EUR: Math.round(b.mar),
-          strategy_EUR: Math.round(b.strat),
-          scan_EUR: Math.round(b.scan),
-          range_scan: +(b.R * 100).toFixed(1) + '%',
-        })),
-      );
-      // Dettaglio gambe per sottostante (qty firmata, strike, scadenza)
-      console.log('[MarginDiag] Gambe opzioni:', legs.map((l) => ({
-        u: l.u, cp: l.cp, q: l.q, K: l.K, T_anni: +l.T.toFixed(3), px: l.px,
-      })));
-      console.log('[MarginDiag] Titoli (per copertura call):', eq.map((s) => ({
-        tick: s.tick, q: s.q,
-      })));
-    } catch (e) {
-      console.error('[MarginDiag] log error', e);
-    }
-    const cur = runScenario(legs, eq, undersActive, effIV, d, dV1M, { ...bp, days });
-    const sigDs: Record<number, number> = {};
-    cur.rows.forEach((x) => (sigDs[x.i] = x.sig1));
-    const sc = occMargin(legs, eq, undersActive, d, sigDs, days, marPrm);
     const pts: { d: number; Margine: number }[] = [];
     for (let x = -35; x <= 15.01; x += 2.5) {
       const s = runScenario(legs, eq, undersActive, effIV, x, volAt(x), { ...bp, days });
@@ -478,8 +443,19 @@ function StressLabContent() {
         Margine: Math.round(occMargin(legs, eq, undersActive, x, sgs, days, marPrm).total),
       });
     }
-    return { marNow: now, marScen: sc, marCurve: pts, marPnlMTM: cur.totEUR };
-  }, [legs, eq, unders, undersActive, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman, ptfBase]);
+    return { marNow: now, marCurve: pts };
+  }, [legs, eq, unders, undersActive, effIV, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct, volMode, dVman]);
+
+  const { marScen, marPnlMTM } = useMemo(() => {
+    const fxR = fxRange / 100;
+    const marPrm = { r, fxUSD: fx.USD, kScan, fxRange: fxR, skewB, kappa, pExp, ivScan, nakedPct };
+    const bp = { r, skewB, kappa, pExp, days, fx, netting: false };
+    const cur = runScenario(legs, eq, undersActive, effIV, d, dV1M, bp);
+    const sigDs: Record<number, number> = {};
+    cur.rows.forEach((x) => (sigDs[x.i] = x.sig1));
+    const sc = occMargin(legs, eq, undersActive, d, sigDs, days, marPrm);
+    return { marScen: sc, marPnlMTM: cur.totEUR };
+  }, [legs, eq, undersActive, effIV, d, dV1M, days, r, skewB, kappa, pExp, fx, kScan, fxRange, ivScan, nakedPct]);
 
   /* ---------- Tabella per sottostante ---------- */
   const undTable = useMemo(() => {
@@ -980,8 +956,44 @@ function StressLabContent() {
                 </span>
               </div>
 
+              {/* Toggle: Includi protezioni */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                {tog(includeProtections, () => setIncludeProtections((v) => !v))}
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.5,
+                    color: includeProtections ? C.cyan : C.mut,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  Includi protezioni
+                  {data.equityProtectionSavings > 0
+                    ? ` (${includeProtections ? '−' : '+'}${fmtN(data.equityProtectionSavings / 1000, 0)}k)`
+                    : ''}
+                  <Info title="Includi protezioni" w={360}>
+                    Le protezioni (put protettive, gambe lunghe di spread) sono <b>sempre incluse nello
+                    shock</b>: il P&L dello scenario non cambia. Questo toggle agisce <b>solo sul valore
+                    dell'Esposizione Potenziale in Equity</b> presa come riferimento:
+                    <br />• <b>ON</b> (default): esposizione <b>netta</b> delle protezioni (rischio ridotto).
+                    <br />• <b>OFF</b>: esposizione <b>lorda</b>, come se le protezioni non riducessero il
+                    rischio.
+                    <br />
+                    <br />
+                    Cambiando il denominatore cambiano <b>beta e delta</b> a scenario (esposizione più grande →
+                    beta/delta più bassi, e viceversa).
+                  </Info>
+                </span>
+              </div>
+
               <div style={{ marginTop: 9, fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
                 Risk Analyzer {fmtN(data.equityGrandTotal / 1000, 0)}k
+                {!includeProtections && data.equityProtectionSavings > 0
+                  ? ` + protezioni ${fmtN(data.equityProtectionSavings / 1000, 0)}k`
+                  : ''}
                 {!includeEtfCommodity
                   ? ` − ETF ${fmtN(data.equityEtfEUR / 1000, 0)}k − commodity ${fmtN(data.equityCommodityEUR / 1000, 0)}k`
                   : ''}
@@ -1290,26 +1302,48 @@ function StressLabContent() {
                   <>
                     <div
                       style={{
-                        fontFamily: MONO,
-                        fontSize: 24,
-                        fontWeight: 800,
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        justifyContent: 'space-between',
+                        gap: 8,
                         margin: '6px 0 2px',
-                        color: headline >= 1.5 ? C.dn : headline <= 0.9 ? C.up : C.text,
                       }}
                     >
-                      {fmtN(headline, 2)}
-                      <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>
-                        {' '}
-                        @ {sgn(d, 1)}%{shockMode === 'titoli' ? ' titoli' : ''}
-                      </span>
+                      <div
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 24,
+                          fontWeight: 800,
+                          color: headline >= 1.5 ? C.dn : headline <= 0.9 ? C.up : C.text,
+                        }}
+                      >
+                        {fmtN(headline, 2)}
+                        <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}>
+                          {' '}
+                          @ {sgn(d, 1)}%{shockMode === 'titoli' ? ' titoli' : ''}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          lineHeight: 1.15,
+                          color: C.mut,
+                          fontFamily: MONO,
+                          textAlign: 'right',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {shockMode === 'market' ? 'β' : 'δ'} vs patr. totale
+                        <br />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+                          {fmtN(headlineTot, 2)}
+                        </span>
+                      </div>
                     </div>
                     <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
                       rif. <span style={{ color: C.dn }}>{fmtN(refDn, 2)}↓</span> ·{' '}
                       <span style={{ color: C.up }}>{fmtN(refUp, 2)}↑</span>{' '}
                       <span style={{ fontSize: 10 }}>(∓10%)</span>
-                    </div>
-                    <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
-                      {shockMode === 'market' ? 'β' : 'δ'} vs patrimonio totale: {fmtN(headlineTot, 2)}
                     </div>
                   </>
                 );
