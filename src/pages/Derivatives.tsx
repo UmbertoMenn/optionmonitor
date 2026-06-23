@@ -65,6 +65,7 @@ import {
 } from '@/lib/optionCalculator';
 import { DerivativePosition, OptionType } from '@/types/portfolio';
 import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
+import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
 import { CallPremiumCalculatorDialog, StrategyLeg } from '@/components/derivatives/CallPremiumCalculatorDialog';
 import { isLegOpenInOrders, ParsedOrder } from '@/lib/orderFileParser';
 import { OptionStratButton } from '@/components/derivatives/OptionStratButton';
@@ -3063,9 +3064,10 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 6: Override Badge */}
-            <div className="flex items-center">
+            {/* Col 6: Override Badge + Roll-up toggle */}
+            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
               {hasOverride && <OverrideBadge />}
+              <PutRollUpToggle option={option} />
             </div>
             
             {/* Col 7: Menu */}

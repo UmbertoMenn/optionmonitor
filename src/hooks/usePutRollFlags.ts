@@ -101,7 +101,13 @@ export function usePutRollFlags() {
       queryClient.invalidateQueries({ queryKey: ['put-roll-flags'] });
     },
     onError: (e: unknown) => {
-      toast.error(e instanceof Error ? e.message : 'Errore aggiornamento flag roll-up');
+      // Supabase/Postgrest errors are plain objects (not Error instances): surface
+      // the real cause (e.g. missing table, RLS) instead of a generic message.
+      const err = e as { message?: string; code?: string; details?: string; hint?: string } | undefined;
+      const detail = err?.message || err?.details || err?.hint || (e instanceof Error ? e.message : '');
+      const code = err?.code ? ` [${err.code}]` : '';
+      console.error('[put_roll_flags] update failed:', e);
+      toast.error(`Errore aggiornamento flag roll-up${code}${detail ? ': ' + detail : ''}`);
     },
   });
 

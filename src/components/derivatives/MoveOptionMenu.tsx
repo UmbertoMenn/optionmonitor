@@ -22,7 +22,6 @@ import { Position } from '@/types/portfolio';
 import { OverrideCategory, OVERRIDE_CATEGORY_LABELS } from '@/types/derivativeOverrides';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { Badge } from '@/components/ui/badge';
-import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
 
 interface MoveOptionMenuProps {
   option: Position;
@@ -176,19 +175,6 @@ export function MoveOptionMenu({ option, availableStocks, currentCategory }: Mov
               )}
             </DropdownMenuItem>
           ))}
-
-          {isPut && isSold && (
-            <>
-              <DropdownMenuSeparator />
-              <div
-                className="px-2 py-1.5"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <PutRollUpToggle option={option} />
-              </div>
-            </>
-          )}
 
           {hasOverride && (
             <>
