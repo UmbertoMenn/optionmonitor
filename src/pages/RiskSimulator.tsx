@@ -1170,7 +1170,7 @@ function StressLabContent() {
               margin: '-4px 0 10px',
               fontSize: 12,
               fontFamily: MONO,
-              color: C.sub,
+              color: C.mut,
             }}
           >
             <span>
