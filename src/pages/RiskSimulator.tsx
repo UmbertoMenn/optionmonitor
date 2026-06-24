@@ -331,7 +331,8 @@ function StressLabContent() {
   // di ciascun nome) → card "Beta". 'titoli' = shock diretto sui TITOLI in portafoglio
   // (beta=1 su ogni nome, l'EUR/USD resta fermo) → card "Delta di portafoglio".
   // Il toggle vive nella card Scenario perché cambia TUTTI i P&L (totale/azioni/opzioni).
-  const [shockMode, setShockMode] = useState<'market' | 'titoli'>('market');
+  // Shock di mercato sempre trasmesso ai titoli via beta reale (selettore rimosso).
+  const shockMode = 'market' as 'market' | 'titoli';
   const [kScan, setKScan] = useState(0.7);
   const [fxRange, setFxRange] = useState(3);
   const [ivScan, setIvScan] = useState(0.4);
@@ -425,27 +426,14 @@ function StressLabContent() {
     return pl / ptfBase / (d / 100);
   }, [legs, eq, undersDelta, effIV, d, ptfBase, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
 
-  /* ---------- Beta di portafoglio (media pesata sui controvalori equity) ----------
-   * È il beta "puro" delta-1: serve per il P/L TEORICO = esposizione potenziale ×
-   * beta portafoglio × shock (quanto perderei se tutto si muovesse a delta pieno). */
-  const betaPort = useMemo(() => {
-    let num = 0;
-    let den = 0;
-    for (const s of eq) {
-      const b = s.tick && unders[s.tick] ? unders[s.tick].beta : s.beta;
-      const w = Math.abs(s.eur);
-      num += w * b;
-      den += w;
-    }
-    return den > 0 ? num / den : 0;
-  }, [eq, unders]);
+  /* ---------- Beta di portafoglio pesato sull'ESPOSIZIONE POTENZIALE ----------
+   * Calcolato nell'hook su tutte le componenti di ptfBase (azioni + esposizione
+   * implicita da put/leap/strategie/sintetiche + GP). È il beta "puro" delta-1 per
+   * il P/L TEORICO = esposizione potenziale × beta × shock. */
+  const betaPort = data.betaPotential;
 
-  /* ---------- P&L VERO dello scenario di MERCATO (coincide con la card P&L Totale
-   * quando il selettore è su Beta Reale). È il "P/L reale" della card Delta. */
-  const scenMarketTot = useMemo(() => {
-    if (shockMode === 'market') return scen.totEUR;
-    return runScenario(legs, eq, unders, effIV, d, dV1M, prm).totEUR;
-  }, [shockMode, scen, legs, eq, unders, effIV, d, dV1M, prm]);
+  /* ---------- P&L VERO dello scenario di mercato (= card P&L Totale). ---------- */
+  const scenMarketTot = scen.totEUR;
 
   /* ---------- Margine cassa ----------
    * Diviso in due memo per le performance dello slider:
@@ -658,7 +646,7 @@ function StressLabContent() {
 
   const kpi = [
     { l: 'P&L Totale', v: scen.totEUR, sub: `patrimonio stressato ${fmtEUR(totalPatrimony + scen.totEUR)}` },
-    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: shockMode === 'titoli' ? 'diretto (β=1,00)' : 'via beta reale' },
+    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: 'via beta reale' },
     {
       l: 'P&L Opzioni',
       v: scen.optEUR,
@@ -1115,19 +1103,13 @@ function StressLabContent() {
           title="Scenario shock di mercato"
           info={
             <Info title="Come leggere i controlli" w={360}>
-              Lo slider è lo <b>shock di mercato</b> (la variazione % dell'indice di riferimento). Scegli come
-              propagarlo ai tuoi titoli:
+              Lo slider è lo <b>shock di mercato</b> (la variazione % dell'indice di riferimento). Viene
+              trasmesso a ogni titolo tramite il suo <b>beta reale</b> (es. beta 1,5 → −15% se il mercato fa
+              −10%).
               <br />
               <br />
-              • <b>Beta Reale</b>: ogni titolo si muove di <b>beta × shock</b> (es. beta 1,5 → −15% se il mercato
-              fa −10%). È lo scenario realistico “se il mercato scende del 10%”.
-              <br />
-              • <b>Beta = 1.00</b>: ogni titolo si muove <b>esattamente come lo shock</b> (−10% = −10% su tutti),
-              ignorando il beta. Utile per isolare la sensibilità ai tuoi sottostanti.
-              <br />
-              <br />
-              In entrambi i casi vedi sempre, a fianco, sia il <b>Beta</b> (sensibilità al mercato) sia il
-              <b> Delta</b> (sensibilità ai tuoi titoli).
+              A fianco vedi sempre sia il <b>Beta</b> (sensibilità al mercato) sia il <b>Delta</b> (quanto della
+              perdita teorica beta-adjusted si realizza davvero).
               <br />
               <br />
               <b>Vol accoppiata (consigliata)</b>: la vol ATM a 1 mese reagisce al mercato secondo la relazione
@@ -1136,34 +1118,6 @@ function StressLabContent() {
             </Info>
           }
         >
-          <div style={{ display: 'flex', gap: 0, marginBottom: 12 }}>
-            {(['market', 'titoli'] as const).map((m, i) => {
-              const active = shockMode === m;
-              const isTitoli = m === 'titoli';
-              const accent = isTitoli ? C.cyan : C.blue;
-              return (
-                <button
-                  key={m}
-                  onClick={() => setShockMode(m)}
-                  style={{
-                    flex: 1,
-                    padding: '7px 4px',
-                    cursor: 'pointer',
-                    fontSize: 11.5,
-                    fontWeight: 700,
-                    background: active ? (isTitoli ? C.cyan : 'rgba(41,98,255,.16)') : 'transparent',
-                    border: `1px solid ${active ? accent : C.border2}`,
-                    borderLeft: i === 1 ? 'none' : undefined,
-                    color: active ? (isTitoli ? '#0b0f17' : C.blue) : C.mut,
-                    borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
-                    fontFamily: SANS,
-                  }}
-                >
-                  {isTitoli ? 'Beta = 1.00' : 'Beta Reale'}
-                </button>
-              );
-            })}
-          </div>
           <Slider
             label="Shock di mercato"
             value={d}
@@ -1172,7 +1126,7 @@ function StressLabContent() {
             max={20}
             step={1}
             fmt={(v) => sgn(v, 1) + '%'}
-            accent={shockMode === 'titoli' ? C.cyan : d < 0 ? C.dn : C.up}
+            accent={d < 0 ? C.dn : C.up}
           />
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {(
