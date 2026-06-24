@@ -318,6 +318,8 @@ function StressLabContent() {
 
   /* ---------- Slider scenario ---------- */
   const [d, setD] = useState(-10);
+  const [riskTarget, setRiskTarget] = useState(10); // valore inserito (% patrimonio o k€)
+  const [riskUnit, setRiskUnit] = useState<'pct' | 'eur'>('pct');
   const [volMode, setVolMode] = useState<'auto' | 'manual'>('auto');
   const [dVman, setDVman] = useState(15);
   const [days, setDays] = useState(0);
@@ -378,6 +380,44 @@ function StressLabContent() {
   const totalPatrimony = netting ? data.nettingExCCAndNPRaw : data.nettingTotalRaw;
 
   const volAt = (x: number) => (volMode === 'auto' ? coupledDV1M(x) : dVman);
+
+  /* ---------- CAPACITÀ DI RISCHIO (PUT vendute allo strike attuale) ----------
+   * Aggiungere put identiche (stesso strike/scadenza/sottostante) scala il book in
+   * modo LINEARE: ogni € di esposizione potenziale in più perde, in un dato scenario,
+   * una quota costante p = |perdita put| / esposizione potenziale put.
+   *  - p(slider)  → quota in un calo "ordinario" (lo shock dello slider)
+   *  - p(coda)    → quota in un crash (−30%): qui il gamma porta il delta delle put
+   *                 verso 1, quindi p è molto più alta → è il vincolo prudente. */
+  const TAIL_D = -30;
+
+  // Indici delle gambe PUT vendute + esposizione potenziale (Σ strike·|q|·mult / fx).
+  const putBook = useMemo(() => {
+    const idx = new Set<number>();
+    let ePut = 0;
+    legs.forEach((l, i) => {
+      if (l.cp === 'P' && l.q < 0) {
+        idx.add(i);
+        ePut += (l.K * Math.abs(l.q) * l.mult) / fx.USD;
+      }
+    });
+    return { idx, ePut };
+  }, [legs, fx.USD]);
+
+  // Perdita del solo book di put nello scenario dello slider (somma P&L gambe put corte).
+  const lPutNow = useMemo(() => {
+    let s = 0;
+    for (const rr of scen.rows) if (putBook.idx.has(rr.i)) s += rr.pnlEUR;
+    return s;
+  }, [scen, putBook]);
+
+  // Scenario di coda (−30%): perdita totale e perdita del book di put.
+  const tail = useMemo(() => {
+    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
+    const sc = runScenario(legs, eq, unders, effIV, TAIL_D, volAt(TAIL_D), bp);
+    let lPut = 0;
+    for (const rr of sc.rows) if (putBook.idx.has(rr.i)) lPut += rr.pnlEUR;
+    return { totEUR: sc.totEUR, lPut };
+  }, [legs, eq, unders, effIV, r, skewB, kappa, pExp, fx, netting, volMode, dVman, putBook]);
 
   /* ---------- Beta di riferimento ∓10% ---------- */
   const { betaDown, betaUp } = useMemo(() => {
@@ -1531,6 +1571,157 @@ function StressLabContent() {
           </Panel>
         </div>
       </div>
+
+      {/* CAPACITÀ DI RISCHIO */}
+      <Panel
+        title="Capacità di rischio — quante PUT aggiungere (allo strike attuale)"
+        style={{ marginBottom: 14 }}
+        info={
+          <Info title="Quante put posso ancora vendere" w={420}>
+            Aggiungere put identiche a quelle attuali (stesso strike/scadenza) scala il book in modo
+            <b> lineare</b>: ogni € di esposizione potenziale in più perde, in un dato scenario, una quota
+            costante <b>p = perdita put ÷ esposizione potenziale put</b>.
+            <br />
+            <br />
+            Capacità aggiungibile = (rischio target − perdita attuale di portafoglio) ÷ p.
+            <br />
+            <br />
+            <b>Attenzione</b>: la quota p in un calo ordinario è bassa (put OTM), ma in un <b>crash</b> il gamma
+            porta il delta delle put verso 1 e p sale molto. Dimensiona sul <b>vincolo prudente</b> (scenario di
+            coda −30%): se sizing sul calo ordinario, in un vero crash perderesti molto più del target.
+          </Info>
+        }
+      >
+        {(() => {
+          const ePut = putBook.ePut;
+          if (ePut <= 0) {
+            return (
+              <div style={{ fontSize: 12, color: C.mut, fontFamily: SANS }}>
+                Nessuna PUT venduta in portafoglio: niente esposizione PUT da scalare.
+              </div>
+            );
+          }
+          const targetEUR = riskUnit === 'pct' ? (totalPatrimony * riskTarget) / 100 : riskTarget * 1000;
+          const calc = (lPut: number, lTot: number) => {
+            const p = -Math.min(0, lPut) / ePut; // perdita put per € di esposizione (≥0)
+            const lossNow = -Math.min(0, lTot); // perdita totale attuale (≥0)
+            const headroom = targetEUR - lossNow;
+            const dE = p > 1e-9 ? Math.max(0, headroom / p) : Infinity;
+            return { p, lossNow, headroom, dE };
+          };
+          const a = calc(lPutNow, scen.totEUR);
+          const b = calc(tail.lPut, tail.totEUR);
+          const inputStyle: React.CSSProperties = {
+            width: 90,
+            padding: '6px 8px',
+            background: C.bg,
+            border: `1px solid ${C.border2}`,
+            borderRadius: 6,
+            color: C.text,
+            fontFamily: MONO,
+            fontSize: 14,
+            fontWeight: 700,
+          };
+          const Box = ({
+            label,
+            sub,
+            c,
+            r,
+            prudent,
+          }: {
+            label: string;
+            sub: string;
+            c: string;
+            r: ReturnType<typeof calc>;
+            prudent?: boolean;
+          }) => (
+            <div style={{ border: `1px solid ${c}`, borderRadius: 8, padding: '12px 14px', background: 'rgba(255,255,255,.02)' }}>
+              <div style={{ ...lbl, color: c, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {label}
+                {prudent && (
+                  <span style={{ fontSize: 9, fontWeight: 800, color: '#0b0f17', background: c, padding: '1px 5px', borderRadius: 4 }}>
+                    VINCOLO
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 10.5, color: C.mut, fontFamily: SANS, marginBottom: 6 }}>{sub}</div>
+              {r.headroom <= 0 ? (
+                <div style={{ fontFamily: MONO, fontSize: 13, fontWeight: 800, color: C.dn }}>
+                  Già oltre il target — riduci
+                </div>
+              ) : (
+                <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.up }}>
+                  +{fmtEUR(r.dE)}
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 4, lineHeight: 1.6 }}>
+                <div>partecip. put <span style={{ color: C.text, fontWeight: 700 }}>{fmtN(r.p * 100, 1)}%</span></div>
+                <div>perdita attuale <span style={{ color: C.dn }}>{fmtEUR(-r.lossNow)}</span></div>
+                {r.headroom > 0 && (
+                  <div>
+                    esp. PUT tot →{' '}
+                    <span style={{ color: C.text, fontWeight: 700 }}>{fmtEUR(ePut + r.dE)}</span>{' '}
+                    (leva {fmtN(totalPatrimony ? (ePut + r.dE) / totalPatrimony : 0, 2)})
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+          return (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                <span style={{ fontSize: 12.5, color: C.text, fontFamily: SANS }}>Rischio massimo che accetto di perdere:</span>
+                <input
+                  type="number"
+                  value={riskTarget}
+                  onChange={(e) => setRiskTarget(Number(e.target.value) || 0)}
+                  style={inputStyle}
+                />
+                <div style={{ display: 'flex', gap: 0 }}>
+                  {(['pct', 'eur'] as const).map((u, i) => (
+                    <button
+                      key={u}
+                      onClick={() => setRiskUnit(u)}
+                      style={{
+                        padding: '6px 10px',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        background: riskUnit === u ? C.blue : 'transparent',
+                        border: `1px solid ${riskUnit === u ? C.blue : C.border2}`,
+                        borderLeft: i === 1 ? 'none' : undefined,
+                        color: riskUnit === u ? '#fff' : C.mut,
+                        borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
+                        fontFamily: SANS,
+                      }}
+                    >
+                      {u === 'pct' ? '% patrim.' : 'k €'}
+                    </button>
+                  ))}
+                </div>
+                <span style={{ fontSize: 11.5, color: C.mut, fontFamily: MONO }}>
+                  = {fmtEUR(targetEUR)} · esp. PUT attuale {fmtEUR(ePut)}
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2,1fr)', gap: 12 }}>
+                <Box
+                  label={`Scenario slider (${sgn(d, 1)}%)`}
+                  sub="Calo ordinario: capacità ampia, NON è il vincolo di sicurezza."
+                  c={C.cyan}
+                  r={a}
+                />
+                <Box
+                  label="Scenario di coda (−30%)"
+                  sub="Crash: il delta delle put → 1. Dimensiona qui."
+                  c={C.blue}
+                  r={b}
+                  prudent
+                />
+              </div>
+            </>
+          );
+        })()}
+      </Panel>
 
       {/* CHART */}
       <Panel
