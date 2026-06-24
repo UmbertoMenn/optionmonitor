@@ -1161,6 +1161,29 @@ function StressLabContent() {
             fmt={(v) => sgn(v, 1) + '%'}
             accent={d < 0 ? C.dn : C.up}
           />
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              margin: '-4px 0 10px',
+              fontSize: 12,
+              fontFamily: MONO,
+              color: C.mut,
+            }}
+          >
+            <span>
+              Beta totale ponderato:{' '}
+              <b style={{ color: C.text }}>{fmtN(totBetaWeighted, 2)}</b>
+            </span>
+            <span>
+              Shock Titoli:{' '}
+              <b style={{ color: totBetaWeighted * d < 0 ? C.dn : C.up }}>
+                {sgn(totBetaWeighted * d, 2)}%
+              </b>
+            </span>
+          </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
             {(
               [
