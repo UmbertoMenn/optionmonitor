@@ -318,8 +318,6 @@ function StressLabContent() {
 
   /* ---------- Slider scenario ---------- */
   const [d, setD] = useState(-10);
-  const [riskTarget, setRiskTarget] = useState(10); // valore inserito (% patrimonio o k€)
-  const [riskUnit, setRiskUnit] = useState<'pct' | 'eur'>('pct');
   const [volMode, setVolMode] = useState<'auto' | 'manual'>('auto');
   const [dVman, setDVman] = useState(15);
   const [days, setDays] = useState(0);
@@ -381,21 +379,6 @@ function StressLabContent() {
 
   const volAt = (x: number) => (volMode === 'auto' ? coupledDV1M(x) : dVman);
 
-  /* ---------- CAPACITÀ DI RISCHIO ----------
-   * Quanta esposizione potenziale potrei avere per perdere al massimo un certo importo,
-   * in un dato scenario. Partecipazione q = |perdita reale| ÷ esposizione potenziale
-   * (è la stessa quota del Delta @ scenario, ma rapportata all'esposizione, non al
-   * teorico). Scalando il book in modo lineare: esposizione max = target ÷ q.
-   *  - q(slider) → calo "ordinario": q bassa, capacità ampia (NON è il vincolo).
-   *  - q(coda −30%) → crash: il gamma porta i delta delle put verso 1, q sale molto
-   *                   → capacità bassa: è il vincolo prudente su cui dimensionare. */
-  const TAIL_D = -30;
-
-  // Perdita TOTALE nello scenario di coda (−30%), full revaluation (gamma + vol coerente).
-  const tailLoss = useMemo(() => {
-    const bp = { r, skewB, kappa, pExp, days: 0, fx, netting };
-    return runScenario(legs, eq, unders, effIV, TAIL_D, volAt(TAIL_D), bp).totEUR;
-  }, [legs, eq, unders, effIV, r, skewB, kappa, pExp, fx, netting, volMode, dVman]);
 
   /* ---------- Beta di riferimento ∓10% ---------- */
   const { betaDown, betaUp } = useMemo(() => {
@@ -678,12 +661,20 @@ function StressLabContent() {
   }, [scen, legs, legSort, undersActive]);
 
   const kpi = [
-    { l: 'P&L Totale', v: scen.totEUR, sub: `patrimonio stressato ${fmtEUR(totalPatrimony + scen.totEUR)}` },
-    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: 'via beta reale' },
+    {
+      l: 'P&L Totale',
+      v: scen.totEUR,
+      sub: `patrimonio stressato ${fmtEUR(totalPatrimony + scen.totEUR)}`,
+      pPatr: totalPatrimony ? scen.totEUR / totalPatrimony : null,
+      pEsp: ptfBase ? scen.totEUR / ptfBase : null,
+    },
+    { l: 'P&L Azioni / ETF', v: scen.eqEUR, sub: 'via beta reale', pPatr: null, pEsp: null },
     {
       l: 'P&L Opzioni',
       v: scen.optEUR,
       sub: netting ? '⚠ netting attivo: opzioni a intrinseco (hold to expiry)' : 'rivalutazione completa Black-Scholes',
+      pPatr: null,
+      pEsp: null,
     },
   ];
 
@@ -1173,9 +1164,22 @@ function StressLabContent() {
               color: C.mut,
             }}
           >
-            <span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               Beta totale ponderato:{' '}
               <b style={{ color: C.text }}>{fmtN(totBetaWeighted, 2)}</b>
+              <Info title="Beta totale ponderato" w={400}>
+                È il <b>beta medio del portafoglio</b>, pesato per l'esposizione di ogni sottostante
+                (controvalore dei titoli + nozionale delle opzioni). Indica di quanto si muove
+                complessivamente il book per ogni 1% di mercato: 1,00 = come l'indice, 2,00 = il doppio.
+                <br />
+                <br />
+                I beta per nome sono quelli della tabella per sottostante (override UI inclusi). È lo stesso
+                beta usato nel <b>P/L teorico</b> della card Delta.
+                <br />
+                <br />
+                <b>Shock Titoli</b> qui a fianco = beta totale × shock di mercato: la variazione % media
+                attesa sui tuoi titoli per lo shock impostato.
+              </Info>
             </span>
             <span>
               Shock Titoli:{' '}
@@ -1322,7 +1326,14 @@ function StressLabContent() {
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,minmax(0,1fr))', gap: 14 }}>
             {kpi.map((k) => (
               <Panel key={k.l} style={{ padding: '14px 16px' }}>
-                <div style={lbl}>{k.l}</div>
+                <div style={{ ...lbl, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                  <span>{k.l}</span>
+                  {k.pPatr != null && (
+                    <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 800, color: pnlColor(k.v) }}>
+                      su patrim. {sgn(k.pPatr * 100, 1)}%
+                    </span>
+                  )}
+                </div>
                 <div
                   style={{
                     fontFamily: MONO,
@@ -1336,6 +1347,12 @@ function StressLabContent() {
                   {fmtEUR(k.v)}
                 </div>
                 <div style={{ fontSize: 10.5, color: C.mut }}>{k.sub}</div>
+                {k.pEsp != null && (
+                  <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
+                    su esp. potenziale{' '}
+                    <span style={{ color: pnlColor(k.v), fontWeight: 700 }}>{sgn(k.pEsp * 100, 1)}%</span>
+                  </div>
+                )}
               </Panel>
             ))}
             {/* Beta @ scenario — sensibilità al mercato */}
@@ -1352,9 +1369,9 @@ function StressLabContent() {
                   accelera.
                   <br />
                   <br />
-                  Denominatore = <b>Esposizione Potenziale in Equity</b>. Sotto, in piccolo, lo stesso beta
-                  riferito al <b>patrimonio totale</b> (netting dashboard): la base per ponderare il benchmark
-                  sull'equity line.
+                  Headline = beta riferito al <b>patrimonio totale</b> (netting dashboard): quanto si muove il
+                  patrimonio per 1% di mercato. Sotto, in piccolo, lo stesso beta riferito all'<b>Esposizione
+                  Potenziale in Equity</b> (denominatore di P&L%/delta).
                 </Info>
               </div>
               {(() => {
@@ -1363,18 +1380,21 @@ function StressLabContent() {
                 const betaTot = betaScen * scale;
                 return (
                   <>
-                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: betaScen >= 1.5 ? C.dn : betaScen <= 0.9 ? C.up : C.text }}>
-                      {fmtN(betaScen, 2)}
+                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, margin: '6px 0 2px', color: betaTot >= 1.5 ? C.dn : betaTot <= 0.9 ? C.up : C.text }}>
+                      {fmtN(betaTot, 2)}
                       <span style={{ color: C.mut, fontSize: 12, fontWeight: 600 }}> @ {sgn(d, 1)}%</span>
                     </div>
-                    <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO }}>
+                    <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO }}>
+                      β vs patr. totale
+                    </div>
+                    <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 4 }}>
+                      β vs esp. potenziale{' '}
+                      <span style={{ color: C.text, fontWeight: 700 }}>{fmtN(betaScen, 2)}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
                       rif. <span style={{ color: C.dn }}>{fmtN(betaDown, 2)}↓</span> ·{' '}
                       <span style={{ color: C.up }}>{fmtN(betaUp, 2)}↑</span>{' '}
                       <span style={{ fontSize: 10 }}>(∓10%)</span>
-                    </div>
-                    <div style={{ fontSize: 10, color: C.mut, fontFamily: MONO, marginTop: 4 }}>
-                      β vs patr. totale{' '}
-                      <span style={{ color: C.text, fontWeight: 700 }}>{fmtN(betaTot, 2)}</span>
                     </div>
                   </>
                 );
@@ -1424,7 +1444,7 @@ function StressLabContent() {
                         <span style={{ color: pnlColor(plReale), fontWeight: 700 }}>{fmtEUR(plReale)}</span>
                       </div>
                       <div>
-                        ÷ P/L teorico (esp.pot × β {fmtN(betaPort, 2)}){' '}
+                        ÷ P/L teorico (esp.pot × β {fmtN(betaPort, 2)} × {sgn(d, 0)}%){' '}
                         <span style={{ color: pnlColor(plTeorico), fontWeight: 700 }}>{fmtEUR(plTeorico)}</span>
                       </div>
                       <div>
@@ -1579,177 +1599,6 @@ function StressLabContent() {
           </Panel>
         </div>
       </div>
-
-      {/* CAPACITÀ DI RISCHIO */}
-      <Panel
-        title="Capacità di rischio — esposizione potenziale massima per la perdita target"
-        style={{ marginBottom: 14 }}
-        info={
-          <Info title="Quanta esposizione posso reggere" w={440}>
-            Imposti la <b>perdita massima</b> che accetti. In un dato scenario il portafoglio perde una
-            <b> quota q</b> della sua esposizione potenziale: <b>q = |perdita reale| ÷ esposizione potenziale</b>.
-            Scalando il book in modo lineare (più put agli stessi strike), l'esposizione potenziale massima è
-            <b> target ÷ q</b>, e quella aggiungibile è la differenza con l'attuale.
-            <br />
-            <br />
-            <b>Attenzione</b>: in un calo ordinario q è bassa (put OTM) → sembra esserci molto spazio. In un
-            <b> crash</b> il gamma porta i delta delle put verso 1, q sale e lo spazio crolla. Dimensiona sul
-            <b> vincolo di coda (−30%)</b>.
-          </Info>
-        }
-      >
-        {(() => {
-          const E0 = ptfBase;
-          const targetEUR = riskUnit === 'pct' ? (totalPatrimony * riskTarget) / 100 : riskTarget * 1000;
-          const row = (lossTot: number) => {
-            const loss = -Math.min(0, lossTot); // perdita attuale (≥0)
-            const q = E0 > 0 ? loss / E0 : 0; // partecipazione: perdita per € di esposizione
-            const eMax = q > 1e-9 ? targetEUR / q : Infinity; // esposizione potenziale max
-            const add = Number.isFinite(eMax) ? eMax - E0 : Infinity;
-            return { loss, q, eMax, add };
-          };
-          const a = row(scen.totEUR);
-          const b = row(tailLoss);
-          const inputStyle: React.CSSProperties = {
-            width: 88,
-            padding: '6px 8px',
-            background: C.bg,
-            border: `1px solid ${C.border2}`,
-            borderRadius: 6,
-            color: C.text,
-            fontFamily: MONO,
-            fontSize: 14,
-            fontWeight: 700,
-          };
-          const Box = ({
-            label,
-            sub,
-            c,
-            r,
-            prudent,
-          }: {
-            label: string;
-            sub: string;
-            c: string;
-            r: ReturnType<typeof row>;
-            prudent?: boolean;
-          }) => {
-            const over = r.q <= 1e-9 ? false : r.add <= 0;
-            return (
-              <div style={{ border: `1px solid ${c}`, borderRadius: 8, padding: '12px 14px', background: 'rgba(255,255,255,.02)' }}>
-                <div style={{ ...lbl, color: c, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {label}
-                  {prudent && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#0b0f17', background: c, padding: '1px 5px', borderRadius: 4 }}>
-                      VINCOLO
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 10.5, color: C.mut, fontFamily: SANS, marginBottom: 8 }}>{sub}</div>
-
-                {r.q <= 1e-9 ? (
-                  <div style={{ fontFamily: MONO, fontSize: 12, color: C.mut }}>
-                    Nessuna perdita in questo scenario: nessun limite di rischio.
-                  </div>
-                ) : (
-                  <>
-                    {/* riga risultato */}
-                    {over ? (
-                      <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 800, color: C.dn }}>
-                        Già oltre il target — riduci esposizione
-                      </div>
-                    ) : (
-                      <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.up }}>
-                        +{fmtEUR(r.add)}
-                        <span style={{ fontSize: 11, color: C.mut, fontWeight: 600 }}> aggiungibili</span>
-                      </div>
-                    )}
-                    {/* calcolo esplicito */}
-                    <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 6, lineHeight: 1.7, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}>
-                      <div>
-                        q = perdita ÷ esp.pot. ={' '}
-                        <span style={{ color: C.dn }}>{fmtEUR(-r.loss)}</span> ÷{' '}
-                        <span style={{ color: C.text }}>{fmtEUR(E0)}</span> ={' '}
-                        <span style={{ color: c, fontWeight: 800 }}>{fmtN(r.q * 100, 1)}%</span>
-                      </div>
-                      <div>
-                        esp.pot. max = target ÷ q ={' '}
-                        <span style={{ color: C.text, fontWeight: 700 }}>{fmtEUR(r.eMax)}</span>
-                      </div>
-                      <div>
-                        capacità = max − attuale ={' '}
-                        <span style={{ color: C.text, fontWeight: 700 }}>{fmtEUR(r.eMax)}</span> −{' '}
-                        <span style={{ color: C.text }}>{fmtEUR(E0)}</span>
-                      </div>
-                      {!over && (
-                        <div>
-                          leva su patrimonio →{' '}
-                          <span style={{ color: C.text, fontWeight: 700 }}>
-                            {fmtN(totalPatrimony ? r.eMax / totalPatrimony : 0, 2)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          };
-          return (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-                <span style={{ fontSize: 12.5, color: C.text, fontFamily: SANS }}>Perdita massima che accetto:</span>
-                <input
-                  type="number"
-                  value={riskTarget}
-                  onChange={(e) => setRiskTarget(Number(e.target.value) || 0)}
-                  style={inputStyle}
-                />
-                <div style={{ display: 'flex', gap: 0 }}>
-                  {(['pct', 'eur'] as const).map((u, i) => (
-                    <button
-                      key={u}
-                      onClick={() => setRiskUnit(u)}
-                      style={{
-                        padding: '6px 10px',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        background: riskUnit === u ? C.blue : 'transparent',
-                        border: `1px solid ${riskUnit === u ? C.blue : C.border2}`,
-                        borderLeft: i === 1 ? 'none' : undefined,
-                        color: riskUnit === u ? '#fff' : C.mut,
-                        borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
-                        fontFamily: SANS,
-                      }}
-                    >
-                      {u === 'pct' ? '% patrim.' : 'k €'}
-                    </button>
-                  ))}
-                </div>
-                <span style={{ fontSize: 11.5, color: C.mut, fontFamily: MONO }}>
-                  = {fmtEUR(targetEUR)} · esp. potenziale attuale {fmtEUR(E0)}
-                </span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2,1fr)', gap: 12 }}>
-                <Box
-                  label={`Scenario slider (${sgn(d, 1)}%)`}
-                  sub="Calo ordinario: capacità ampia, NON è il vincolo di sicurezza."
-                  c={C.cyan}
-                  r={a}
-                />
-                <Box
-                  label="Scenario di coda (−30%)"
-                  sub="Crash: i delta delle put → 1, q sale. Dimensiona qui."
-                  c={C.blue}
-                  r={b}
-                  prudent
-                />
-              </div>
-            </>
-          );
-        })()}
-      </Panel>
 
       {/* CHART */}
       <Panel
