@@ -1729,7 +1729,7 @@ function StressLabContent() {
                     const tShock = betaPort * (ruinX as number);
                     return (
                       <g>
-                        <rect x={lx} y={ly} width={132} height={50} rx={5} fill="#1C2030" stroke={C.dn} strokeWidth={1} />
+                        <rect x={lx} y={ly} width={190} height={50} rx={5} fill="#1C2030" stroke={C.dn} strokeWidth={1} />
                         <text x={lx + 8} y={ly + 16} fill={C.dn} fontFamily={MONO} fontSize={10.5} fontWeight={700}>
                           Rovina (−100% patrim.)
                         </text>
