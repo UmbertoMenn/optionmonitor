@@ -1690,6 +1690,10 @@ function StressLabContent() {
               <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
               <XAxis
                 dataKey="d"
+                type="number"
+                domain={[curveMin, 15]}
+                allowDataOverflow
+                ticks={Array.from({ length: Math.floor((15 - curveMin) / 5) + 1 }, (_, i) => curveMin + i * 5)}
                 tick={{ fill: C.mut, fontSize: 11, fontFamily: MONO }}
                 tickFormatter={(v) => v + '%'}
                 stroke={C.border2}
@@ -1718,7 +1722,6 @@ function StressLabContent() {
                   x={ruinX}
                   stroke={C.dn}
                   strokeWidth={2.5}
-                  ifOverflow="extendDomain"
                   label={(props: { viewBox?: { x?: number; y?: number; height?: number } }) => {
                     const vb = props.viewBox || {};
                     const lx = (vb.x ?? 0) + 7;
