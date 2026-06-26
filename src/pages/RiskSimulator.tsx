@@ -968,10 +968,11 @@ function StressLabContent() {
                 const reale = ptfBase * deltaEff;
                 const leva = totalPatrimony ? reale / totalPatrimony : 0;
                 const betaW = totBetaWeighted;
-                // Rovina lineare dalla leva @ scenario: −100% perf. = calo titoli 100/leva,
-                // = calo mercato (100/leva)/β. Solo se leva > 0 (esposizione netta lunga).
-                const ruinTitoli = leva > 0.01 ? 100 / leva : null;
-                const ruinMkt = ruinTitoli != null && betaW > 0.01 ? ruinTitoli / betaW : null;
+                // Rovina (−100% perf.) da FULL REVALUATION: ruinX è lo shock di mercato a
+                // cui il P&L = −100% del patrimonio (stesso punto della riga rossa, gamma+vol
+                // inclusi). Shock titoli = beta titoli ponderato × shock mercato.
+                const ruinMktV = ruinX; // shock mercato di rovina (o null se oltre −95%)
+                const ruinTitoliV = ruinX != null ? betaW * ruinX : null;
                 const showReal = true;
                 const card = (
                   label: string,
@@ -1068,18 +1069,15 @@ function StressLabContent() {
                         </Info>,
                         <>
                           <div>valori a questo shock di mercato ({sgn(d, 1)}%)</div>
-                          {ruinTitoli != null ? (
+                          {ruinX != null ? (
                             <div>
-                              −100% perf. a <span style={{ color: C.dn }}>−{fmtN(ruinTitoli, 2)}%</span> titoli ·{' '}
-                              {ruinMkt != null ? (
-                                <span style={{ color: C.dn }}>−{fmtN(ruinMkt, 1)}%</span>
-                              ) : (
-                                '—'
-                              )}{' '}
-                              mercato (β pond. {fmtN(betaW, 2)})
+                              rovina −100% perf. (full reval):{' '}
+                              <span style={{ color: C.dn }}>{sgn(ruinTitoliV as number, 1)}%</span> titoli ·{' '}
+                              <span style={{ color: C.dn }}>{sgn(ruinMktV as number, 1)}%</span> mercato (β pond.{' '}
+                              {fmtN(betaW, 2)})
                             </div>
                           ) : (
-                            <div>net short / non direzionale lungo</div>
+                            <div>rovina oltre −95% di mercato (book robusto)</div>
                           )}
                         </>,
                       )}
