@@ -212,13 +212,20 @@ function Panel({
   headerRight,
   children,
   style,
+  collapsible,
+  collapsed,
+  onToggle,
 }: {
   title?: string;
   info?: React.ReactNode;
   headerRight?: React.ReactNode;
   children: React.ReactNode;
   style?: React.CSSProperties;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
+  const isCollapsed = collapsible && collapsed;
   return (
     <div
       style={{
@@ -237,17 +244,32 @@ function Panel({
             color: C.mut,
             textTransform: 'uppercase',
             letterSpacing: 1,
-            marginBottom: 12,
+            marginBottom: isCollapsed ? 0 : 12,
             display: 'flex',
             alignItems: 'center',
           }}
         >
-          {title}
+          <span
+            onClick={collapsible ? onToggle : undefined}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: collapsible ? 'pointer' : undefined,
+            }}
+          >
+            {collapsible && (
+              <span style={{ color: C.mut, fontSize: 10, width: 10, display: 'inline-block' }}>
+                {collapsed ? '▸' : '▾'}
+              </span>
+            )}
+            {title}
+          </span>
           {info}
           {headerRight && <span style={{ marginLeft: 'auto' }}>{headerRight}</span>}
         </div>
       )}
-      {children}
+      {!isCollapsed && children}
     </div>
   );
 }
@@ -298,6 +320,9 @@ function StressLabContent() {
 
   /* ---------- Slider scenario ---------- */
   const [d, setD] = useState(-10);
+  const [heatCollapsed, setHeatCollapsed] = useState(true); // matrice shock/vol ridotta di default
+  const [marginCollapsed, setMarginCollapsed] = useState(true); // margine cassa ridotto di default
+  const [plPct, setPlPct] = useState(true); // card P&L vs shock: default in % sul patrimonio
   const [volMode, setVolMode] = useState<'auto' | 'manual'>('auto');
   const [dVman, setDVman] = useState(15);
   const [days, setDays] = useState(0);
@@ -579,6 +604,18 @@ function StressLabContent() {
     }
     return pts;
   }, [legs, eq, undersActive, effIV, volMode, dVman, prm]);
+
+  // Stessa curva in % sul patrimonio (totalPatrimony rispetta il toggle ex CC e NP).
+  const curvePct = useMemo(
+    () =>
+      curve.map((p) => ({
+        d: p.d,
+        Totale: totalPatrimony ? (p.Totale / totalPatrimony) * 100 : 0,
+        'Azioni/ETF': totalPatrimony ? (p['Azioni/ETF'] / totalPatrimony) * 100 : 0,
+        Opzioni: totalPatrimony ? (p.Opzioni / totalPatrimony) * 100 : 0,
+      })),
+    [curve, totalPatrimony],
+  );
 
   /* ---------- Heatmap ---------- */
   const HM_D = [-30, -25, -20, -15, -10, -5, 0, 5, 10];
@@ -1582,19 +1619,47 @@ function StressLabContent() {
 
       {/* CHART */}
       <Panel
-        title="P&L vs shock di mercato (vol coerente per ogni punto)"
+        title={plPct ? 'P/L % su patrimonio vs shock di mercato' : 'P&L (€) vs shock di mercato (vol coerente per ogni punto)'}
         style={{ marginBottom: 14 }}
         info={
           <Info title="Perché la curva delle opzioni non è una retta" w={350}>
             Ogni punto è una full revaluation: a ogni shock di mercato corrisponde la sua vol coerente. La
             convessità che vedi è il gamma/vega aggregato del book; un approccio delta×beta sarebbe la tangente
             in zero e divergerebbe proprio nelle code.
+            <br />
+            <br />
+            In <b>%</b> il P&L è rapportato al <b>patrimonio totale</b> (netting della dashboard; ex CC e NP se
+            il toggle è attivo).
           </Info>
+        }
+        headerRight={
+          <div style={{ display: 'flex', gap: 0 }}>
+            {(['pct', 'eur'] as const).map((u, i) => (
+              <button
+                key={u}
+                onClick={() => setPlPct(u === 'pct')}
+                style={{
+                  padding: '3px 9px',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: (plPct ? 'pct' : 'eur') === u ? C.blue : 'transparent',
+                  border: `1px solid ${(plPct ? 'pct' : 'eur') === u ? C.blue : C.border2}`,
+                  borderLeft: i === 1 ? 'none' : undefined,
+                  color: (plPct ? 'pct' : 'eur') === u ? '#fff' : C.mut,
+                  borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0',
+                  fontFamily: SANS,
+                }}
+              >
+                {u === 'pct' ? '% patrim.' : '€'}
+              </button>
+            ))}
+          </div>
         }
       >
         <div style={{ width: '100%', height: 300 }}>
           <ResponsiveContainer>
-            <LineChart data={curve} margin={{ top: 8, right: 18, left: 8, bottom: 0 }}>
+            <LineChart data={plPct ? curvePct : curve} margin={{ top: 8, right: 18, left: 8, bottom: 0 }}>
               <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
               <XAxis
                 dataKey="d"
@@ -1604,7 +1669,7 @@ function StressLabContent() {
               />
               <YAxis
                 tick={{ fill: C.mut, fontSize: 11, fontFamily: MONO }}
-                tickFormatter={(v) => (v / 1000).toFixed(0) + 'k'}
+                tickFormatter={(v) => (plPct ? fmtN(v, 0) + '%' : (v / 1000).toFixed(0) + 'k')}
                 stroke={C.border2}
                 width={52}
               />
@@ -1617,7 +1682,7 @@ function StressLabContent() {
                   fontSize: 12,
                 }}
                 labelFormatter={(v: number) => 'Mercato ' + sgn(v, 1) + '%'}
-                formatter={(v: number, n: string) => [fmtEUR(v), n]}
+                formatter={(v: number, n: string) => [plPct ? fmtN(v, 2) + '%' : fmtEUR(v), n]}
               />
               <Legend wrapperStyle={{ fontSize: 12, fontFamily: SANS }} />
               <ReferenceLine x={d} stroke={C.amber} strokeDasharray="4 3" />
@@ -1640,6 +1705,9 @@ function StressLabContent() {
       {/* HEATMAP */}
       <Panel
         title="Matrice P&L totale · mercato × Δvol ATM 1M"
+        collapsible
+        collapsed={heatCollapsed}
+        onToggle={() => setHeatCollapsed((v) => !v)}
         style={{ marginBottom: 14 }}
         info={
           <Info title="Griglia congiunta, non indipendente" w={350}>
@@ -1742,6 +1810,9 @@ function StressLabContent() {
       {/* MARGINE */}
       <Panel
         title="Margine cassa · TIMS ibrido (strategy-based + scan sugli spread)"
+        collapsible
+        collapsed={marginCollapsed}
+        onToggle={() => setMarginCollapsed((v) => !v)}
         style={{ marginBottom: 14 }}
         info={
           <Info title="Come viene calcolato" w={440}>
