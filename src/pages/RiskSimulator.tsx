@@ -66,6 +66,13 @@ const sgn = (v: number, dec = 1) =>
   (v > 0 ? '+' : v < 0 ? '−' : '') + fmtN(Math.abs(v), dec);
 const pnlColor = (v: number) => (v > 0 ? C.up : v < 0 ? C.dn : C.mut);
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
 /* ============================== TOOLTIP ============================== */
 function Info({
   title,
@@ -78,75 +85,48 @@ function Info({
   w?: number;
   right?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
   return (
-    <span ref={ref} style={{ position: 'relative', display: 'inline-flex', marginLeft: 6 }}>
-      <span
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(!open);
-        }}
-        style={{
-          cursor: 'pointer',
-          width: 15,
-          height: 15,
-          borderRadius: '50%',
-          border: `1px solid ${open ? C.blue : C.border2}`,
-          color: open ? C.blue : C.mut,
-          fontSize: 10,
-          lineHeight: '13px',
-          textAlign: 'center',
-          fontFamily: SANS,
-          fontStyle: 'italic',
-          fontWeight: 700,
-          userSelect: 'none',
-          flexShrink: 0,
-        }}
-        title="spiegazione"
-      >
-        i
-      </span>
-      {open && (
-        <div
-          style={{
-            position: 'absolute',
-            zIndex: 999,
-            top: 20,
-            [right || w >= 400 ? 'right' : 'left']: -10,
-            width: w,
-            maxWidth: 'min(88vw, 420px)',
-            background: '#1C2030',
-            border: `1px solid ${C.border2}`,
-            borderRadius: 8,
-            padding: '12px 14px',
-            boxShadow: '0 12px 32px rgba(0,0,0,.55)',
-            fontSize: 12,
-            lineHeight: 1.55,
-            color: C.text,
-            fontFamily: SANS,
-            fontWeight: 400,
-            textAlign: 'left',
-            whiteSpace: 'normal',
-            textTransform: 'none',
-            letterSpacing: 0,
-          }}
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            style={{
+              cursor: 'help',
+              width: 15,
+              height: 15,
+              borderRadius: '50%',
+              border: `1px solid ${C.border2}`,
+              color: C.mut,
+              fontSize: 10,
+              lineHeight: '13px',
+              textAlign: 'center',
+              fontFamily: SANS,
+              fontStyle: 'italic',
+              fontWeight: 700,
+              userSelect: 'none',
+              flexShrink: 0,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginLeft: 6,
+            }}
+          >
+            i
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          side={right ? 'right' : 'top'}
+          sideOffset={6}
+          style={{ maxWidth: w, width: w }}
+          className="!bg-[#1C2030] !border-[#2A2E3D] !text-[#B0B8C8] p-3 text-xs leading-relaxed"
         >
           <div style={{ color: C.blue, fontWeight: 700, marginBottom: 5, fontSize: 12 }}>
             {title}
           </div>
           {children}
-        </div>
-      )}
-    </span>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
