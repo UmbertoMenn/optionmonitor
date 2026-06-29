@@ -1445,7 +1445,7 @@ function StressLabContent() {
                     {fmtEUR(k.v)}
                   </span>
                   {k.pPatr != null && (
-                    <span style={{ fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 'auto', display: 'inline-flex', alignItems: 'center' }}>
                       ({sgn(k.pPatr * 100, 1)}%)
                       <Info title="Perdita % sul patrimonio" w={340}>
                         È il P&L in percentuale del <b>patrimonio totale</b> (netting della dashboard): netting
