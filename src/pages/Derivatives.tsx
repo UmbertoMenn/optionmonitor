@@ -829,6 +829,19 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 min-w-[920px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <span />
+                    <span />
+                    <span>Sottostante / Strategia</span>
+                    <span />
+                    <span className="text-center">Stato</span>
+                    <span className="text-center">Roll</span>
+                    <span />
+                    <span className="text-right">Netto unit.</span>
+                    <span className="text-right">Contratti</span>
+                    <span className="text-right">PMC</span>
+                    <span className="text-right">Prezzo</span>
+                  </div>
                   {categories.nakedPuts.map((np, index) => (
                     <NakedPutRow key={index} nakedPut={np} stockPositions={stockPositions} getOverrideForPosition={getOverrideForPosition} underlyingPrices={underlyingPrices} getPremiumByTickerAndSymbol={getPremiumByTickerAndSymbol} />
                   ))}
@@ -3001,7 +3014,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_2rem_2rem_2rem_8rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[1000px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[920px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -3035,13 +3048,10 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
               </TooltipContent>
             </Tooltip>
             
-            {/* Col 6: Override Badge + Roll-up toggle */}
+            {/* Col 6: Roll-up toggle */}
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <PutRollUpToggle option={option} />
             </div>
-            
-            {/* Col 7: Menu */}
-            <span />
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -3098,29 +3108,6 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                 <p>Netto unitario flussi di cassa PUT (dalla calcolatrice)</p>
               </TooltipContent>
             </Tooltip>
-            
-            {/* Col 10: PS */}
-            <div className="text-right flex items-center justify-end">
-              {hasUnderlyingPrice ? (
-                <>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                        
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Prezzo Sottostante</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  {option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (
-                    <StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />
-                  )}
-                </>
-              ) : (
-                <span className="text-sm text-muted-foreground">-</span>
-              )}
-            </div>
             
             {/* Col 11: Contratti */}
             <span className="text-sm text-muted-foreground text-right">
