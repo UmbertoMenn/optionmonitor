@@ -1928,7 +1928,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_7rem_4.5rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+          className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_7rem_4.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2057,19 +2057,6 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           <span className="text-sm text-muted-foreground text-right">
             {contracts} × 100
           </span>
-          
-          {/* Col: P/L */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`} onClick={(e) => e.stopPropagation()}>
-                <span className="text-xs text-muted-foreground">P/L:</span>
-                <span className="text-sm">{formatCurrency(totalPL, legCurrency)}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{hasSavedGP ? 'Profit/Loss: flussi di cassa + valore di mercato' : 'P/L calcolato senza operazioni storiche caricate'}</p>
-            </TooltipContent>
-          </Tooltip>
       </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
@@ -2221,7 +2208,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_4rem_3rem_auto_6rem_6rem_7rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_4rem_3rem_auto_6rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Grid: Chevron | Underlying | OptionStrat | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -2351,19 +2338,6 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
               <span className="text-sm text-muted-foreground">-</span>
             )}
           </div>
-           
-           {/* Col 10: P/L */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${hasSavedGP ? (totalPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`} onClick={(e) => e.stopPropagation()}>
-                <span className="text-xs text-muted-foreground">P/L:</span>
-                <span className="text-sm">{formatCurrency(totalPL, legCurrency)}</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{hasSavedGP ? 'Profit/Loss: flussi di cassa + valore di mercato' : 'P/L calcolato senza operazioni storiche caricate'}</p>
-            </TooltipContent>
-          </Tooltip>
       </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
