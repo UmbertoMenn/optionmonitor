@@ -1426,14 +1426,7 @@ function StressLabContent() {
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,minmax(0,1fr))', gap: 14 }}>
             {kpi.map((k) => (
               <Panel key={k.l} style={{ padding: '14px 16px' }}>
-                <div style={{ ...lbl, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                  <span>{k.l}</span>
-                  {k.pPatr != null && (
-                    <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 800, color: pnlColor(k.v) }}>
-                      su patrim. {sgn(k.pPatr * 100, 1)}%
-                    </span>
-                  )}
-                </div>
+                <div style={lbl}>{k.l}</div>
                 <div
                   style={{
                     fontFamily: MONO,
@@ -1441,13 +1434,29 @@ function StressLabContent() {
                     fontWeight: 800,
                     color: pnlColor(k.v),
                     margin: '6px 0 2px',
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 6,
+                    flexWrap: 'wrap',
                   }}
                 >
-                  {k.v > 0 ? '+' : ''}
-                  {fmtEUR(k.v)}
+                  <span>
+                    {k.v > 0 ? '+' : ''}
+                    {fmtEUR(k.v)}
+                  </span>
+                  {k.pPatr != null && (
+                    <span style={{ fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
+                      ({sgn(k.pPatr * 100, 1)}%)
+                      <Info title="Perdita % sul patrimonio" w={340}>
+                        È il P&L in percentuale del <b>patrimonio totale</b> (netting della dashboard): netting
+                        <b> ex CC e NP</b> se il toggle è attivo, altrimenti <b>netting totale</b>.
+                      </Info>
+                    </span>
+                  )}
                 </div>
                 {k.sub && <div style={{ fontSize: 10.5, color: C.mut }}>{k.sub}</div>}
-                {k.pEsp != null && (                  <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
+                {k.pEsp != null && (
+                  <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
                     su esp. potenziale{' '}
                     <span style={{ color: pnlColor(k.v), fontWeight: 700 }}>{sgn(k.pEsp * 100, 1)}%</span>
                   </div>
