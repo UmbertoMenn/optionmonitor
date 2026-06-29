@@ -1930,7 +1930,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_7rem_4.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+          className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_3rem_3rem_5rem_6rem_4.5rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Col 1: Chevron */}
           {isOpen ? (
@@ -2032,28 +2032,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
             </TooltipContent>
           </Tooltip>
           
-          {/* Col 8: PS */}
-          <div className="text-right flex items-center justify-end">
-            {hasUnderlyingPrice ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Prezzo Sottostante</p>
-                  </TooltipContent>
-                </Tooltip>
-                {shouldShowStaleIndicator(underlyingPrices[underlying]) && (
-                  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
-                )}
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">-</span>
-            )}
-          </div>
+
           
           {/* Col 9: Contratti */}
           <span className="text-sm text-muted-foreground text-right">
@@ -2210,7 +2189,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_4rem_3rem_auto_6rem_6rem_7rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
+        className="grid grid-cols-[1.25rem_minmax(6rem,1fr)_4rem_4rem_3rem_auto_6rem_6rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[880px]"
       >
           {/* Grid: Chevron | Underlying | OptionStrat | IR/OOR | Scadenze | PUT spread | CALL spread | Contratti | P/L */}
           {/* Col 1: Chevron */}
@@ -2318,28 +2297,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
             {contracts} × 100
           </span>
           
-          {/* Col 8: PS */}
-          <div className="text-right flex items-center justify-end">
-            {hasUnderlyingPrice ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-help whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Prezzo Sottostante</p>
-                  </TooltipContent>
-                </Tooltip>
-                {shouldShowStaleIndicator(underlyingPrices[underlying]) && (
-                  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
-                )}
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">-</span>
-            )}
-          </div>
+
       </div>
       <CollapsibleContent>
         <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 space-y-4">
@@ -2569,7 +2527,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
         tabIndex={0}
         onClick={() => setIsOpen(!isOpen)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-        className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_8rem_8rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
+        className="grid grid-cols-[1.25rem_minmax(10rem,1fr)_4rem_12rem_3.5rem_9rem_4rem_4.5rem_8rem] gap-3 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[850px]"
       >
           {/* Colonna 1: Chevron */}
           {isOpen ? (
@@ -2705,28 +2663,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
             </span>
           </div>
           
-          {/* Colonna 8: Prezzo Sottostante */}
-          <div className="text-right flex items-center justify-end overflow-hidden">
-            {hasUnderlyingPrice ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-                      
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Prezzo Sottostante</p>
-                  </TooltipContent>
-                </Tooltip>
-                {shouldShowStaleIndicator(underlyingPrices[underlying]) && (
-                  <StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />
-                )}
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">-</span>
-            )}
-          </div>
+
           
           {/* Colonna 9: P/L */}
           <Tooltip>
