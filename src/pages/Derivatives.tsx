@@ -1213,7 +1213,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             
             {/* Col 3: Descrizione + Synthetic badge */}
             <div className="flex items-center gap-1.5 min-w-0">
-              <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span></div>
+              <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>{option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (<StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />)}</div>
               {coveredCall.isSynthetic && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1519,7 +1519,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             
             {/* Col 3: Description + Synthetic badge */}
             <div className="flex items-center gap-1.5 min-w-0">
-              <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span></div>
+              <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>{option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (<StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />)}</div>
               {isSynthetic && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1816,7 +1816,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_4.5rem_
           <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
           
           {/* Col 3: Descrizione */}
-          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span></div>
+          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>{option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (<StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />)}</div>
           
           {/* Col 4: OptionStrat */}
           <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLongPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
@@ -1993,7 +1993,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           )}
           
           {/* Col 2: Underlying */}
-          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{underlying}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span></div>
+          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{underlying}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span>{shouldShowStaleIndicator(underlyingPrices[underlying]) && (<StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />)}</div>
           
           {/* Col 3: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -2253,7 +2253,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
           )}
           
           {/* Col 2: Underlying */}
-          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{underlying}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span></div>
+          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{underlying}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span>{shouldShowStaleIndicator(underlyingPrices[underlying]) && (<StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />)}</div>
           
           {/* Col 3: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -2590,7 +2590,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           )}
           
           {/* Colonna 2: Underlying */}
-          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{underlying}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span></div>
+          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{underlying}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span>{shouldShowStaleIndicator(underlyingPrices[underlying]) && (<StalePriceIndicator ticker={underlyingPrices[underlying]?.ticker} />)}</div>
           
           {/* Colonna 3: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -3004,7 +3004,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
             
             {/* Col 3: Descrizione */}
-            <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span></div>
+            <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>{option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (<StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />)}</div>
             
             {/* Col 4: OptionStrat */}
             <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildNakedPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
@@ -3199,7 +3199,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
           
           {/* Col 3: Descrizione */}
-          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span></div>
+          <div className="flex items-baseline gap-2 min-w-0"><span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-mono font-semibold text-cyan-300 whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>{option.underlying && shouldShowStaleIndicator(underlyingPrices[option.underlying]) && (<StalePriceIndicator ticker={underlyingPrices[option.underlying]?.ticker} />)}</div>
           
           {/* Col 4: OptionStrat */}
           <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLeapCallUrl(underlyingPrices[option.underlying].ticker, option) : null} />
