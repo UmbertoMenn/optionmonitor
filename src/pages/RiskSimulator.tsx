@@ -18,7 +18,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Activity, AlertTriangle, Loader2 } from 'lucide-react';
+import { Activity, AlertTriangle, Loader2, FlaskConical } from 'lucide-react';
 import { AppHeaderMenu } from '@/components/layout/AppHeaderMenu';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -2593,7 +2593,7 @@ export function RiskSimulator() {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
-              <Activity className="w-6 h-6 text-primary" />
+              <FlaskConical className="w-6 h-6 text-primary" />
             </div>
             <h1 className="text-lg font-bold">Stress Lab</h1>
           </div>
