@@ -704,7 +704,7 @@ function StressLabContent() {
     {
       l: 'P&L Totale',
       v: scen.totEUR,
-      sub: `patrimonio stressato ${fmtEUR(totalPatrimony + scen.totEUR)}`,
+      sub: '',
       pPatr: totalPatrimony ? scen.totEUR / totalPatrimony : null,
       pEsp: ptfBase ? scen.totEUR / ptfBase : null,
     },
@@ -1033,7 +1033,7 @@ function StressLabContent() {
                     )}
                     {showReal &&
                       card(
-                        'Esposizione Reale in Equity',
+                        `Esposizione Reale in Equity · @ ${sgn(d, 1)}%`,
                         fmtEUR(reale),
                         C.blue,
                         <Info title="Esposizione Reale in Equity" w={360}>
@@ -1050,15 +1050,14 @@ function StressLabContent() {
                           È un'esposizione <b>lineare</b> (delta-€): in un crash la perdita reale è maggiore,
                           perché il gamma delle put vendute accelera. Negativa = sei net short.
                         </Info>,
-                        <>valori a questo shock di mercato ({sgn(d, 1)}%)</>,
                       )}
                     {showReal &&
                       card(
-                        'Leva Reale',
+                        `Leva Reale · @ ${sgn(d, 1)}%`,
                         `${fmtN(leva, 2)}×`,
                         C.amber,
                         <Info title="Leva Reale" w={360}>
-                          <b>Esposizione Reale ÷ Patrimonio totale</b> (netting della dashboard, coerente col
+                          <b>Esposizione Reale / Patrimonio totale</b> (netting della dashboard, coerente col
                           toggle <b>Netting Ex CC e NP</b>: il denominatore è il netting totale o l'ex CC e NP).
                           <br />
                           <br />
@@ -1072,7 +1071,6 @@ function StressLabContent() {
                           per il gamma).
                         </Info>,
                         <>
-                          <div>valori a questo shock di mercato ({sgn(d, 1)}%)</div>
                           {ruinX != null ? (
                             <div>
                               rovina −100% perf. (full reval):{' '}
@@ -1089,6 +1087,37 @@ function StressLabContent() {
                   </div>
                 );
               })()}
+
+              {/* Patrimonio iniziale → stressato (allo shock corrente) */}
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '10px 12px',
+                  background: 'rgba(255,255,255,.02)',
+                  border: `1px solid ${C.border2}`,
+                  borderRadius: 7,
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  fontFamily: MONO,
+                }}
+              >
+                <span style={{ fontSize: 10.5, color: C.mut, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  Patrimonio iniziale
+                </span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>{fmtEUR(totalPatrimony)}</span>
+                <span style={{ color: C.mut, fontSize: 15 }}>→</span>
+                <span style={{ fontSize: 10.5, color: C.mut, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  Patrimonio stressato @ {sgn(d, 1)}%
+                </span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: pnlColor(scen.totEUR) }}>
+                  {fmtEUR(totalPatrimony + scen.totEUR)}
+                </span>
+                <span style={{ fontSize: 11, color: pnlColor(scen.totEUR) }}>
+                  ({sgn(totalPatrimony ? (scen.totEUR / totalPatrimony) * 100 : 0, 1)}%)
+                </span>
+              </div>
 
               {/* Toggle: Includi ETF e Commodities */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
@@ -1417,9 +1446,8 @@ function StressLabContent() {
                   {k.v > 0 ? '+' : ''}
                   {fmtEUR(k.v)}
                 </div>
-                <div style={{ fontSize: 10.5, color: C.mut }}>{k.sub}</div>
-                {k.pEsp != null && (
-                  <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
+                {k.sub && <div style={{ fontSize: 10.5, color: C.mut }}>{k.sub}</div>}
+                {k.pEsp != null && (                  <div style={{ fontSize: 10.5, color: C.mut, fontFamily: MONO, marginTop: 2 }}>
                     su esp. potenziale{' '}
                     <span style={{ color: pnlColor(k.v), fontWeight: 700 }}>{sgn(k.pEsp * 100, 1)}%</span>
                   </div>
@@ -1515,7 +1543,7 @@ function StressLabContent() {
                         <span style={{ color: pnlColor(plReale), fontWeight: 700 }}>{fmtEUR(plReale)}</span>
                       </div>
                       <div>
-                        ÷ P/L teorico (esp.pot × β {fmtN(betaPort, 2)} × {sgn(d, 0)}%){' '}
+                        / P/L teorico (esp.pot × β {fmtN(betaPort, 2)} × {sgn(d, 0)}%){' '}
                         <span style={{ color: pnlColor(plTeorico), fontWeight: 700 }}>{fmtEUR(plTeorico)}</span>
                       </div>
                       <div>
@@ -1550,7 +1578,7 @@ function StressLabContent() {
                   margine sale proprio mentre il patrimonio si svuota.
                   <br />
                   <br />
-                  <b>Incidenza su bond + cash</b> (riga piccola): margine ÷ valore di bond + cash (escluso cash
+                  <b>Incidenza su bond + cash</b> (riga piccola): margine / valore di bond + cash (escluso cash
                   GP). È il rapporto che fa scattare la <b>richiesta di reintegro</b>: nel crash il numeratore
                   cresce mentre bond e cash restano stabili, quindi l'incidenza accelera. Il bordo diventa rosso
                   quando lo scenario la fa salire oltre +20% rispetto a oggi.
@@ -2567,7 +2595,7 @@ export function RiskSimulator() {
             <div className="p-2 rounded-lg bg-primary/10">
               <Activity className="w-6 h-6 text-primary" />
             </div>
-            <h1 className="text-lg font-bold">Risk / Margin Simulator</h1>
+            <h1 className="text-lg font-bold">Stress Lab</h1>
           </div>
           <AppHeaderMenu />
         </div>

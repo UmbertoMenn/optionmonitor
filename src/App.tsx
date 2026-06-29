@@ -136,7 +136,7 @@ function AppRoutes() {
             </ErrorBoundary>
           } />
           <Route path="/risk-simulator" element={
-            <ErrorBoundary title="Errore nel caricamento del Risk Simulator">
+            <ErrorBoundary title="Errore nel caricamento dello Stress Lab">
               <RiskSimulator />
             </ErrorBoundary>
           } />
