@@ -829,7 +829,7 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
-                  <div className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 min-w-[920px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[920px] text-[10px] uppercase tracking-wider text-[hsl(var(--stress-mut))] font-semibold">
                     <span />
                     <span />
                     <span>Sottostante / Strategia</span>
@@ -3014,7 +3014,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[920px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(14rem,1fr)_2rem_3rem_2.5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-[hsl(var(--stress-border))] bg-[hsl(var(--stress-panel))] hover:bg-[hsl(var(--stress-panel2))] cursor-pointer transition-colors min-w-[920px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -3127,15 +3127,15 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </Tooltip>
             
             {/* Col 12: Prezzo */}
-            <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-              <span className="font-mono font-semibold text-sm">
+            <div className="flex flex-col items-end justify-center leading-tight whitespace-nowrap">
+              <span className="font-mono font-semibold text-sm flex items-center gap-1">
                 {formatCurrency(option.current_price || 0, getOptionCurrency(option))}
+                {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
+                  <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
+                )}
               </span>
-              {shouldShowOptionStaleIndicator(option, option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined) && (
-                <StalePriceIndicator ticker={option.underlying ? underlyingPrices[option.underlying]?.ticker : undefined} />
-              )}
               {priceChangePct !== null && (
-                <span className={`text-xs font-medium ${priceChangePct <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                <span className={`text-[10px] font-mono ${priceChangePct <= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
                   {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(1)}%
                 </span>
               )}
