@@ -1107,7 +1107,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             
             {/* Col 3: Descrizione + Synthetic badge */}
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+              <span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>
               {coveredCall.isSynthetic && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1233,7 +1233,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                    
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -1421,7 +1421,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             
             {/* Col 3: Description + Synthetic badge */}
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+              <span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>
               {isSynthetic && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1532,7 +1532,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                    
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -1723,7 +1723,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
           <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
           
           {/* Col 3: Descrizione */}
-          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+          <span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>
           
           {/* Col 4: OptionStrat */}
           <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLongPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
@@ -1773,7 +1773,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                      
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -1922,7 +1922,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           )}
           
           {/* Col 2: Underlying */}
-          <span className="font-medium truncate">{underlying}</span>
+          <span className="font-medium truncate">{underlying}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span>
           
           {/* Col 3: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -2021,7 +2021,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, legCurrency)}
+                      
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -2203,7 +2203,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
           )}
           
           {/* Col 2: Underlying */}
-          <span className="font-medium truncate">{underlying}</span>
+          <span className="font-medium truncate">{underlying}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span>
           
           {/* Col 3: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -2307,7 +2307,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, legCurrency)}
+                      
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -2561,7 +2561,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           )}
           
           {/* Colonna 2: Underlying */}
-          <span className="font-medium truncate">{underlying}</span>
+          <span className="font-medium truncate">{underlying}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(ticker || underlying)}: {formatCurrency(underlyingPrice, legCurrency)}</span>
           
           {/* Colonna 3: OptionStrat + Calculator */}
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -2694,7 +2694,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, legCurrency)}
+                      
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -2871,7 +2871,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
             >
               {isBought ? 'A' : 'V'}
             </Badge>
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(underlying?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>
             <Badge 
               variant={!hasUnderlyingPrice ? "secondary" : isITM ? "destructive" : "default"} 
               className="text-xs shrink-0"
@@ -2885,7 +2885,7 @@ function OtherStrategyRow({ otherStrategy }: { otherStrategy: OtherStrategyPosit
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
-                    PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                    
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -2996,7 +2996,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             <Badge variant="outline" className="text-xs text-green-500 border-green-500">V</Badge>
             
             {/* Col 3: Descrizione */}
-            <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+            <span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>
             
             {/* Col 4: OptionStrat */}
             <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildNakedPutUrl(underlyingPrices[option.underlying].ticker, option) : null} />
@@ -3088,7 +3088,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                        PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                        
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -3217,7 +3217,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           <Badge variant="outline" className="text-xs text-red-500 border-red-500">A</Badge>
           
           {/* Col 3: Descrizione */}
-          <span className="font-medium truncate">{formatOptionDescription(option)}</span>
+          <span className="font-medium truncate">{formatOptionDescription(option)}</span><span className="text-sm font-semibold text-primary whitespace-nowrap shrink-0">{(underlyingPrices[option.underlying || '']?.ticker || option.underlying)}: {formatCurrency(underlyingPrice, getOptionCurrency(option))}</span>
           
           {/* Col 4: OptionStrat */}
           <OptionStratButton url={option.underlying && underlyingPrices[option.underlying]?.ticker ? buildLeapCallUrl(underlyingPrices[option.underlying].ticker, option) : null} />
@@ -3252,7 +3252,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="text-sm text-muted-foreground cursor-help truncate" onClick={(e) => e.stopPropagation()}>
-                      PS: {formatCurrency(underlyingPrice, getOptionCurrency(option))}
+                      
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
