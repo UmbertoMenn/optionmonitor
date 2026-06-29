@@ -791,7 +791,8 @@ export function filterAndCalculateCallPremiums(
 export function filterAndCalculatePutPremiums(
   orders: ParsedOrder[],
   ticker: string,
-  referenceExpiry?: string
+  referenceExpiry?: string,
+  options?: { keepProtectiveBuys?: boolean }
 ): OrderParseResult {
   // Step 1: Filter for executed PUT orders matching the ticker
   const baseFiltered = orders.filter(order => {
@@ -810,19 +811,25 @@ export function filterAndCalculatePutPremiums(
   }
   
   // Step 3: Filter out buy-only PUTs (pure protections)
-  let filteredOrders = baseFiltered.filter(order => {
-    if (symbolsWithSells.has(order.symbol)) {
-      return true;
-    }
-    if (import.meta.env.DEV) {
-      console.log(`[PUT filter] Excluded buy-only PUT ${order.symbol}`);
-    }
-    return false;
-  });
+  // ...UNLESS keepProtectiveBuys (de-risking covered call): we WANT the
+  // protection-put cost to be subtracted from the net.
+  let filteredOrders = options?.keepProtectiveBuys
+    ? baseFiltered
+    : baseFiltered.filter(order => {
+        if (symbolsWithSells.has(order.symbol)) {
+          return true;
+        }
+        if (import.meta.env.DEV) {
+          console.log(`[PUT filter] Excluded buy-only PUT ${order.symbol}`);
+        }
+        return false;
+      });
   
   // Step 4: If referenceExpiry provided, exclude symbols with anomalous expiry
   // (bought and sold but with expiry >> median → protection closed)
-  if (referenceExpiry) {
+  // Skipped for de-risking (keepProtectiveBuys): the protection may legitimately
+  // be far (LEAP) and must still be counted.
+  if (referenceExpiry && !options?.keepProtectiveBuys) {
     const refDate = new Date(referenceExpiry);
     const sixMonthsMs = 6 * 30 * 24 * 60 * 60 * 1000;
     const anomalousSymbols = new Set<string>();

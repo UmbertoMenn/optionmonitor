@@ -1719,6 +1719,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
         contractsInPortfolio={contractsCovered}
         underlyingPrice={underlyingPrice}
         strategyLegs={ccLegs}
+        isDeRisking
       />
     </>
   );

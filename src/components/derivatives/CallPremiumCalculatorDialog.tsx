@@ -76,6 +76,8 @@ interface CallPremiumCalculatorDialogProps {
   underlyingPrice: number;
   strategyType?: CalculatorStrategyType;
   strategyLegs?: StrategyLeg[];
+  /** De-risking covered call: include the protection-put cost in the net. */
+  isDeRisking?: boolean;
 }
 
 export function CallPremiumCalculatorDialog({
@@ -88,6 +90,7 @@ export function CallPremiumCalculatorDialog({
   underlyingPrice,
   strategyType = 'covered_call',
   strategyLegs,
+  isDeRisking = false,
 }: CallPremiumCalculatorDialogProps) {
   const isMultiLeg = strategyType === 'iron_condor' || strategyType === 'double_diagonal' || strategyType === 'other_strategy';
   const isIronCondor = strategyType === 'iron_condor';
@@ -102,7 +105,7 @@ export function CallPremiumCalculatorDialog({
   const [metrics, setMetrics] = useState<PremiumMetrics | null>(null);
   const [callOrders, setCallOrders] = useState<ParsedOrder[]>([]);
   const [putOrders, setPutOrders] = useState<ParsedOrder[]>([]);
-  const [includePutPremiums, setIncludePutPremiums] = useState(false);
+  const [includePutPremiums, setIncludePutPremiums] = useState(isDeRisking);
   const [parseResult, setParseResult] = useState<OrderParseResult | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastOperationDate, setLastOperationDate] = useState<string | null>(null);
@@ -254,7 +257,7 @@ export function CallPremiumCalculatorDialog({
       let mergedPutOrders = putOrders;
       let newPutCount = 0;
       if (isCoveredCall) {
-        const putResult = filterAndCalculatePutPremiums(orders, ticker);
+        const putResult = filterAndCalculatePutPremiums(orders, ticker, undefined, isDeRisking ? { keepProtectiveBuys: true } : undefined);
         mergedPutOrders = mergeOrders(putOrders, putResult.filteredOrders, cutoffDate);
         newPutCount = mergedPutOrders.length - putOrders.length;
         setPutOrders(mergedPutOrders);
