@@ -64,7 +64,6 @@ import {
   getPriceRangeForPositions 
 } from '@/lib/optionCalculator';
 import { DerivativePosition, OptionType } from '@/types/portfolio';
-import { MoveOptionMenu, OverrideBadge } from '@/components/derivatives/MoveOptionMenu';
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
 import { CallPremiumCalculatorDialog, StrategyLeg } from '@/components/derivatives/CallPremiumCalculatorDialog';
 import { isLegOpenInOrders, ParsedOrder } from '@/lib/orderFileParser';
@@ -1152,8 +1151,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                   </TooltipContent>
                 </Tooltip>
               )}
-              {hasOverride && <OverrideBadge />}
-            </div>
+                          </div>
             
             {/* Col 6: ITM/OTM */}
             <Tooltip>
@@ -1172,11 +1170,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             </Tooltip>
             
             {/* Col 7: Menu */}
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="covered_call" 
-            />
+            <span />
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -1456,8 +1450,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             
             {/* Col 5: Badges */}
             <div className="flex items-center gap-1 w-12 justify-end">
-              {getOverrideForPosition(option.id) && <OverrideBadge />}
-            </div>
+                          </div>
             
             {/* Col 6: ITM/OTM */}
             <Tooltip>
@@ -1476,11 +1469,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             </Tooltip>
             
             {/* Col 7: Menu */}
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="covered_call" 
-            />
+            <span />
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -1756,8 +1745,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
                 </TooltipContent>
               </Tooltip>
             )}
-            {hasOverride && <OverrideBadge />}
-          </div>
+                      </div>
           
           {/* Col 6: ITM/OTM */}
           <Tooltip>
@@ -1776,11 +1764,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(8rem,1fr)_2rem_3rem_3rem_2rem_6re
           </Tooltip>
           
           {/* Col 7: Menu */}
-          <MoveOptionMenu 
-            option={option} 
-            availableStocks={stockPositions} 
-            currentCategory="protection" 
-          />
+          <span />
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
@@ -2819,14 +2803,9 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
             <p>{!hasUnderlyingPrice ? 'Prezzo sottostante non disponibile' : isITM ? (isCall ? 'In The Money: il sottostante è sopra lo strike' : 'In The Money: il sottostante è sotto lo strike') : (isCall ? 'Out of The Money: il sottostante è sotto lo strike' : 'Out of The Money: il sottostante è sopra lo strike')}</p>
           </TooltipContent>
         </Tooltip>
-        {hasOverride && <OverrideBadge />}
-      </div>
+              </div>
       <div className="flex items-center gap-4 shrink-0">
-        <MoveOptionMenu 
-          option={option} 
-          availableStocks={stockPositions} 
-          currentCategory="other" 
-        />
+        <span />
         <span className="text-sm text-muted-foreground">
           {Math.abs(option.quantity)} × 100
         </span>
@@ -3040,16 +3019,11 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             
             {/* Col 6: Override Badge + Roll-up toggle */}
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              {hasOverride && <OverrideBadge />}
-              <PutRollUpToggle option={option} />
+                            <PutRollUpToggle option={option} />
             </div>
             
             {/* Col 7: Menu */}
-            <MoveOptionMenu 
-              option={option} 
-              availableStocks={stockPositions} 
-              currentCategory="naked_put" 
-            />
+            <span />
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -3266,15 +3240,10 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           
           {/* Col 6: Override Badge */}
           <div className="flex items-center">
-            {hasOverride && <OverrideBadge />}
-          </div>
+                      </div>
           
           {/* Col 7: Menu */}
-          <MoveOptionMenu 
-            option={option} 
-            availableStocks={stockPositions} 
-            currentCategory="leap_call" 
-          />
+          <span />
           
           {/* Col 7: PS */}
           <div className="text-right flex items-center justify-end">
