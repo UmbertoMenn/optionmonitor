@@ -126,6 +126,18 @@ export function buildProjectionInputs(
     });
   }
 
+  const derivSummary: DerivSummaryLeg[] = positions
+    .filter(p => p.asset_type === 'derivative' && p.option_type)
+    .map(p => ({
+      description: p.description,
+      underlying: p.underlying || p.description || '',
+      type: p.option_type as 'call' | 'put',
+      qty: p.quantity,
+      strike: p.strike_price ?? 0,
+      mvT0: (p.snapshot_price ?? p.current_price ?? 0) * ((p.quantity * 100) / (p.exchange_rate && p.exchange_rate > 0 ? p.exchange_rate : 1)),
+      hasUnderlying: !!(underlyingPrices?.[p.underlying || p.description || '']?.price ?? 0),
+    }));
+
   const bonds: BondInput[] = [];
   const unparsedBonds: string[] = [];
   const partialBonds: string[] = [];
