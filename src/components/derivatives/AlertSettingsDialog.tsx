@@ -235,6 +235,17 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const [newPriceDeleteAfterTrigger, setNewPriceDeleteAfterTrigger] = useState(false);
   const [validatingTicker, setValidatingTicker] = useState(false);
   const [tickerValidation, setTickerValidation] = useState<{ valid: boolean; price?: number; currency?: string } | null>(null);
+
+  // State for bulk price alerts creation
+  const [bulkTicker, setBulkTicker] = useState('');
+  const [bulkValidatingTicker, setBulkValidatingTicker] = useState(false);
+  const [bulkTickerValidation, setBulkTickerValidation] = useState<{ valid: boolean; price?: number; currency?: string } | null>(null);
+  const [bulkBaseMode, setBulkBaseMode] = useState<'current' | 'manual'>('current');
+  const [bulkManualPrice, setBulkManualPrice] = useState('');
+  const [bulkStepPct, setBulkStepPct] = useState('5');
+  const [bulkCount, setBulkCount] = useState(10);
+  const [bulkDirection, setBulkDirection] = useState<'above' | 'below' | 'both'>('both');
+  const [bulkDeleteAfterTrigger, setBulkDeleteAfterTrigger] = useState(false);
   
   // Extract available tickers from strategies + stock positions
   const { resolved: availableTickers, unresolved: unresolvedUnderlyingsRaw } = useMemo(() => 
