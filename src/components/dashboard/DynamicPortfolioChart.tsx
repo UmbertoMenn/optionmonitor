@@ -352,7 +352,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
         <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
           <CarouselContent>
             {/* Slide 0 (solo Netting Totale): proiezione patrimonio alle scadenze */}
-            {viewMode === 'netting_total' && (
+            {viewMode === 'netting_total' && isAdmin && (
               <CarouselItem>
                 <PatrimonyProjectionCard
                   positions={positions}
