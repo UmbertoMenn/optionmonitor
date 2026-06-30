@@ -51,6 +51,16 @@ export interface ResolvedBondOverride {
   frequency: number;
 }
 
+export interface DerivSummaryLeg {
+  description: string;
+  underlying: string;
+  type: 'call' | 'put';
+  qty: number;
+  strike: number;
+  mvT0: number;
+  hasUnderlying: boolean;
+}
+
 export interface ProjectionInputs {
   t0: Date;
   horizon: Date;
@@ -64,6 +74,8 @@ export interface ProjectionInputs {
   unparsedBonds: string[];   // bond senza scadenza deducibile → tenuti piatti
   partialBonds: string[];    // bond con scadenza ma senza cedola → pull-to-par, cedole non modellate
   derivsNoUnderlying: string[];
+  derivMVT0: number;         // somma MV derivati a t0 (con segno)
+  derivSummary: DerivSummaryLeg[]; // dettaglio gambe per UI
   patrimonyT0: number;       // 'all'
   equityT0: number;          // azionario + derivati a t0
   bondCommodityT0: number;   // bond + commodities a t0
