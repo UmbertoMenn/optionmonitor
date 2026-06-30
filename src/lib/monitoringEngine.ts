@@ -630,6 +630,7 @@ function computeIncompleteMultiLeg(
     derisking_covered_call: 'De-Risking CC',
     iron_condor: 'Iron Condor',
     double_diagonal: 'Double Diagonal',
+    call_spread: 'Call Spread',
   };
   const result: MonitoringIncompleteStrategy[] = [];
   for (const inc of categories.incompleteStrategies || []) {

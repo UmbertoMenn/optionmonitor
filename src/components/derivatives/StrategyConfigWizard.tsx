@@ -32,6 +32,8 @@ const STRATEGY_OPTIONS = [
   { value: 'naked_put', label: 'Naked Put' },
   { value: 'put_spread', label: 'Put Spread' },
   { value: 'diagonal_put_spread', label: 'Diagonal Put Spread' },
+  { value: 'call_spread', label: 'Call Spread' },
+  { value: 'diagonal_call_spread', label: 'Diagonal Call Spread' },
   { value: 'leap_call', label: 'LEAP Call' },
   { value: 'other', label: 'Altre Strategie' },
 ];
@@ -62,6 +64,10 @@ function isCategoryCompatible(category: string, legs: Position[]): { ok: boolean
     case 'protection':
       if (hasCall) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
       if (hasShortPut) return { ok: false, reason: 'Protezione pura ammette solo PUT comprate' };
+      return { ok: true };
+    case 'call_spread':
+    case 'diagonal_call_spread':
+      if (hasPut) return { ok: false, reason: 'Call Spread non può contenere PUT' };
       return { ok: true };
     case 'covered_call':
     case 'derisking_covered_call':
@@ -187,6 +193,13 @@ function detectStrategyType(positions: Position[]): string {
   if (hasPutSpread && soldCalls.length === 0 && boughtCalls.length === 0) {
     const allPutExpiries = new Set([...soldPuts, ...boughtPuts].map(p => p.expiry_date || ''));
     return allPutExpiries.size <= 1 ? 'put_spread' : 'diagonal_put_spread';
+  }
+
+  // Call Spread: 1+ Long Call & 1+ Short Call, no PUT, no stock.
+  // Stesse scadenze ⇒ call_spread; scadenze diverse ⇒ diagonal_call_spread.
+  if (soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length === 0 && boughtPuts.length === 0 && !hasStock) {
+    const allCallExpiries = new Set([...soldCalls, ...boughtCalls].map(c => c.expiry_date || ''));
+    return allCallExpiries.size <= 1 ? 'call_spread' : 'diagonal_call_spread';
   }
 
   if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
