@@ -246,6 +246,7 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
   const [bulkCount, setBulkCount] = useState(10);
   const [bulkDirection, setBulkDirection] = useState<'above' | 'below' | 'both'>('both');
   const [bulkDeleteAfterTrigger, setBulkDeleteAfterTrigger] = useState(false);
+  const [priceMode, setPriceMode] = useState<'single' | 'bulk'>('single');
   
   // Extract available tickers from strategies + stock positions
   const { resolved: availableTickers, unresolved: unresolvedUnderlyingsRaw } = useMemo(() => 
