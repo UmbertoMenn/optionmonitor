@@ -275,6 +275,29 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
         <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-blue-500 inline-block" /> patrimonio (€)</span>
         <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 inline-block" style={{ background: 'hsl(142, 71%, 45%)' }} /> P/L %</span>
+        {inputs.derivSummary.length > 0 && (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1 text-blue-500 cursor-help">
+                  <Info className="w-3 h-3" /> {inputs.derivSummary.length} derivati ({fmtEURc(inputs.derivMVT0)})
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[320px] text-xs">
+                <div className="font-semibold mb-1">Derivati inclusi nel bucket Equity:</div>
+                <ul className="list-disc pl-4 max-h-[200px] overflow-y-auto">
+                  {inputs.derivSummary.slice(0, 20).map((d, i) => (
+                    <li key={i}>
+                      {d.qty > 0 ? '+' : ''}{d.qty} {d.type.toUpperCase()} {d.underlying} @ {d.strike}
+                      {!d.hasUnderlying && <span className="text-amber-500"> (no spot)</span>}
+                    </li>
+                  ))}
+                  {inputs.derivSummary.length > 20 && <li>… e altri {inputs.derivSummary.length - 20}</li>}
+                </ul>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         {inputs.partialBonds.length > 0 && (
           <TooltipProvider delayDuration={150}>
             <Tooltip>
