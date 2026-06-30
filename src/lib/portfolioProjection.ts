@@ -66,6 +66,7 @@ export interface ProjectionInputs {
   horizon: Date;
   // bucket costanti (EUR)
   equityFlat: number;        // azioni + ETF — shockabili nel MC titoli
+  gpEquityFlat: number;      // GP azionaria (gp_total - gp_cash) — piatta, in bucket Equity
   commodityFlat: number;     // materie prime — piatte
   cashResidual: number;      // cash + arrotondamenti — piatto
   unparsedBondFlat: number;  // bond senza scadenza → tenuti al valore corrente (bucket bond)
@@ -75,11 +76,14 @@ export interface ProjectionInputs {
   partialBonds: string[];    // bond con scadenza ma senza cedola → pull-to-par, cedole non modellate
   derivsNoUnderlying: string[];
   derivMVT0: number;         // somma MV derivati a t0 (con segno)
+  derivativesNettingT0: number; // valore "netting derivati" signed a t0 (= derivMVT0 se non override)
+  equityDerivOffset: number; // (derivativesNettingT0 - derivMVT0): offset costante aggiunto al sleeve equity
   derivSummary: DerivSummaryLeg[]; // dettaglio gambe per UI
   patrimonyT0: number;       // 'all'
-  equityT0: number;          // azionario + derivati a t0
+  equityT0: number;          // azionario + GP equity + netting derivati a t0
   bondCommodityT0: number;   // bond + commodities a t0
 }
+
 
 export function buildProjectionInputs(
   positions: Position[],
