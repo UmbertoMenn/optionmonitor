@@ -448,7 +448,7 @@ function RecentAlertsCard({ categories, underlyingPrices }: RecentAlertsCardProp
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Gestione avvisi e notifiche</p>
+                <p>Gestisci avvisi</p>
               </TooltipContent>
             </Tooltip>
           </div>
