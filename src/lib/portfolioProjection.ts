@@ -238,14 +238,26 @@ const NO_SHOCK: ShockSet = { volMult: 1, rateBump: 0, equityMult: 1, underlyingM
 function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: ProjectionScope = 'all'): number {
   const r = DEFAULT_RATE + sh.rateBump;
 
-  // ── bucket EQUITY: azioni/ETF (shockabili) + derivati (decadimento) ──
+  // ── bucket EQUITY: azioni/ETF (shockabili) + derivati (decadimento + esercizio) ──
   let derivVal = 0;
+  let equityAdjAtExpiry = 0; // P/L da esercizio: spostato dal bucket derivati al bucket equity
   for (const d of inp.derivs) {
-    if (!d.hasUnderlying) { derivVal += d.mvT0; continue; }
+    if (!d.hasUnderlying) {
+      // Senza prezzo sottostante: decadimento lineare del MV verso 0 sulla vita residua.
+      const frac = d.T0 > 0 ? Math.max(0, (d.T0 - tp.tYears) / d.T0) : 0;
+      derivVal += d.mvT0 * frac;
+      continue;
+    }
     const Tt = Math.max(0, d.T0 - tp.tYears);
     const sMult = sh.underlyingMult[d.underlying] ?? sh.equityMult;
     const S = d.S0 * sMult;
-    if (d.ivResolved) {
+    const expired = tp.tYears >= d.T0;
+    if (expired) {
+      // Esercizio a scadenza: il P/L intrinseco si materializza nel bucket equity (azioni
+      // consegnate/acquistate al strike). Il bucket derivati si azzera.
+      const intrinsic = d.type === 'call' ? Math.max(0, S - d.K) : Math.max(0, d.K - S);
+      equityAdjAtExpiry += intrinsic * d.qtyMult;
+    } else if (d.ivResolved) {
       derivVal += bsPrice(S, d.K, Tt, r, d.iv * sh.volMult, d.type) * d.qtyMult;
     } else {
       const intrinsic = d.type === 'call' ? Math.max(0, S - d.K) : Math.max(0, d.K - S);
@@ -254,7 +266,7 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
       derivVal += px * d.qtyMult;
     }
   }
-  const equitySleeve = inp.equityFlat * sh.equityMult + derivVal;
+  const equitySleeve = inp.equityFlat * sh.equityMult + derivVal + equityAdjAtExpiry;
 
   // ── bucket BOND + COMMODITY ──
   let bondVal = 0;
