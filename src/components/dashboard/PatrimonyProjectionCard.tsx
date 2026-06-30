@@ -361,8 +361,8 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
         sono consegnate al strike, per le short put sono acquistate al strike (l'effetto si
         materializza nel bucket Equity). I bond convergono al valore di rimborso (pull-to-par) e
         le cedole staccate incrementano il patrimonio. Azioni/ETF/cash restano costanti nello
-        scenario base. Il toggle <strong>Equity</strong> include azioni, ETF e tutti i derivati
-        (sottostante azionario).
+        scenario base. Il toggle <strong>Equity</strong> = azioni + ETF + GP azionaria
+        (esclusa la liquidità GP) + Netting Totale derivati a t0.
       </p>
     </div>
   );
