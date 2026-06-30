@@ -664,6 +664,42 @@ export function categorizeDerivatives(
         }
         break;
       }
+      case 'call_spread': {
+        // Call Spread verticale (stessa scadenza): 1+ Long Call & 1+ Short Call, no PUT.
+        const sc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity < 0);
+        const bc = matchedVirtual.filter(d => d.option_type === 'call' && d.quantity > 0);
+        if (sc.length > 0 && bc.length > 0) {
+          const configOptions: OtherStrategyPosition[] = [];
+          for (const opt of matchedVirtual) {
+            const entry: OtherStrategyPosition = { option: opt, underlying: linkedStock || null };
+            otherStrategies.push(entry);
+            configOptions.push(entry);
+          }
+          configOtherGroups.push({
+            underlying: config.underlying,
+            options: configOptions,
+            totalPremium: configOptions.reduce((sum, o) => sum + (o.option.market_value || 0), 0),
+            totalProfitLoss: configOptions.reduce((sum, o) => sum + (o.option.profit_loss || 0), 0),
+            strategyName: detectStrategyName(configOptions) || 'Call Spread',
+            configId: config.id,
+            configStrategyType: config.strategy_type,
+          });
+        } else if (matchedVirtual.length > 0) {
+          const missing: string[] = [];
+          if (sc.length === 0) missing.push('Short Call');
+          if (bc.length === 0) missing.push('Long Call');
+          incompleteStrategies.push({
+            configId: config.id,
+            strategyType: 'call_spread',
+            underlying: config.underlying,
+            isSynthetic: false,
+            presentLegs: matchedVirtual,
+            missingLegs: missing,
+            linkedStock: linkedStock || null,
+          });
+        }
+        break;
+      }
       case 'naked_put': {
         for (const put of matchedVirtual.filter(d => d.option_type === 'put' && d.quantity < 0)) {
           nakedPuts.push({ option: put, underlying: linkedStock || null, contracts: Math.abs(put.quantity) });
