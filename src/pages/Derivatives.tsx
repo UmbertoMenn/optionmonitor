@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp } from 'lucide-react';
+import { TrendingUp, LogOut, Settings, ArrowLeft, Shield, Target, ChevronDown, ChevronRight, ShieldAlert, Layers, CircleDollarSign, Puzzle, Umbrella, Rocket, Calculator, HelpCircle, Menu, Sun, Moon, Info, ArrowDownUp, ArrowUp } from 'lucide-react';
 
 import { IronCondorIcon } from '@/components/ui/iron-condor-icon';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -860,7 +860,9 @@ export function Derivatives() {
                     <span className="col-span-3 text-left">Sottostante / Strategia</span>
                     <span />
                     <span className="text-center">Stato</span>
-                    <span className="text-center">ROLL-UP</span>
+                    <span className="text-center whitespace-nowrap flex items-center justify-center gap-0.5">
+                      ROLL <ArrowUp className="w-3 h-3" />
+                    </span>
                     <span className="text-right">Target</span>
                     <span />
                     <span className="text-right">Netto unit.</span>
