@@ -171,6 +171,11 @@ export const GROUPED_DISTANCE_ALERTS = [
     putType: ALERT_TYPES.DISTANCE_NAKED_PUT,
   },
   {
+    label: 'PUT da rollare al rialzo',
+    callType: ALERT_TYPES.DISTANCE_PUT_ROLL_UP, // PUT ITM gestita come una covered call: avviso quando il titolo SALE verso lo strike
+    putType: null,
+  },
+  {
     label: 'Iron Condor',
     callType: ALERT_TYPES.DISTANCE_IRON_CONDOR_CALL,
     putType: ALERT_TYPES.DISTANCE_IRON_CONDOR_PUT,
