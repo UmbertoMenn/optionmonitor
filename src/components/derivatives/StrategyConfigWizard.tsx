@@ -195,6 +195,13 @@ function detectStrategyType(positions: Position[]): string {
     return allPutExpiries.size <= 1 ? 'put_spread' : 'diagonal_put_spread';
   }
 
+  // Call Spread: 1+ Long Call & 1+ Short Call, no PUT, no stock.
+  // Stesse scadenze ⇒ call_spread; scadenze diverse ⇒ diagonal_call_spread.
+  if (soldCalls.length >= 1 && boughtCalls.length >= 1 && soldPuts.length === 0 && boughtPuts.length === 0 && !hasStock) {
+    const allCallExpiries = new Set([...soldCalls, ...boughtCalls].map(c => c.expiry_date || ''));
+    return allCallExpiries.size <= 1 ? 'call_spread' : 'diagonal_call_spread';
+  }
+
   if (soldCalls.length > 0 && (hasStock || soldPuts.some(p => Math.abs(p.strike_price || 0) > 0))) {
     if (boughtPuts.length > 0 && !hasPutSpread) return 'derisking_covered_call';
     if (hasStock) return 'covered_call';
