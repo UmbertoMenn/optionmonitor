@@ -1,20 +1,40 @@
-## Problema
-Nelle tabelle delle strategie derivati l'etichetta header "SOTTOSTANTE / STRATEGIA" appare visivamente disallineata rispetto al bordo sinistro della card perché è posizionata nella 3ª colonna della grid (dopo le colonne riservate al chevron e al badge "V"), anziché partire dall'estremità sinistra.
+## Obiettivo
+Aggiungere nella tab "Avvisi di Prezzo" del dialog "Gestisci avvisi" una sezione per **creare in blocco più avvisi di prezzo** su un ticker, distanziati di una % impostabile, a partire dal prezzo corrente o da un prezzo manuale.
 
-## Soluzione
-In `src/pages/Derivatives.tsx` modificare le 7 righe di header grid (linee 665, 725, 777, 820, 863, 998, 1040) in modo che il label "Sottostante / Strategia":
+## UX (in `AlertSettingsDialog.tsx`, sotto il form di creazione singola)
 
-1. Occupi anche le colonne iniziali vuote tramite `col-span-N` (N = numero di colonne iniziali "spaziatrici" + 1, tipicamente 3 per coveredCalls/longPuts/leapCalls, 2 per ironCondors/doubleDiagonals, 3 o 4 per le altre).
-2. Eliminare i corrispondenti `<span />` placeholder che lo precedono.
-3. Mantenere `text-left` esplicito e l'allineamento con `items-center`.
+Nuova card **"Crea avvisi massivi"** con i seguenti campi:
 
-Esempio (linee 665-668):
-```tsx
-<div className="grid grid-cols-[...]">
-  <span className="col-span-3 text-left">Sottostante / Strategia</span>
-  <span /> {/* colonna dopo (es. icona link) */}
-  ...
-```
+1. **Ticker** — input + pulsante "Valida" (riutilizza `validateTicker`, mostra prezzo corrente rilevato).
+2. **Prezzo di partenza** — radio:
+   - "Prezzo attuale" (auto-compilato dopo la validazione, sola lettura)
+   - "Prezzo manuale" (input numerico)
+3. **Step %** — input numerico (default 5, range 0,1–50, step 0,1).
+4. **Numero di avvisi** — slider 1–20 (default 10).
+5. **Direzione** — radio:
+   - Solo sopra (rialzo)
+   - Solo sotto (ribasso)
+   - Entrambe (genera N sopra + N sotto)
+6. **Cancella dopo trigger** — switch (come per singolo).
+7. **Anteprima** — lista compatta dei prezzi target calcolati (es. `+5%: 105.00`, `+10%: 110.25`, …) con badge direzione.
+8. **Pulsante "Crea N avvisi"** — disabilitato finché ticker valido e parametri OK.
 
-## Verifica
-Controllare visivamente le 7 sezioni (Covered Calls, De-Risking CC, Iron Condor, Double Diagonal, Naked Put, LEAP Call, Long Put) per assicurarsi che il label parta dal bordo sinistro come gli altri header e che le colonne successive (Stato, Target, ecc.) restino correttamente allineate sopra i rispettivi valori.
+## Calcolo prezzi
+- Base `P0` = prezzo attuale validato o prezzo manuale.
+- Per `i = 1..N`: 
+  - Sopra → `P0 * (1 + step/100)^i`
+  - Sotto → `P0 * (1 - step/100)^i`
+- Arrotondamento a 2 decimali per visualizzazione; valore numerico completo inviato al DB.
+- Se "Entrambe" → si creano `2*N` avvisi (sopra `above`, sotto `below`).
+
+## Logica creazione
+- Nessun cambio schema DB: si usa la tabella `price_alerts` esistente.
+- Nuovo hook `useBatchCreatePriceAlerts` in `src/hooks/usePriceAlerts.ts` che fa una singola `insert([...])` con array di righe (più efficiente del loop), restituisce conteggio inseriti.
+- Toast riassuntivo: "Creati N avvisi su TICKER". In caso di errori, mostra messaggio.
+- Invalida `['price-alerts']` a fine creazione.
+
+## File toccati
+- `src/hooks/usePriceAlerts.ts` — aggiunto `useBatchCreatePriceAlerts`.
+- `src/components/derivatives/AlertSettingsDialog.tsx` — nuova sub-sezione UI nella tab Avvisi di Prezzo + stato locale per i parametri massivi + handler.
+
+Nessuna modifica al backend, alle edge function o alle policy RLS (le insert massive sono coperte dalle policy esistenti `user_id = auth.uid()`).
