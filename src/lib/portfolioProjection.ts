@@ -51,6 +51,16 @@ export interface ResolvedBondOverride {
   frequency: number;
 }
 
+export interface DerivSummaryLeg {
+  description: string;
+  underlying: string;
+  type: 'call' | 'put';
+  qty: number;
+  strike: number;
+  mvT0: number;
+  hasUnderlying: boolean;
+}
+
 export interface ProjectionInputs {
   t0: Date;
   horizon: Date;
@@ -64,6 +74,8 @@ export interface ProjectionInputs {
   unparsedBonds: string[];   // bond senza scadenza deducibile → tenuti piatti
   partialBonds: string[];    // bond con scadenza ma senza cedola → pull-to-par, cedole non modellate
   derivsNoUnderlying: string[];
+  derivMVT0: number;         // somma MV derivati a t0 (con segno)
+  derivSummary: DerivSummaryLeg[]; // dettaglio gambe per UI
   patrimonyT0: number;       // 'all'
   equityT0: number;          // azionario + derivati a t0
   bondCommodityT0: number;   // bond + commodities a t0
@@ -113,6 +125,18 @@ export function buildProjectionInputs(
       qtyMult, anchorPerShare: anchor, hasUnderlying, mvT0,
     });
   }
+
+  const derivSummary: DerivSummaryLeg[] = positions
+    .filter(p => p.asset_type === 'derivative' && p.option_type)
+    .map(p => ({
+      description: p.description,
+      underlying: p.underlying || p.description || '',
+      type: p.option_type as 'call' | 'put',
+      qty: p.quantity,
+      strike: p.strike_price ?? 0,
+      mvT0: (p.snapshot_price ?? p.current_price ?? 0) * ((p.quantity * 100) / (p.exchange_rate && p.exchange_rate > 0 ? p.exchange_rate : 1)),
+      hasUnderlying: !!(underlyingPrices?.[p.underlying || p.description || '']?.price ?? 0),
+    }));
 
   const bonds: BondInput[] = [];
   const unparsedBonds: string[] = [];
@@ -171,6 +195,7 @@ export function buildProjectionInputs(
     t0, horizon,
     equityFlat, commodityFlat, cashResidual, unparsedBondFlat,
     derivs, bonds, unparsedBonds, partialBonds, derivsNoUnderlying,
+    derivMVT0, derivSummary,
     patrimonyT0, equityT0, bondCommodityT0,
   };
 }
@@ -213,14 +238,26 @@ const NO_SHOCK: ShockSet = { volMult: 1, rateBump: 0, equityMult: 1, underlyingM
 function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: ProjectionScope = 'all'): number {
   const r = DEFAULT_RATE + sh.rateBump;
 
-  // ── bucket EQUITY: azioni/ETF (shockabili) + derivati (decadimento) ──
+  // ── bucket EQUITY: azioni/ETF (shockabili) + derivati (decadimento + esercizio) ──
   let derivVal = 0;
+  let equityAdjAtExpiry = 0; // P/L da esercizio: spostato dal bucket derivati al bucket equity
   for (const d of inp.derivs) {
-    if (!d.hasUnderlying) { derivVal += d.mvT0; continue; }
+    if (!d.hasUnderlying) {
+      // Senza prezzo sottostante: decadimento lineare del MV verso 0 sulla vita residua.
+      const frac = d.T0 > 0 ? Math.max(0, (d.T0 - tp.tYears) / d.T0) : 0;
+      derivVal += d.mvT0 * frac;
+      continue;
+    }
     const Tt = Math.max(0, d.T0 - tp.tYears);
     const sMult = sh.underlyingMult[d.underlying] ?? sh.equityMult;
     const S = d.S0 * sMult;
-    if (d.ivResolved) {
+    const expired = tp.tYears >= d.T0;
+    if (expired) {
+      // Esercizio a scadenza: il P/L intrinseco si materializza nel bucket equity (azioni
+      // consegnate/acquistate al strike). Il bucket derivati si azzera.
+      const intrinsic = d.type === 'call' ? Math.max(0, S - d.K) : Math.max(0, d.K - S);
+      equityAdjAtExpiry += intrinsic * d.qtyMult;
+    } else if (d.ivResolved) {
       derivVal += bsPrice(S, d.K, Tt, r, d.iv * sh.volMult, d.type) * d.qtyMult;
     } else {
       const intrinsic = d.type === 'call' ? Math.max(0, S - d.K) : Math.max(0, d.K - S);
@@ -229,7 +266,7 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
       derivVal += px * d.qtyMult;
     }
   }
-  const equitySleeve = inp.equityFlat * sh.equityMult + derivVal;
+  const equitySleeve = inp.equityFlat * sh.equityMult + derivVal + equityAdjAtExpiry;
 
   // ── bucket BOND + COMMODITY ──
   let bondVal = 0;
