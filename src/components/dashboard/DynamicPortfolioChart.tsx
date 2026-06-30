@@ -292,6 +292,7 @@ const CHART_TITLES: Record<ViewMode, string> = {
 
 
 export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices, hasConfigurations = true, strategyConfigs = [] }: DynamicPortfolioChartProps) {
+  const { isAdmin } = useAuth();
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
 
