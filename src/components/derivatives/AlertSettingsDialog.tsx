@@ -688,6 +688,95 @@ export function AlertSettingsDialog({ open, onOpenChange, categories, underlying
       }
     }
   };
+
+  // Validate ticker for bulk creation
+  const handleValidateBulkTicker = async () => {
+    const ticker = bulkTicker.trim().toUpperCase();
+    if (!ticker) return;
+    setBulkValidatingTicker(true);
+    setBulkTickerValidation(null);
+    try {
+      const result = await validateTicker(ticker);
+      setBulkTickerValidation(result);
+      if (!result.valid) toast.error(`Ticker "${ticker}" non trovato`);
+    } catch {
+      setBulkTickerValidation({ valid: false });
+      toast.error('Errore durante la validazione del ticker');
+    } finally {
+      setBulkValidatingTicker(false);
+    }
+  };
+
+  // Compute bulk preview prices
+  const bulkBasePrice = (() => {
+    if (bulkBaseMode === 'current') return bulkTickerValidation?.price ?? 0;
+    const v = parseFloat(bulkManualPrice);
+    return isNaN(v) ? 0 : v;
+  })();
+  const bulkStepNum = (() => {
+    const v = parseFloat(bulkStepPct);
+    return isNaN(v) ? 0 : v;
+  })();
+  const bulkPreview = (() => {
+    if (bulkBasePrice <= 0 || bulkStepNum <= 0 || bulkCount <= 0) return [] as Array<{ direction: 'above' | 'below'; price: number; pct: number }>;
+    const list: Array<{ direction: 'above' | 'below'; price: number; pct: number }> = [];
+    const factorUp = 1 + bulkStepNum / 100;
+    const factorDown = 1 - bulkStepNum / 100;
+    if (bulkDirection === 'above' || bulkDirection === 'both') {
+      for (let i = 1; i <= bulkCount; i++) {
+        list.push({ direction: 'above', price: bulkBasePrice * Math.pow(factorUp, i), pct: bulkStepNum * i });
+      }
+    }
+    if (bulkDirection === 'below' || bulkDirection === 'both') {
+      for (let i = 1; i <= bulkCount; i++) {
+        const p = bulkBasePrice * Math.pow(factorDown, i);
+        if (p > 0) list.push({ direction: 'below', price: p, pct: -bulkStepNum * i });
+      }
+    }
+    return list;
+  })();
+
+  const handleCreateBulkPriceAlerts = async () => {
+    const ticker = bulkTicker.trim().toUpperCase();
+    if (!ticker) {
+      toast.error('Inserisci un ticker valido');
+      return;
+    }
+    if (bulkBasePrice <= 0) {
+      toast.error('Imposta un prezzo di partenza valido');
+      return;
+    }
+    if (bulkStepNum <= 0 || bulkStepNum > 50) {
+      toast.error('Step % deve essere tra 0 e 50');
+      return;
+    }
+    if (bulkPreview.length === 0) {
+      toast.error('Nessun avviso da creare');
+      return;
+    }
+    try {
+      await batchCreatePriceAlertsMutation.mutateAsync(
+        bulkPreview.map(p => ({
+          ticker,
+          direction: p.direction,
+          target_price: Math.round(p.price * 100) / 100,
+          cooldown_minutes: cooldownMinutes,
+          delete_after_trigger: bulkDeleteAfterTrigger,
+        }))
+      );
+      toast.success(`Creati ${bulkPreview.length} avvisi su ${ticker}`);
+      setBulkTicker('');
+      setBulkManualPrice('');
+      setBulkTickerValidation(null);
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        toast.error('Alcuni avvisi esistono già: rimuovi i duplicati e riprova');
+      } else {
+        toast.error('Errore nella creazione degli avvisi');
+      }
+    }
+  };
+
   
   // Handle delete price alert
   const handleDeletePriceAlert = async (id: string) => {
