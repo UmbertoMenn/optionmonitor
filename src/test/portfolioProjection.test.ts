@@ -104,3 +104,45 @@ describe('portfolioProjection', () => {
     expect(det[det.length - 1].pnlPct).toBeGreaterThan(0);
   });
 });
+
+import { parseBondPartial } from '@/lib/bondMath';
+
+describe('bondMath.parseBondPartial (formati BTP reali)', () => {
+  it('BTP TF 2,45% ST33 EUR → cedola 2.45, settembre 2033, semestrale', () => {
+    const b = parseBondPartial('BTP TF 2,45% ST33 EUR');
+    expect(b.couponRatePct).toBeCloseTo(2.45);
+    expect(b.maturity?.getUTCFullYear()).toBe(2033);
+    expect(b.maturity?.getUTCMonth()).toBe(8); // settembre
+    expect(b.frequency).toBe(2);
+  });
+  it('BTP ITA 28062030 (data concatenata) → scadenza ok, cedola non deducibile', () => {
+    const b = parseBondPartial('BTP ITA 28062030 INFL CUM ASS');
+    expect(b.couponRatePct).toBeNull();
+    expect(b.maturity?.getUTCFullYear()).toBe(2030);
+    expect(b.maturity?.getUTCMonth()).toBe(5); // giugno
+  });
+  it('BTP VALORE 05/03/2030 ST UP CUM → scadenza ok, cedola step-up non deducibile', () => {
+    const b = parseBondPartial('BTP VALORE 05/03/2030 ST UP CUM');
+    expect(b.couponRatePct).toBeNull();
+    expect(b.maturity?.getUTCFullYear()).toBe(2030);
+    expect(b.maturity?.getUTCMonth()).toBe(2); // marzo
+  });
+});
+
+describe('portfolioProjection: regressione bond non proiettabili', () => {
+  it('un bond senza scadenza deducibile resta nel patrimonio (non sparisce)', () => {
+    const positions = [
+      pos({ asset_type: 'stock', market_value: 1_000_000, snapshot_market_value: 1_000_000 }),
+      // niente scadenza/cedola deducibili → deve restare piatto, NON essere sottratto
+      pos({ asset_type: 'bond', isin: 'IT000NODATA', description: 'OBBLIGAZIONE STRANA SENZA DATI',
+        snapshot_price: 99, current_price: 99, snapshot_market_value: 3_000_000, market_value: 3_000_000 }),
+    ];
+    const baseValue = 4_000_000; // stock 1M + bond 3M
+    const inp = buildProjectionInputs(positions, baseValue);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    expect(inp.unparsedBonds.length).toBe(1);
+    // il patrimonio a t0 deve essere ~4M, non 1M
+    expect(det[0].patrimony).toBeCloseTo(4_000_000, -2);
+  });
+});

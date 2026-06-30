@@ -1,7 +1,7 @@
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { bsPrice, impliedVolatility } from '@/lib/blackScholes';
-import { parseBondInfo, bondYTM, bondCleanPrice, BondInfo } from '@/lib/bondMath';
+import { parseBondPartial, bondYTM, bondCleanPrice, BondInfo } from '@/lib/bondMath';
 
 const MS_YEAR = 365.25 * 24 * 3600 * 1000;
 const DEFAULT_RATE = 0.04;        // risk-free di base per il pricing opzioni
@@ -35,17 +35,26 @@ interface BondInput {
   currentClean: number;  // prezzo % corrente
   ytm: number;
   mvT0: number;          // market value EUR a t0
-  couponCashPerPeriod: number; // EUR per cedola
+  couponCashPerPeriod: number; // EUR per cedola (0 se cedola non modellata)
+  couponsModeled: boolean;
+}
+
+/** Override risolto per ISIN, chiave `${portfolio_id}::${isin}`. */
+export interface ResolvedBondOverride {
+  couponRatePct: number | null;
+  maturityMs: number | null;
+  frequency: number;
 }
 
 export interface ProjectionInputs {
   t0: Date;
   horizon: Date;
-  flatNonBondEquity: number; // commodity + cash + altro non azionario, costante (EUR)
+  flatNonBondEquity: number; // commodity + cash + bond non proiettabili, costante (EUR)
   equityFlat: number;        // azioni + ETF aggregati (EUR) — shockabili nel MC titoli
   derivs: DerivInput[];
   bonds: BondInput[];
-  unparsedBonds: string[];
+  unparsedBonds: string[];   // bond senza scadenza deducibile → tenuti piatti
+  partialBonds: string[];    // bond con scadenza ma senza cedola → pull-to-par, cedole non modellate
   derivsNoUnderlying: string[];
   patrimonyT0: number;
 }
@@ -54,6 +63,7 @@ export function buildProjectionInputs(
   positions: Position[],
   baseValue: number,
   underlyingPrices?: Record<string, UnderlyingPrice>,
+  bondOverrides?: Record<string, ResolvedBondOverride>,
 ): ProjectionInputs {
   const t0 = new Date();
   const fxOf = (p: Position) => (p.exchange_rate && p.exchange_rate > 0 ? p.exchange_rate : 1);
@@ -96,36 +106,42 @@ export function buildProjectionInputs(
 
   const bonds: BondInput[] = [];
   const unparsedBonds: string[] = [];
-  let bondMVTotal = 0;
+  const partialBonds: string[] = [];
+  let parsedBondMV = 0;   // SOLO i bond effettivamente proiettati (da sottrarre dal flat)
   let equityFlat = 0;
-  let otherFlat = 0; // commodity + cash residuo
 
   for (const p of positions) {
     const mvEUR = p.snapshot_market_value ?? p.market_value ?? 0;
     if (p.asset_type === 'bond') {
-      bondMVTotal += mvEUR;
-      const info = parseBondInfo(p.description);
+      const ov = p.isin ? bondOverrides?.[`${p.portfolio_id}::${p.isin}`] : undefined;
+      const partial = parseBondPartial(p.description);
+      const maturity = ov?.maturityMs != null ? new Date(ov.maturityMs) : partial.maturity;
+      const couponRatePct = ov ? ov.couponRatePct : partial.couponRatePct; // override vince (anche se null)
+      const frequency = ov?.frequency ?? partial.frequency;
       const currentClean = p.snapshot_price ?? p.current_price ?? 0;
-      if (info && currentClean > 0 && mvEUR !== 0) {
-        if (info.maturity.getTime() > maxExpiry) maxExpiry = info.maturity.getTime();
+
+      if (maturity && isFinite(maturity.getTime()) && currentClean > 0 && mvEUR !== 0) {
+        parsedBondMV += mvEUR;
+        if (maturity.getTime() > maxExpiry) maxExpiry = maturity.getTime();
+        const info: BondInfo = { couponRatePct: couponRatePct ?? 0, maturity, frequency, parsedFrom: ov ? 'override' : 'auto' };
         const ytm = bondYTM(info, currentClean, t0);
-        // cedola in cassa per periodo = mv * coupon% / (prezzo * freq)
-        const couponCashPerPeriod = (mvEUR * info.couponRatePct) / (currentClean * info.frequency);
-        bonds.push({ description: p.description, info, currentClean, ytm, mvT0: mvEUR, couponCashPerPeriod });
+        const couponsModeled = couponRatePct != null && couponRatePct > 0;
+        const couponCashPerPeriod = couponsModeled ? (mvEUR * (couponRatePct as number)) / (currentClean * frequency) : 0;
+        bonds.push({ description: p.description, info, currentClean, ytm, mvT0: mvEUR, couponCashPerPeriod, couponsModeled });
+        if (!couponsModeled) partialBonds.push(p.description);
       } else {
+        // scadenza non deducibile → resta nel bucket flat (NON sottratto): tenuto al valore corrente
         unparsedBonds.push(p.description);
       }
     } else if (p.asset_type === 'stock' || p.asset_type === 'etf') {
       equityFlat += mvEUR;
-    } else if (p.asset_type !== 'derivative') {
-      otherFlat += mvEUR;
     }
   }
 
-  // baseValue (summary.totalValue) = non-derivati a MV + cash. Togliamo i bond (proiettati a parte);
-  // la quota azionaria la separiamo per poterla shockare nel MC titoli. Il resto (cash, commodity,
-  // e l'eventuale gap di arrotondamento) resta costante.
-  const flatNonBondEquity = baseValue - bondMVTotal - equityFlat;
+  // baseValue (summary.totalValue) = non-derivati a MV + cash. Sottraiamo SOLO i bond proiettati
+  // (riaggiunti tramite bonds[]) e l'azionario (shockabile). Tutto il resto — cash, commodity e i
+  // bond non proiettabili — resta costante nel bucket flat, così il patrimonio a t0 coincide col reale.
+  const flatNonBondEquity = baseValue - parsedBondMV - equityFlat;
 
   // Orizzonte: max scadenza tra bond e derivati; se assente, +1 anno di default.
   const horizon = maxExpiry > 0 ? new Date(maxExpiry) : new Date(t0.getTime() + MS_YEAR);
@@ -136,7 +152,7 @@ export function buildProjectionInputs(
 
   return {
     t0, horizon, flatNonBondEquity, equityFlat, derivs, bonds,
-    unparsedBonds, derivsNoUnderlying, patrimonyT0,
+    unparsedBonds, partialBonds, derivsNoUnderlying, patrimonyT0,
   };
 }
 

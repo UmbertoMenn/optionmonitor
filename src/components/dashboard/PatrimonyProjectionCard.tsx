@@ -6,14 +6,20 @@ import {
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Info } from 'lucide-react';
+import { Info, ChevronDown, Wrench } from 'lucide-react';
 import {
   buildProjectionInputs, buildTimeGrid, projectDeterministic, projectMonteCarlo,
-  DEFAULT_MC,
+  DEFAULT_MC, ResolvedBondOverride,
 } from '@/lib/portfolioProjection';
+import { parseBondPartial } from '@/lib/bondMath';
+import { useBondOverrides, BondOverride } from '@/hooks/useBondOverrides';
 
 interface Props {
   positions: Position[];
@@ -21,37 +27,119 @@ interface Props {
   underlyingPrices?: Record<string, UnderlyingPrice>;
 }
 
-const fmtEURc = (n: number) =>
-  '€' + n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
+const MS_YEAR = 365.25 * 24 * 3600 * 1000;
+const fmtEURc = (n: number) => '€' + n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
 const fmtEURcompact = (n: number) => {
   const a = Math.abs(n);
   if (a >= 1_000_000) return '€' + (n / 1_000_000).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + 'M';
   if (a >= 1_000) return '€' + (n / 1_000).toLocaleString('it-IT', { maximumFractionDigits: 0 }) + 'k';
   return '€' + n.toFixed(0);
 };
+const toISO = (d: Date) => d.toISOString().slice(0, 10);
+
+// ── Riga editor per risolvere un bond ──────────────────────────
+function BondFixRow({ position, override, onSave, saving }: {
+  position: Position;
+  override?: BondOverride;
+  onSave: (inp: { portfolioId: string; isin: string; couponRatePct: number | null; maturityDate: string | null; frequency: number }) => void;
+  saving: boolean;
+}) {
+  const partial = parseBondPartial(position.description);
+  const [coupon, setCoupon] = useState(
+    override?.coupon_rate_pct != null ? String(override.coupon_rate_pct)
+      : partial.couponRatePct != null ? String(partial.couponRatePct) : '',
+  );
+  const [maturity, setMaturity] = useState(
+    override?.maturity_date ?? (partial.maturity ? toISO(partial.maturity) : ''),
+  );
+  const [freq, setFreq] = useState(String(override?.frequency ?? partial.frequency));
+
+  const canSave = !!position.isin && maturity !== '';
+
+  return (
+    <div className="flex flex-wrap items-end gap-2 py-2 border-b border-border/40 last:border-0">
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-medium text-foreground truncate" title={position.description}>{position.description}</div>
+        <div className="text-[10px] text-muted-foreground font-mono">{position.isin ?? 'ISIN assente — non salvabile'}</div>
+      </div>
+      <div className="flex flex-col">
+        <label className="text-[10px] text-muted-foreground">Cedola %</label>
+        <Input value={coupon} onChange={e => setCoupon(e.target.value)} placeholder="es. 2,45" className="h-7 w-20 text-xs" inputMode="decimal" />
+      </div>
+      <div className="flex flex-col">
+        <label className="text-[10px] text-muted-foreground">Scadenza</label>
+        <Input type="date" value={maturity} onChange={e => setMaturity(e.target.value)} className="h-7 w-36 text-xs" />
+      </div>
+      <div className="flex flex-col">
+        <label className="text-[10px] text-muted-foreground">Cedole/anno</label>
+        <Select value={freq} onValueChange={setFreq}>
+          <SelectTrigger className="h-7 w-16 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1">1</SelectItem>
+            <SelectItem value="2">2</SelectItem>
+            <SelectItem value="4">4</SelectItem>
+            <SelectItem value="12">12</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <Button
+        size="sm" variant="outline" className="h-7"
+        disabled={!canSave || saving}
+        onClick={() => onSave({
+          portfolioId: position.portfolio_id,
+          isin: position.isin as string,
+          couponRatePct: coupon.trim() === '' ? null : parseFloat(coupon.replace(',', '.')),
+          maturityDate: maturity || null,
+          frequency: parseInt(freq, 10) || 1,
+        })}
+      >
+        Salva
+      </Button>
+    </div>
+  );
+}
 
 export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices }: Props) {
   const [mcVolRates, setMcVolRates] = useState(false);
   const [mcUnderlying, setMcUnderlying] = useState(false);
+  const [rangeYears, setRangeYears] = useState<number | null>(null); // null = Max
+  const [fixOpen, setFixOpen] = useState(false);
+
+  const { overrides, getOverride, setOverride, isSaving } = useBondOverrides();
+
+  const bondOverrideMap = useMemo(() => {
+    const m: Record<string, ResolvedBondOverride> = {};
+    for (const o of overrides) {
+      m[`${o.portfolio_id}::${o.isin}`] = {
+        couponRatePct: o.coupon_rate_pct,
+        maturityMs: o.maturity_date ? Date.parse(o.maturity_date) : null,
+        frequency: o.frequency,
+      };
+    }
+    return m;
+  }, [overrides]);
 
   const inputs = useMemo(
-    () => buildProjectionInputs(positions, baseValue, underlyingPrices),
-    [positions, baseValue, underlyingPrices],
+    () => buildProjectionInputs(positions, baseValue, underlyingPrices, bondOverrideMap),
+    [positions, baseValue, underlyingPrices, bondOverrideMap],
   );
-  const grid = useMemo(() => buildTimeGrid(inputs.t0, inputs.horizon, 60), [inputs]);
+
+  const maxYears = Math.max(0.25, (inputs.horizon.getTime() - inputs.t0.getTime()) / MS_YEAR);
+  const effectiveHorizon = useMemo(() => {
+    if (rangeYears == null) return inputs.horizon;
+    const capped = new Date(inputs.t0.getTime() + rangeYears * MS_YEAR);
+    return capped.getTime() < inputs.horizon.getTime() ? capped : inputs.horizon;
+  }, [rangeYears, inputs]);
+
+  const grid = useMemo(() => buildTimeGrid(inputs.t0, effectiveHorizon, 60), [inputs, effectiveHorizon]);
   const deterministic = useMemo(() => projectDeterministic(inputs, grid), [inputs, grid]);
 
   const mcOn = mcVolRates || mcUnderlying;
   const mc = useMemo(() => {
     if (!mcOn) return null;
-    return projectMonteCarlo(inputs, grid, {
-      ...DEFAULT_MC,
-      enableVolRates: mcVolRates,
-      enableUnderlying: mcUnderlying,
-    });
+    return projectMonteCarlo(inputs, grid, { ...DEFAULT_MC, enableVolRates: mcVolRates, enableUnderlying: mcUnderlying });
   }, [mcOn, mcVolRates, mcUnderlying, inputs, grid]);
 
-  // dataset unico per il grafico
   const data = useMemo(() => deterministic.map((d, i) => {
     const m = mc?.[i];
     return {
@@ -64,6 +152,21 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
 
   const last = deterministic[deterministic.length - 1];
   const horizonLabel = grid[grid.length - 1]?.label ?? '';
+
+  // bond da risolvere (non completamente modellati): no scadenza, oppure scadenza ma niente cedola
+  const bondsToFix = useMemo(() => positions.filter(p => {
+    if (p.asset_type !== 'bond') return false;
+    const ov = getOverride(p.portfolio_id, p.isin);
+    if (ov) return ov.coupon_rate_pct == null || ov.maturity_date == null;
+    const partial = parseBondPartial(p.description);
+    return !(partial.maturity && partial.couponRatePct != null && partial.couponRatePct > 0);
+  }), [positions, getOverride]);
+
+  const presets: { label: string; years: number | null }[] = [
+    { label: '1A', years: 1 }, { label: '2A', years: 2 }, { label: '3A', years: 3 },
+    { label: '5A', years: 5 }, { label: '10A', years: 10 },
+  ].filter(p => p.years! <= maxYears + 0.5);
+  presets.push({ label: 'Max', years: null });
 
   return (
     <div className="flex flex-col gap-2">
@@ -90,30 +193,31 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
         </div>
       </div>
 
+      {/* Selettore arco temporale asse X */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <span className="text-[11px] text-muted-foreground mr-1">Orizzonte:</span>
+        {presets.map(p => (
+          <button
+            key={p.label}
+            onClick={() => setRangeYears(p.years)}
+            className={`px-2 py-0.5 rounded text-[11px] border transition-colors ${
+              rangeYears === p.years
+                ? 'border-primary bg-primary/15 text-primary'
+                : 'border-border text-muted-foreground hover:bg-muted'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
       <div className="w-full h-[230px]">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-            <XAxis
-              dataKey="label"
-              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
-              interval="preserveStartEnd"
-              minTickGap={24}
-            />
-            <YAxis
-              yAxisId="eur"
-              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
-              tickFormatter={fmtEURcompact}
-              width={56}
-              domain={['auto', 'auto']}
-            />
-            <YAxis
-              yAxisId="pct"
-              orientation="right"
-              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }}
-              tickFormatter={(v) => `${v}%`}
-              width={40}
-            />
+            <XAxis dataKey="label" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} interval="preserveStartEnd" minTickGap={24} />
+            <YAxis yAxisId="eur" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} tickFormatter={fmtEURcompact} width={56} domain={['auto', 'auto']} />
+            <YAxis yAxisId="pct" orientation="right" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} tickFormatter={(v) => `${v}%`} width={40} />
             <RechartsTooltip
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null;
@@ -135,82 +239,72 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
               }}
             />
             {mcOn && (
-              <Area
-                yAxisId="eur"
-                dataKey="range"
-                stroke="none"
-                fill="hsl(217, 91%, 60%)"
-                fillOpacity={0.12}
-                isAnimationActive={false}
-                connectNulls
-              />
+              <Area yAxisId="eur" dataKey="range" stroke="none" fill="hsl(217, 91%, 60%)" fillOpacity={0.12} isAnimationActive={false} connectNulls />
             )}
-            <Line
-              yAxisId="eur"
-              type="monotone"
-              dataKey="patrimony"
-              stroke="hsl(217, 91%, 60%)"
-              strokeWidth={2}
-              dot={false}
-              isAnimationActive={false}
-              name="Patrimonio"
-            />
+            <Line yAxisId="eur" type="monotone" dataKey="patrimony" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={false} isAnimationActive={false} name="Patrimonio" />
             {mcOn && (
-              <Line
-                yAxisId="eur"
-                type="monotone"
-                dataKey="p50"
-                stroke="hsl(217, 91%, 60%)"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-                dot={false}
-                isAnimationActive={false}
-                name="MC mediana"
-              />
+              <Line yAxisId="eur" type="monotone" dataKey="p50" stroke="hsl(217, 91%, 60%)" strokeWidth={1} strokeDasharray="4 3" dot={false} isAnimationActive={false} name="MC mediana" />
             )}
-            <Line
-              yAxisId="pct"
-              type="monotone"
-              dataKey="pnlPct"
-              stroke="hsl(142, 71%, 45%)"
-              strokeWidth={1.5}
-              dot={false}
-              isAnimationActive={false}
-              name="P/L %"
-            />
+            <Line yAxisId="pct" type="monotone" dataKey="pnlPct" stroke="hsl(142, 71%, 45%)" strokeWidth={1.5} dot={false} isAnimationActive={false} name="P/L %" />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
         <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-blue-500 inline-block" /> patrimonio (€)</span>
         <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 inline-block" style={{ background: 'hsl(142, 71%, 45%)' }} /> P/L %</span>
-        {(inputs.unparsedBonds.length > 0 || inputs.derivsNoUnderlying.length > 0) && (
+        {inputs.partialBonds.length > 0 && (
           <TooltipProvider delayDuration={150}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1 text-amber-500 cursor-help ml-auto">
-                  <Info className="w-3 h-3" /> {inputs.unparsedBonds.length + inputs.derivsNoUnderlying.length} pos. tenute piatte
+                <span className="inline-flex items-center gap-1 text-amber-500 cursor-help">
+                  <Info className="w-3 h-3" /> {inputs.partialBonds.length} bond senza cedola
                 </span>
               </TooltipTrigger>
               <TooltipContent className="max-w-[280px] text-xs">
-                {inputs.unparsedBonds.length > 0 && (
-                  <div className="mb-1">
-                    <div className="font-semibold">Bond senza cedola/scadenza deducibili (tenuti al valore corrente, niente cedole):</div>
-                    <ul className="list-disc pl-4">{inputs.unparsedBonds.slice(0, 6).map((b, i) => <li key={i}>{b}</li>)}</ul>
-                  </div>
-                )}
-                {inputs.derivsNoUnderlying.length > 0 && (
-                  <div>
-                    <div className="font-semibold">Derivati senza prezzo sottostante (nessun decadimento):</div>
-                    <ul className="list-disc pl-4">{inputs.derivsNoUnderlying.slice(0, 6).map((b, i) => <li key={i}>{b}</li>)}</ul>
-                  </div>
-                )}
+                <div className="font-semibold mb-1">Pull-to-par applicato, ma cedole NON modellate (cedola non deducibile):</div>
+                <ul className="list-disc pl-4">{inputs.partialBonds.slice(0, 8).map((b, i) => <li key={i}>{b}</li>)}</ul>
+                <div className="mt-1">Risolvili qui sotto inserendo la cedola.</div>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         )}
+        {inputs.unparsedBonds.length > 0 && (
+          <span className="inline-flex items-center gap-1 text-amber-500">
+            <Info className="w-3 h-3" /> {inputs.unparsedBonds.length} bond piatti (no scadenza)
+          </span>
+        )}
       </div>
+
+      {/* Editor manuale bond */}
+      {bondsToFix.length > 0 && (
+        <Collapsible open={fixOpen} onOpenChange={setFixOpen}>
+          <CollapsibleTrigger asChild>
+            <button className="flex items-center gap-2 text-xs text-amber-500 hover:text-amber-400 mt-1">
+              <Wrench className="w-3.5 h-3.5" />
+              Risolvi bond ({bondsToFix.length})
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${fixOpen ? 'rotate-180' : ''}`} />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="mt-1 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+              <p className="text-[11px] text-muted-foreground mb-2">
+                Inserisci cedola annua (%), scadenza e numero cedole/anno. I valori vengono salvati per ISIN
+                e sopravvivono al re-import dello snapshot. Lascia la cedola vuota se il bond non paga cedole.
+              </p>
+              {bondsToFix.map(p => (
+                <BondFixRow
+                  key={p.id}
+                  position={p}
+                  override={getOverride(p.portfolio_id, p.isin)}
+                  onSave={setOverride}
+                  saving={isSaving}
+                />
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       <p className="text-[11px] text-muted-foreground leading-snug">
         Per ogni mese da oggi fino alla scadenza massima tra bond e derivati: i derivati sono
