@@ -228,6 +228,16 @@ function computeUncoveredCalls(
     balance.get(key)!.owned += stock.quantity;
   }
 
+  // Build set di id di long calls usate come synthetic underlying (vanno escluse
+  // dal decremento, perché contate separatamente via syntheticCovered).
+  const syntheticCallIds = new Set<string>();
+  for (const cc of categories.coveredCalls) {
+    if (cc.isSynthetic && cc.syntheticCall) syntheticCallIds.add(cc.syntheticCall.id);
+  }
+  for (const dr of categories.deRiskingCoveredCalls) {
+    if (dr.isSynthetic && dr.syntheticCall) syntheticCallIds.add(dr.syntheticCall.id);
+  }
+
   // Count ALL sold and bought calls from raw derivative positions
   const derivatives = allPositions.filter(p => p.asset_type === 'derivative' && p.option_type === 'call');
   for (const d of derivatives) {
@@ -236,8 +246,8 @@ function computeUncoveredCalls(
     ensure(key);
     if (d.quantity < 0) {
       balance.get(key)!.netSoldCalls += Math.abs(d.quantity);
-    } else {
-      balance.get(key)!.netSoldCalls -= d.quantity; // bought calls offset
+    } else if (!syntheticCallIds.has(d.id)) {
+      balance.get(key)!.netSoldCalls -= d.quantity; // bought calls offset (skip synthetic)
     }
   }
 
