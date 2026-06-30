@@ -198,7 +198,8 @@ export function computeMonitoring(
     nakedPutsITM: computeNakedPutsITM(categories, underlyingPrices),
     leapCallsInGain: computeLeapGain(categories, underlyingPrices),
     otherStrategiesOOROOB: computeOtherOOROOB(categories, underlyingPrices),
-    availableCallsToSell: computeAvailableCalls(allPositions, stockPositions, underlyingPrices, configs, archivedKeys),
+    incompleteMultiLegStrategies: computeIncompleteMultiLeg(categories, underlyingPrices),
+    availableCallsToSell: computeAvailableCalls(allPositions, stockPositions, underlyingPrices, configs, archivedKeys, categories),
   };
 }
 
