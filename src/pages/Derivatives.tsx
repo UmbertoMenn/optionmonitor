@@ -860,7 +860,9 @@ export function Derivatives() {
                     <span className="col-span-3 text-left">Sottostante / Strategia</span>
                     <span />
                     <span className="text-center">Stato</span>
-                    <span className="text-center">ROLL-UP</span>
+                    <span className="text-center whitespace-nowrap flex items-center justify-center gap-0.5">
+                      ROLL <ArrowUp className="w-3 h-3" />
+                    </span>
                     <span className="text-right">Target</span>
                     <span />
                     <span className="text-right">Netto unit.</span>
