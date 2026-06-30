@@ -504,6 +504,7 @@ function computeAvailableCalls(
   underlyingPrices: Record<string, UnderlyingPrice>,
   configs: StrategyConfiguration[],
   archivedKeys?: string[],
+  categories?: DerivativeCategories,
 ): MonitoringAvailableCalls[] {
   // Build archived set using resolveKey for proper ticker matching
   const archivedResolved = new Set<string>();
@@ -532,11 +533,11 @@ function computeAvailableCalls(
     return out;
   };
 
-  const balance = new Map<string, { owned: number; soldCalls: number; displayTicker: string; stockKeys: string[] }>();
+  const balance = new Map<string, { owned: number; soldCalls: number; syntheticCovered: number; displayTicker: string; stockKeys: string[] }>();
 
   const ensure = (key: string, displayTicker?: string, stockKeys?: string[]) => {
     if (!balance.has(key)) {
-      balance.set(key, { owned: 0, soldCalls: 0, displayTicker: displayTicker || key, stockKeys: stockKeys || [] });
+      balance.set(key, { owned: 0, soldCalls: 0, syntheticCovered: 0, displayTicker: displayTicker || key, stockKeys: stockKeys || [] });
     } else if (stockKeys && stockKeys.length) {
       const cur = balance.get(key)!;
       cur.stockKeys = Array.from(new Set([...cur.stockKeys, ...stockKeys]));
@@ -561,6 +562,39 @@ function computeAvailableCalls(
     balance.get(key)!.soldCalls += Math.abs(d.quantity);
   }
 
+  // Aggiunge le componenti sintetiche di CC e DR-CC come "share equivalent":
+  // - Long Call ITM (syntheticCall) ⇒ +|quantity| contratti coperti
+  // - Short Put ITM (syntheticPut)  ⇒ +|quantity| contratti coperti
+  if (categories) {
+    const addSynth = (underlyingText: string, qty: number) => {
+      const key = resolveKey(underlyingText, underlyingPrices);
+      ensure(key);
+      balance.get(key)!.syntheticCovered += qty;
+    };
+    for (const cc of categories.coveredCalls) {
+      if (!cc.isSynthetic) continue;
+      const underlyingText = cc.option.underlying || cc.option.description || '';
+      if (cc.syntheticCall) addSynth(underlyingText, Math.abs(cc.syntheticCall.quantity));
+      if (cc.syntheticPut) addSynth(underlyingText, Math.abs(cc.syntheticPut.quantity));
+    }
+    for (const dr of categories.deRiskingCoveredCalls) {
+      if (!dr.isSynthetic) continue;
+      const underlyingText = dr.coveredCall.option.underlying || dr.coveredCall.option.description || '';
+      if (dr.syntheticCall) addSynth(underlyingText, Math.abs(dr.syntheticCall.quantity));
+      if (dr.syntheticPut) addSynth(underlyingText, Math.abs(dr.syntheticPut.quantity));
+    }
+    // Incomplete synthetic CC/DR-CC (Short Call mancante): la long call / short put
+    // sintetica c'è già ed è una "share equivalent" — va contata.
+    for (const inc of categories.incompleteStrategies) {
+      if (!inc.isSynthetic) continue;
+      if (inc.strategyType !== 'covered_call' && inc.strategyType !== 'derisking_covered_call') continue;
+      const longCall = inc.presentLegs.find(p => p.option_type === 'call' && p.quantity > 0);
+      const shortPut = inc.presentLegs.find(p => p.option_type === 'put' && p.quantity < 0);
+      if (longCall) addSynth(inc.underlying, Math.abs(longCall.quantity));
+      else if (shortPut) addSynth(inc.underlying, Math.abs(shortPut.quantity));
+    }
+  }
+
   const result: MonitoringAvailableCalls[] = [];
   for (const [key, data] of balance) {
     // Skip archived underlyings
@@ -573,7 +607,7 @@ function computeAvailableCalls(
         data.stockKeys.some(sk => archivedRaw.has(sk))
       ) continue;
     }
-    const potential = Math.floor(data.owned / 100);
+    const potential = Math.floor(data.owned / 100) + data.syntheticCovered;
     const available = potential - data.soldCalls;
     if (available >= 1) {
       result.push({ ticker: data.displayTicker, availableShares: available * 100 });
@@ -582,6 +616,30 @@ function computeAvailableCalls(
 
 
   return result.sort((a, b) => b.availableShares - a.availableShares);
+}
+
+/**
+ * 9. Strategie multi-gamba incomplete (config-only).
+ */
+function computeIncompleteMultiLeg(
+  categories: DerivativeCategories,
+  underlyingPrices: Record<string, UnderlyingPrice>,
+): MonitoringIncompleteStrategy[] {
+  const STRATEGY_LABELS: Record<string, string> = {
+    covered_call: 'Covered Call',
+    derisking_covered_call: 'De-Risking CC',
+    iron_condor: 'Iron Condor',
+    double_diagonal: 'Double Diagonal',
+  };
+  const result: MonitoringIncompleteStrategy[] = [];
+  for (const inc of categories.incompleteStrategies || []) {
+    result.push({
+      ticker: getDisplayTicker(inc.underlying, underlyingPrices),
+      strategyName: STRATEGY_LABELS[inc.strategyType] || inc.strategyType,
+      missingLegs: inc.missingLegs,
+    });
+  }
+  return result.sort((a, b) => a.ticker.localeCompare(b.ticker));
 }
 
 // ============ Snapshot builder (for monitoring_snapshot table) ============
