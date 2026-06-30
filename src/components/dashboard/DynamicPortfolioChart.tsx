@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
+import { PatrimonyProjectionCard } from '@/components/dashboard/PatrimonyProjectionCard';
 
 interface DynamicPortfolioChartProps {
   summary: PortfolioSummary | null;
@@ -288,11 +289,6 @@ const CHART_TITLES: Record<ViewMode, string> = {
   netting_ex_cc_np: 'Valore Portafoglio (Netting ex. Covered Call e Naked Put OTM)',
 };
 
-const nettingSlides = [
-  { id: 'bars', title: 'Confronto Valori' },
-  { id: 'pie', title: 'Breakdown Netting' },
-];
-
 
 export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices, hasConfigurations = true, strategyConfigs = [] }: DynamicPortfolioChartProps) {
   const [api, setApi] = useState<CarouselApi>();
@@ -353,7 +349,17 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
       <div className="flex flex-col">
         <Carousel setApi={setApi} opts={{ loop: true }} className="w-full">
           <CarouselContent>
-            {/* Slide 1: Simple bars */}
+            {/* Slide 0 (solo Netting Totale): proiezione patrimonio alle scadenze */}
+            {viewMode === 'netting_total' && (
+              <CarouselItem>
+                <PatrimonyProjectionCard
+                  positions={positions}
+                  baseValue={baseValue}
+                  underlyingPrices={underlyingPrices}
+                />
+              </CarouselItem>
+            )}
+            {/* Slide: Simple bars */}
             <CarouselItem>
               <SimpleBarsChart baseValue={baseValue} finalValue={finalValue} />
               <div className="mt-1 text-center">
@@ -367,7 +373,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
                 )}
               </div>
             </CarouselItem>
-            {/* Slide 2: Breakdown chart */}
+            {/* Slide: Breakdown chart */}
             <CarouselItem>
               <NettingBreakdownChart items={breakdownItems} hasConfigurations={hasDer ? hasConfigurations : true} />
             </CarouselItem>
@@ -375,7 +381,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
           <div className="flex items-center justify-center gap-4 mt-2">
             <CarouselPrevious className="static translate-y-0" />
             <div className="flex gap-2">
-              {nettingSlides.map((_, index) => (
+              {Array.from({ length: viewMode === 'netting_total' ? 3 : 2 }).map((_, index) => (
                 <button
                   key={index}
                   onClick={() => scrollTo(index)}
