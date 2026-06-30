@@ -65,7 +65,8 @@ import {
 } from '@/lib/optionCalculator';
 import { DerivativePosition, OptionType } from '@/types/portfolio';
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
-import { PutRollTargetInput } from '@/components/derivatives/PutRollTargetInput';
+import { RollTargetInput } from '@/components/derivatives/RollTargetInput';
+import { nakedPutKeyForPosition, coveredCallKeyForPosition, deRiskingCoveredCallKeyForPosition } from '@/lib/strategyKeys';
 import { CallPremiumCalculatorDialog, StrategyLeg } from '@/components/derivatives/CallPremiumCalculatorDialog';
 import { isLegOpenInOrders, ParsedOrder } from '@/lib/orderFileParser';
 import { OptionStratButton } from '@/components/derivatives/OptionStratButton';
@@ -661,11 +662,12 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
-                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[900px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[980px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
                     <span /><span />
                     <span>Sottostante / Strategia</span>
                     <span /><span />
                     <span className="text-center">Stato</span>
+                    <span className="text-right">Target</span>
                     <span />
                     <span className="text-right">Netto unit.</span>
                     <span className="text-right">Contratti</span>
@@ -720,11 +722,12 @@ export function Derivatives() {
             <CollapsibleContent>
               <CardContent className="pt-0">
                 <div className="space-y-1 overflow-x-auto">
-                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[900px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                  <div className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center px-3 pb-1 border border-transparent min-w-[980px] text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
                     <span /><span />
                     <span>Sottostante / Strategia</span>
                     <span /><span />
                     <span className="text-center">Stato</span>
+                    <span className="text-right">Target</span>
                     <span />
                     <span className="text-right">Netto unit.</span>
                     <span className="text-right">Contratti</span>
@@ -1174,7 +1177,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[980px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -1251,6 +1254,9 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             </Tooltip>
             
 
+            
+            {/* Col 7: Target da recuperare */}
+            <RollTargetInput strategyKey={coveredCallKeyForPosition(option)} portfolioId={option.portfolio_id} />
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -1480,7 +1486,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
           tabIndex={0}
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsOpen(!isOpen); }}
-          className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[900px]"
+          className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_5rem_2rem_8rem_4.5rem_5rem_8rem] gap-2 items-center p-3 rounded-lg border border-border bg-background/50 hover:bg-muted/50 cursor-pointer transition-colors min-w-[980px]"
         >
             {/* Col 1: Chevron */}
             {isOpen ? (
@@ -1542,6 +1548,9 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             </Tooltip>
             
 
+            
+            {/* Col 7: Target da recuperare */}
+            <RollTargetInput strategyKey={deRiskingCoveredCallKeyForPosition(option)} portfolioId={option.portfolio_id} />
             
             {/* Col 8: Calculator */}
             <Tooltip>
@@ -2891,7 +2900,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             </div>
             
             {/* Col 7: Target da recuperare (roll-up) */}
-            <PutRollTargetInput option={option} />
+            <RollTargetInput strategyKey={nakedPutKeyForPosition(option)} portfolioId={option.portfolio_id} />
             
             {/* Col 8: Calculator */}
             <Tooltip>

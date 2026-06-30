@@ -40,6 +40,34 @@ export function nakedPutKeyForPosition(p: Position): string {
   return nakedPutKey(underlyingKeyForPosition(p), p.strike_price, p.expiry_date);
 }
 
+/** Covered Call strategy key: cc_{underlying}_{strike}_{YYYYMM}. */
+export function coveredCallKey(
+  underlying: string,
+  strike: number | null | undefined,
+  expiry: string | null | undefined,
+): string {
+  return `cc_${underlying}_${strike || 0}_${formatExpiryKey(expiry)}`;
+}
+
+/** Build the Covered Call strategy key from the sold-call position. */
+export function coveredCallKeyForPosition(p: Position): string {
+  return coveredCallKey(underlyingKeyForPosition(p), p.strike_price, p.expiry_date);
+}
+
+/** De-Risking Covered Call strategy key: dcc_{underlying}_{strike}_{YYYYMM}. */
+export function deRiskingCoveredCallKey(
+  underlying: string,
+  strike: number | null | undefined,
+  expiry: string | null | undefined,
+): string {
+  return `dcc_${underlying}_${strike || 0}_${formatExpiryKey(expiry)}`;
+}
+
+/** Build the De-Risking Covered Call strategy key from the sold-call position. */
+export function deRiskingCoveredCallKeyForPosition(p: Position): string {
+  return deRiskingCoveredCallKey(underlyingKeyForPosition(p), p.strike_price, p.expiry_date);
+}
+
 /** True when the position is a sold put (the leg a roll-up flag attaches to). */
 export function isSoldPut(p: Position): boolean {
   return p.option_type === 'put' && p.quantity < 0;
