@@ -655,9 +655,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  CALL vendute con sottostante in portafoglio
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -717,9 +714,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  Covered Call con protezione PUT (incluse sintetiche)
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -771,9 +765,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  Strategie a 4 gambe con rischio limitato
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -817,9 +808,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  Strategie a 4 gambe con scadenze differenti
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -863,9 +851,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  PUT vendute senza copertura
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -912,9 +897,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  PUT venduta + PUT comprata a strike inferiore, stessa scadenza
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -959,9 +941,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  PUT venduta + PUT comprata a strike inferiore, scadenze diverse
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1006,9 +985,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  CALL acquistate a lungo termine
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1093,9 +1069,6 @@ export function Derivatives() {
                     <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
-                <p className="text-sm text-muted-foreground text-left">
-                  Opzioni non classificate in altre categorie
-                </p>
               </CardHeader>
             </CollapsibleTrigger>
             <CollapsibleContent>
