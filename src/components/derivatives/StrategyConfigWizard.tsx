@@ -32,6 +32,8 @@ const STRATEGY_OPTIONS = [
   { value: 'naked_put', label: 'Naked Put' },
   { value: 'put_spread', label: 'Put Spread' },
   { value: 'diagonal_put_spread', label: 'Diagonal Put Spread' },
+  { value: 'call_spread', label: 'Call Spread' },
+  { value: 'diagonal_call_spread', label: 'Diagonal Call Spread' },
   { value: 'leap_call', label: 'LEAP Call' },
   { value: 'other', label: 'Altre Strategie' },
 ];
