@@ -65,6 +65,12 @@ export interface MonitoringAvailableCalls {
   availableShares: number;
 }
 
+export interface MonitoringIncompleteStrategy {
+  ticker: string;
+  strategyName: string;        // "Iron Condor", "Double Diagonal", "Covered Call", ...
+  missingLegs: string[];
+}
+
 export interface MonitoringResult {
   uncoveredCalls: MonitoringUncoveredCall[];
   coveredCallsITM: MonitoringCoveredCallITM[];
@@ -73,6 +79,7 @@ export interface MonitoringResult {
   nakedPutsITM: MonitoringNakedPutITM[];
   leapCallsInGain: MonitoringLeapGain[];
   otherStrategiesOOROOB: MonitoringOtherOOROOB[];
+  incompleteMultiLegStrategies: MonitoringIncompleteStrategy[];
   availableCallsToSell: MonitoringAvailableCalls[];
 }
 
