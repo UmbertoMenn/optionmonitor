@@ -219,7 +219,7 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
                   {(portfolio.id !== selectedPortfolio?.id || isAggregatedView || isAdminMode) && (
                     <div className="w-4 h-4 shrink-0" />
                   )}
-                  <span className="truncate">{portfolio.name}</span>
+                  <span className="truncate">{cleanName(portfolio.name)}</span>
                   {portfolio.total_value && portfolio.total_value > 0 && (
                     <span className="text-xs text-muted-foreground ml-auto">
                       {formatCurrency(portfolio.total_value)}
