@@ -927,9 +927,20 @@ export function StrategyConfigWizard({
 
   const strategyLabel = (type: string) => STRATEGY_OPTIONS.find(o => o.value === type)?.label || type;
 
+  type GroupFilter = 'all' | 'unassigned' | 'archived';
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
+
   // Filter groups by search AND exclude archived
   const filteredGroups = useMemo(() => {
-    const groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
+    let groups: UnderlyingGroup[];
+    if (groupFilter === 'archived') {
+      groups = underlyingGroups.filter(g => archivedKeys.includes(g.key));
+    } else {
+      groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
+      if (groupFilter === 'unassigned') {
+        groups = groups.filter(g => g.positions.some(p => !assignedIds.has(p.id)));
+      }
+    }
     if (!searchQuery.trim()) return groups;
     const q = searchQuery.toLowerCase();
     return groups.filter(g =>
@@ -940,7 +951,7 @@ export function StrategyConfigWizard({
         (p.description || '').toLowerCase().includes(q)
       )
     );
-  }, [underlyingGroups, searchQuery, archivedKeys]);
+  }, [underlyingGroups, searchQuery, archivedKeys, groupFilter, assignedIds]);
 
   // Get strategies for a specific underlying group
   const getStrategiesForGroup = (groupKey: string, groupPositions: Position[]) => {
