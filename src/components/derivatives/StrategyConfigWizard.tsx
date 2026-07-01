@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
 import { RollTargetInput } from '@/components/derivatives/RollTargetInput';
+import { toast } from 'sonner';
 import {
   isSoldPut,
   nakedPutKeyForPosition,
@@ -442,6 +443,7 @@ interface WizardDraft {
   selectedIdsByGroup: [string, string[]][];
   splitPositionIds: string[];
   searchQuery: string;
+  touchedGroupKeys?: string[];
 }
 
 export function StrategyConfigWizard({
@@ -545,6 +547,16 @@ export function StrategyConfigWizard({
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
+  const [touchedGroupKeys, setTouchedGroupKeys] = useState<Set<string>>(new Set());
+
+  const markGroupTouched = useCallback((groupKey: string) => {
+    setTouchedGroupKeys(prev => {
+      if (prev.has(groupKey)) return prev;
+      const next = new Set(prev);
+      next.add(groupKey);
+      return next;
+    });
+  }, []);
 
   // Assigned position ids across all strategies
   const assignedIds = useMemo(() => {
@@ -741,6 +753,7 @@ export function StrategyConfigWizard({
               setSplitPositionIds(new Set(draft.splitPositionIds || []));
               setSelectedIdsByGroup(restoredSelections);
               setSearchQuery(draft.searchQuery || '');
+              setTouchedGroupKeys(new Set(draft.touchedGroupKeys || []));
               return;
             }
             sessionStorage.removeItem(draftStorageKey);
@@ -753,6 +766,7 @@ export function StrategyConfigWizard({
         setSplitPositionIds(autoSplitIds);
         setSelectedIdsByGroup(new Map());
         setSearchQuery('');
+        setTouchedGroupKeys(new Set());
       });
     }
     if (!open) {
@@ -768,9 +782,10 @@ export function StrategyConfigWizard({
       selectedIdsByGroup: Array.from(selectedIdsByGroup.entries()).map(([key, ids]) => [key, Array.from(ids)]),
       splitPositionIds: Array.from(splitPositionIds),
       searchQuery,
+      touchedGroupKeys: Array.from(touchedGroupKeys),
     };
     sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
-  }, [open, strategies, selectedIdsByGroup, splitPositionIds, searchQuery, draftStorageKey, hasInitialized]);
+  }, [open, strategies, selectedIdsByGroup, splitPositionIds, searchQuery, touchedGroupKeys, draftStorageKey, hasInitialized]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
     if (!isOpen) {
@@ -805,6 +820,7 @@ export function StrategyConfigWizard({
       isSynthetic: false,
       suggestedType: suggested,
     }]);
+    markGroupTouched(groupKey);
     // Clear selection for this group
     setSelectedIdsByGroup(prev => {
       const next = new Map(prev);
@@ -850,6 +866,7 @@ export function StrategyConfigWizard({
       const newPositions = [...st.positions, ...toAdd];
       return { ...st, positions: newPositions, suggestedType: detectStrategyType(newPositions) };
     }));
+    markGroupTouched(groupKey);
     setSelectedIdsByGroup(prev => { const next = new Map(prev); next.delete(groupKey); return next; });
   };
 
@@ -881,6 +898,17 @@ export function StrategyConfigWizard({
   };
 
   const handleSave = async () => {
+    // Guard: le strategie devono contenere almeno una gamba derivata,
+    // altrimenti non sono rappresentabili nel motore di monitoraggio e
+    // apparirebbero come "non salvate" alla riapertura del wizard.
+    const invalid = strategies.filter(s => !s.positions.some(p => p.asset_type === 'derivative'));
+    if (invalid.length > 0) {
+      toast.error(
+        `${invalid.length} strateg${invalid.length === 1 ? 'ia' : 'ie'} senza gambe derivate: aggiungi almeno un contratto opzione o rimuovila.`
+      );
+      return;
+    }
+
     const rawConfigs: UpsertConfigParams[] = [];
 
     for (let i = 0; i < strategies.length; i++) {
@@ -919,10 +947,19 @@ export function StrategyConfigWizard({
       }
     }
 
-    // NO deduplication — each strategy is saved as a separate row
-    await onSave(rawConfigs);
-    sessionStorage.removeItem(draftStorageKey);
-    onOpenChange(false);
+    try {
+      console.log('[StrategyConfigWizard] Saving strategies', {
+        count: rawConfigs.length,
+        payload: rawConfigs,
+      });
+      await onSave(rawConfigs);
+      sessionStorage.removeItem(draftStorageKey);
+      onOpenChange(false);
+    } catch (e) {
+      console.error('[StrategyConfigWizard] Save failed', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Salvataggio fallito: ${msg}`);
+    }
   };
 
   const strategyLabel = (type: string) => STRATEGY_OPTIONS.find(o => o.value === type)?.label || type;
@@ -938,7 +975,9 @@ export function StrategyConfigWizard({
     } else {
       groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
       if (groupFilter === 'unassigned') {
-        groups = groups.filter(g => g.positions.some(p => !assignedIds.has(p.id)));
+        groups = groups.filter(g =>
+          g.positions.some(p => !assignedIds.has(p.id)) || touchedGroupKeys.has(g.key)
+        );
       }
     }
     if (!searchQuery.trim()) return groups;
@@ -951,7 +990,7 @@ export function StrategyConfigWizard({
         (p.description || '').toLowerCase().includes(q)
       )
     );
-  }, [underlyingGroups, searchQuery, archivedKeys, groupFilter, assignedIds]);
+  }, [underlyingGroups, searchQuery, archivedKeys, groupFilter, assignedIds, touchedGroupKeys]);
 
   // Get strategies for a specific underlying group
   const getStrategiesForGroup = (groupKey: string, groupPositions: Position[]) => {
