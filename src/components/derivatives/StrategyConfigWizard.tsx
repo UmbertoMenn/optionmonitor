@@ -443,6 +443,7 @@ interface WizardDraft {
   selectedIdsByGroup: [string, string[]][];
   splitPositionIds: string[];
   searchQuery: string;
+  touchedGroupKeys?: string[];
 }
 
 export function StrategyConfigWizard({
