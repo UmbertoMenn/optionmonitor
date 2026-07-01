@@ -753,6 +753,7 @@ export function StrategyConfigWizard({
               setSplitPositionIds(new Set(draft.splitPositionIds || []));
               setSelectedIdsByGroup(restoredSelections);
               setSearchQuery(draft.searchQuery || '');
+              setTouchedGroupKeys(new Set(draft.touchedGroupKeys || []));
               return;
             }
             sessionStorage.removeItem(draftStorageKey);
