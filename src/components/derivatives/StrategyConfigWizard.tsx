@@ -688,12 +688,17 @@ export function StrategyConfigWizard({
         }
       }
 
-      // Restore stock slots from linked_stock_slot_ids (preferred) or legacy linked_stock_id
+      // Restore stock slots from linked_stock_slot_ids (preferred) or legacy linked_stock_id.
+      // IMPORTANT: cerchiamo nell'intero elenco `restorePositions`, non nel `groupPositions`
+      // filtrato per chiave-sottostante. Per una CC/DR-CC senza alcuna gamba derivata (solo
+      // azioni), non c'è nulla che ancori il gruppo al ticker giusto tramite il matching
+      // testuale fuzzy, quindi il filtro per gruppo esclude erroneamente l'azione anche se
+      // l'ID salvato è corretto. L'ID è già univoco e autoritativo: non serve ri-filtrare.
       const savedSlotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
       if (savedSlotIds.length > 0) {
         for (const slotId of savedSlotIds) {
-          const stockSlot = groupPositions.find(p =>
-            !usedIds.has(p.id) && p.asset_type === 'stock' && p.id === slotId
+          const stockSlot = restorePositions.find(p =>
+            !usedIds.has(p.id) && (p.asset_type === 'stock' || p.asset_type === 'etf') && p.id === slotId
           );
           if (stockSlot) {
             usedIds.add(stockSlot.id);
@@ -701,9 +706,9 @@ export function StrategyConfigWizard({
           }
         }
       } else if (config.linked_stock_id) {
-        const stockSlot = groupPositions.find(p =>
+        const stockSlot = restorePositions.find(p =>
           !usedIds.has(p.id) &&
-          p.asset_type === 'stock' &&
+          (p.asset_type === 'stock' || p.asset_type === 'etf') &&
           (p.id === config.linked_stock_id || p.id.startsWith(config.linked_stock_id + '__slot_'))
         );
         if (stockSlot) {
@@ -712,9 +717,9 @@ export function StrategyConfigWizard({
         }
       }
       // Fallback: for CC/DRCC strategies, auto-assign first available stock in group
-      if (!matched.some(p => p.asset_type === 'stock') && 
+      if (!matched.some(p => p.asset_type === 'stock' || p.asset_type === 'etf') &&
           (config.strategy_type === 'covered_call' || config.strategy_type === 'derisking_covered_call')) {
-        const fallbackStock = groupPositions.find(p => !usedIds.has(p.id) && p.asset_type === 'stock');
+        const fallbackStock = groupPositions.find(p => !usedIds.has(p.id) && (p.asset_type === 'stock' || p.asset_type === 'etf'));
         if (fallbackStock) {
           usedIds.add(fallbackStock.id);
           matched.push(fallbackStock);
