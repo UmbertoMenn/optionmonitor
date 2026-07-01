@@ -955,7 +955,9 @@ export function StrategyConfigWizard({
     } else {
       groups = underlyingGroups.filter(g => !archivedKeys.includes(g.key));
       if (groupFilter === 'unassigned') {
-        groups = groups.filter(g => g.positions.some(p => !assignedIds.has(p.id)));
+        groups = groups.filter(g =>
+          g.positions.some(p => !assignedIds.has(p.id)) || touchedGroupKeys.has(g.key)
+        );
       }
     }
     if (!searchQuery.trim()) return groups;
