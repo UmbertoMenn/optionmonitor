@@ -1097,7 +1097,20 @@ export function StrategyConfigWizard({
                               </Badge>
                             )}
                           </div>
-                          {groupStrategies.length === 0 && onArchive && (
+                          {archivedKeys.includes(group.key) && onUnarchive ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onUnarchive(group.key);
+                              }}
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                              Ripristina
+                            </Button>
+                          ) : groupStrategies.length === 0 && onArchive && (
                             <Button
                               variant="ghost"
                               size="sm"
