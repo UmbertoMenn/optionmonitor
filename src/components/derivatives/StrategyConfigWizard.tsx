@@ -970,7 +970,7 @@ export function StrategyConfigWizard({
         (p.description || '').toLowerCase().includes(q)
       )
     );
-  }, [underlyingGroups, searchQuery, archivedKeys, groupFilter, assignedIds]);
+  }, [underlyingGroups, searchQuery, archivedKeys, groupFilter, assignedIds, touchedGroupKeys]);
 
   // Get strategies for a specific underlying group
   const getStrategiesForGroup = (groupKey: string, groupPositions: Position[]) => {
