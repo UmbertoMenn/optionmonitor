@@ -107,16 +107,24 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
     );
   }
 
+  // Clean up "Principale" suffix for display
+  const cleanName = (name: string) => {
+    return name
+      .replace(/portafoglio principale/gi, 'Portafoglio')
+      .replace(/portfolio principale/gi, 'Portafoglio')
+      .trim();
+  };
+
   // Get display name for selector
   const getDisplayName = () => {
     if (isAggregatedView) {
       // Check if it's a per-user aggregate (own or client)
       const selectedId = selectedPortfolio?.id || '';
       if (selectedId === AGGREGATED_PORTFOLIO_ID) return 'Aggregato - Tutti';
-      return selectedPortfolio?.name || 'Il Mio Aggregato';
+      return selectedPortfolio?.name ? cleanName(selectedPortfolio.name) : 'Il Mio Aggregato';
     }
-    if (isAdminMode && selectedPortfolio) return `👤 ${selectedPortfolio.name}`;
-    return selectedPortfolio?.name || 'Seleziona Portfolio';
+    if (isAdminMode && selectedPortfolio) return `👤 ${cleanName(selectedPortfolio.name)}`;
+    return selectedPortfolio?.name ? cleanName(selectedPortfolio.name) : 'Seleziona Portfolio';
   };
 
   return (
