@@ -511,6 +511,21 @@ export function categorizeDerivatives(
               sharesCovered: contracts * 100, isFullyCovered: true,
             });
           }
+
+          // INCOMPLETE: CC configurata (con azioni collegate) ma senza Short Call venduta.
+          // Copre il caso di strategie salvate con la sola gamba azionaria, in attesa
+          // di vendere la call.
+          if (calls.length === 0 && linkedStock) {
+            incompleteStrategies.push({
+              configId: config.id,
+              strategyType: 'covered_call',
+              underlying: config.underlying,
+              isSynthetic: false,
+              presentLegs: matchedVirtual,
+              missingLegs: ['Short Call'],
+              linkedStock,
+            });
+          }
         }
         break;
       }

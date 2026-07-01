@@ -576,7 +576,7 @@ async function computeSectionsFromCache(
   }
 
   // ============ 8. Call da rivendere ============
-  const callsToSell: { ticker: string; availableShares: number }[] = [];
+  const callsToSell: { ticker: string; availableContracts: number }[] = [];
   for (const stock of stockPositions) {
     const potentialContracts = Math.floor(stock.quantity / 100);
     if (potentialContracts < 1) continue;
@@ -598,15 +598,15 @@ async function computeSectionsFromCache(
 
     const available = potentialContracts - soldCallContracts;
     if (available >= 1) {
-      callsToSell.push({ ticker: stockKey, availableShares: available * 100 });
+      callsToSell.push({ ticker: stockKey, availableContracts: available });
     }
   }
   if (callsToSell.length > 0) {
-    callsToSell.sort((a, b) => b.availableShares - a.availableShares);
+    callsToSell.sort((a, b) => b.availableContracts - a.availableContracts);
     sections.push({
       title: "Covered Call / D-R CC da rivendere",
       emoji: "green",
-      items: callsToSell.map(item => `${item.ticker} ${item.availableShares}az`),
+      items: callsToSell.map(item => `${item.ticker} ×${item.availableContracts}`),
     });
   }
 

@@ -358,7 +358,7 @@ export function DerivativesSummaryCard({
                 variant="outline" 
                 className="text-xs bg-green-500/10 border-green-500/30"
               >
-                {item.ticker} {item.availableShares}az
+                {item.ticker} ×{item.availableContracts}
               </Badge>
             )}
           />

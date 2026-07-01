@@ -901,7 +901,15 @@ export function StrategyConfigWizard({
     // Guard: le strategie devono contenere almeno una gamba derivata,
     // altrimenti non sono rappresentabili nel motore di monitoraggio e
     // apparirebbero come "non salvate" alla riapertura del wizard.
-    const invalid = strategies.filter(s => !s.positions.some(p => p.asset_type === 'derivative'));
+    // Eccezione: Covered Call / De-Risking CC con la sola gamba azionaria sono ammesse
+    // (azioni in attesa di vendita della call) e vengono rappresentate come "gamba mancante".
+    const invalid = strategies.filter(s => {
+      if (s.positions.some(p => p.asset_type === 'derivative')) return false;
+      const isStockOnlyCcOrDrcc =
+        (s.strategyType === 'covered_call' || s.strategyType === 'derisking_covered_call') &&
+        s.positions.some(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+      return !isStockOnlyCcOrDrcc;
+    });
     if (invalid.length > 0) {
       toast.error(
         `${invalid.length} strateg${invalid.length === 1 ? 'ia' : 'ie'} senza gambe derivate: aggiungi almeno un contratto opzione o rimuovila.`

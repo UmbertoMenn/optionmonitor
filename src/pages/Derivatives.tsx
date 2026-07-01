@@ -256,7 +256,7 @@ function IncompleteStrategyRow({ inc, underlyingPrices }: { inc: IncompleteStrat
         </div>
       </div>
       <CollapsibleContent>
-        {inc.presentLegs.length > 0 ? (
+        {(inc.presentLegs.length > 0 || inc.linkedStock) ? (
           <LegsDetailList legs={inc.presentLegs} underlyingPrices={underlyingPrices} stock={inc.linkedStock} />
         ) : (
           <div className="ml-7 mt-2 p-3 rounded-lg border border-border/50 bg-muted/30 text-xs text-muted-foreground">

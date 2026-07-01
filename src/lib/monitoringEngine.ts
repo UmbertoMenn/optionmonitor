@@ -62,7 +62,7 @@ export interface MonitoringOtherOOROOB {
 
 export interface MonitoringAvailableCalls {
   ticker: string;
-  availableShares: number;
+  availableContracts: number;
 }
 
 export interface MonitoringIncompleteStrategy {
@@ -610,12 +610,12 @@ function computeAvailableCalls(
     const potential = Math.floor(data.owned / 100) + data.syntheticCovered;
     const available = potential - data.soldCalls;
     if (available >= 1) {
-      result.push({ ticker: data.displayTicker, availableShares: available * 100 });
+      result.push({ ticker: data.displayTicker, availableContracts: available });
     }
   }
 
 
-  return result.sort((a, b) => b.availableShares - a.availableShares);
+  return result.sort((a, b) => b.availableContracts - a.availableContracts);
 }
 
 /**
@@ -637,6 +637,14 @@ function computeIncompleteMultiLeg(
   };
   const result: MonitoringIncompleteStrategy[] = [];
   for (const inc of categories.incompleteStrategies || []) {
+    // CC/DR-CC a cui manca la Short Call = azioni scoperte in attesa di vendita call:
+    // sono già rappresentate in "Call da rivendere" (computeAvailableCalls calcola le
+    // azioni non coperte da nessuna call venduta indipendentemente dalla config salvata).
+    // Le escludiamo qui per evitare di mostrare due volte lo stesso avviso.
+    // Una DR-CC a cui manca SOLO la Long Put (call già venduta, protezione mancante)
+    // resta invece qui: è un avviso distinto, non un "contratto da rivendere".
+    const isCcOrDrcc = inc.strategyType === 'covered_call' || inc.strategyType === 'derisking_covered_call';
+    if (isCcOrDrcc && inc.missingLegs.includes('Short Call')) continue;
     result.push({
       ticker: getDisplayTicker(inc.underlying, underlyingPrices),
       strategyName: STRATEGY_LABELS[inc.strategyType] || inc.strategyType,
@@ -720,7 +728,7 @@ export function buildSnapshotSections(monitoring: MonitoringResult): { title: st
     sections.push({
       title: 'Covered Call / D-R CC da rivendere',
       emoji: 'green',
-      items: monitoring.availableCallsToSell.map(item => `${item.ticker} ${item.availableShares}az`),
+      items: monitoring.availableCallsToSell.map(item => `${item.ticker} ×${item.availableContracts}`),
     });
   }
 
