@@ -558,17 +558,6 @@ export function StrategyConfigWizard({
     });
   }, []);
 
-  const findGroupKeyForStrategy = useCallback((strategyId: string): string | null => {
-    const strat = strategies.find(s => s.id === strategyId);
-    if (!strat) return null;
-    const posId = strat.positions[0]?.id;
-    if (!posId) return null;
-    for (const [key, ids] of selectedIdsByGroup) { void key; void ids; }
-    // Cerca il gruppo che contiene una qualsiasi delle posizioni della strategia
-    return null; // placeholder: touch è già gestito dagli handler contestuali
-  }, [strategies, selectedIdsByGroup]);
-  void findGroupKeyForStrategy;
-
   // Assigned position ids across all strategies
   const assignedIds = useMemo(() => {
     const ids = new Set<string>();
