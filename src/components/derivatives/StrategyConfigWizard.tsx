@@ -766,6 +766,7 @@ export function StrategyConfigWizard({
         setSplitPositionIds(autoSplitIds);
         setSelectedIdsByGroup(new Map());
         setSearchQuery('');
+        setTouchedGroupKeys(new Set());
       });
     }
     if (!open) {
@@ -781,9 +782,10 @@ export function StrategyConfigWizard({
       selectedIdsByGroup: Array.from(selectedIdsByGroup.entries()).map(([key, ids]) => [key, Array.from(ids)]),
       splitPositionIds: Array.from(splitPositionIds),
       searchQuery,
+      touchedGroupKeys: Array.from(touchedGroupKeys),
     };
     sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
-  }, [open, strategies, selectedIdsByGroup, splitPositionIds, searchQuery, draftStorageKey, hasInitialized]);
+  }, [open, strategies, selectedIdsByGroup, splitPositionIds, searchQuery, touchedGroupKeys, draftStorageKey, hasInitialized]);
 
   const handleOpenChange = useCallback((isOpen: boolean) => {
     if (!isOpen) {
