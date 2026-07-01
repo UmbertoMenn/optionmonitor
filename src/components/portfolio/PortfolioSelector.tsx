@@ -315,7 +315,7 @@ export function PortfolioSelector({ fullWidth = false }: PortfolioSelectorProps 
                             ) : (
                               <User className="w-3 h-3 text-muted-foreground shrink-0" />
                             )}
-                            <span className="truncate">{p.name}</span>
+                            <span className="truncate">{cleanName(p.name)}</span>
                           </div>
                           {p.total_value && p.total_value > 0 && (
                             <span className="text-xs text-muted-foreground ml-2">
