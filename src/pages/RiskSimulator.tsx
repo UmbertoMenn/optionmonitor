@@ -377,10 +377,10 @@ function StressLabContent() {
    * equity del Risk Analyzer, coi sotto-toggle ETF/commodity e GP applicati nell'hook).
    * PATRIMONIO STRESSATO assoluto = patrimonio TOTALE (netting dashboard, con GP) + P&L:
    * è il numero che interessa davvero, indipendente dall'ambito di analisi. Il toggle
-   * Netting Ex CC e NP sceglie la metrica del totale (e la valutazione opzioni nel P&L).
+   * Netting Intrinseco (A) sceglie la metrica del totale (e la valutazione opzioni nel P&L).
    */
   const ptfBase = equityExposure;
-  const totalPatrimony = netting ? data.nettingExCCAndNPRaw : data.nettingTotalRaw;
+  const totalPatrimony = netting ? data.nettingIntrinsicARaw : data.nettingTotalRaw;
 
   const volAt = (x: number) => (volMode === 'auto' ? coupledDV1M(x) : dVman);
 
@@ -628,7 +628,7 @@ function StressLabContent() {
     return pts;
   }, [legs, eq, unders, effIV, volMode, dVman, prm, curveMin]);
 
-  // Stessa curva in % sul patrimonio (totalPatrimony rispetta il toggle ex CC e NP).
+  // Stessa curva in % sul patrimonio (totalPatrimony rispetta il toggle Intrinseco A).
   const curvePct = useMemo(
     () =>
       curve.map((p) => ({
@@ -855,7 +855,7 @@ function StressLabContent() {
             basano solo sui singoli titoli (+ opzioni), togliendo ETF/ETC/commodity.
             <br />
             <br />
-            Il toggle <b>Netting Ex CC e NP</b> qui a fianco sceglie la metrica del totale e la
+            Il toggle <b>Netting Intrinseco (A)</b> qui a fianco sceglie la metrica del totale e la
             valutazione delle opzioni sotto shock (intrinseco hold-to-expiry).
           </Info>
         }
@@ -878,7 +878,7 @@ function StressLabContent() {
                 letterSpacing: 0.5,
               }}
             >
-              Netting Ex CC e NP
+              Netting Intrinseco (A)
             </span>
             <button
               onClick={() => setNetting(!netting)}
@@ -1058,7 +1058,7 @@ function StressLabContent() {
                         C.amber,
                         <Info title="Leva Reale" w={360}>
                           <b>Esposizione Reale / Patrimonio totale</b> (netting della dashboard, coerente col
-                          toggle <b>Netting Ex CC e NP</b>: il denominatore è il netting totale o l'ex CC e NP).
+                          toggle <b>Netting Intrinseco (A)</b>: il denominatore è il netting totale o l'Intrinseco A).
                           <br />
                           <br />
                           Dice quanta parte del patrimonio è <b>davvero esposta</b> alla direzione dell'equity:
@@ -1066,7 +1066,7 @@ function StressLabContent() {
                           bassi = molto coperto/poco direzionale.
                           <br />
                           <br />
-                          Cambia con lo slider (segue il delta @ scenario) e col toggle Ex CC e NP. Negativa =
+                          Cambia con lo slider (segue il delta @ scenario) e col toggle Intrinseco (A). Negativa =
                           net short. È leva <b>direzionale lineare</b>, non perdita massima (la coda è peggiore
                           per il gamma).
                         </Info>,
@@ -1449,7 +1449,7 @@ function StressLabContent() {
                       ({sgn(k.pPatr * 100, 1)}%)
                       <Info title="Perdita % sul patrimonio" w={340}>
                         È il P&L in percentuale del <b>patrimonio totale</b> (netting della dashboard): netting
-                        <b> ex CC e NP</b> se il toggle è attivo, altrimenti <b>netting totale</b>.
+                        <b> Intrinseco (A)</b> se il toggle è attivo, altrimenti <b>netting totale</b>.
                       </Info>
                     </span>
                   )}
@@ -1719,7 +1719,7 @@ function StressLabContent() {
             in zero e divergerebbe proprio nelle code.
             <br />
             <br />
-            In <b>%</b> il P&L è rapportato al <b>patrimonio totale</b> (netting della dashboard; ex CC e NP se
+            In <b>%</b> il P&L è rapportato al <b>patrimonio totale</b> (netting della dashboard; Intrinseco A se
             il toggle è attivo).
             <br />
             <br />
@@ -2437,7 +2437,7 @@ function StressLabContent() {
                           style={{ color: C.amber, fontSize: 9, fontWeight: 800 }}
                           title={
                             rr.netted
-                              ? 'gamba corta valutata a intrinseco (Netting Ex CC e NP)'
+                              ? 'gamba corta valutata a intrinseco (Netting Intrinseco A)'
                               : 'gamba valutata a intrinseco (prezzo sotto intrinseco)'
                           }
                         >

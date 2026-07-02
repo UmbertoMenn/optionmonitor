@@ -145,7 +145,7 @@ export function Dashboard() {
 
   const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
 
-  // DEBUG diagnostico: confronto "ex CC e NP" attuale vs "solo valore intrinseco" (qualsiasi posizione).
+  // DEBUG diagnostico: confronto market value vs Netting Intrinseco (A) vs Netting Intrinseco (B).
   // Attivazione: in console -> localStorage.setItem('nettingDebug','1'); poi seleziona il portfolio e ricarica.
   // Disattivazione: localStorage.removeItem('nettingDebug').
   useEffect(() => {
@@ -166,16 +166,16 @@ export function Dashboard() {
       prezzoOpz: r.price,
       prezzoSott: r.underlyingPrice,
       'MARKET': Math.round(r.marketValue),
-      'EX_CC_NP (attuale)': Math.round(r.currentExCCNP),
-      'INTRINSECO (tutto)': Math.round(r.fullyIntrinsic),
-      'Δ intr-attuale': Math.round(r.fullyIntrinsic - r.currentExCCNP),
+      'INTRINSECO (A)': Math.round(r.intrinsicA),
+      'INTRINSECO (B)': Math.round(r.intrinsicB),
+      'Δ B−A': Math.round(r.intrinsicB - r.intrinsicA),
     })));
     console.log(
       `Base (patrimonio non-derivati): €${fmt(cmp.baseValue)}\n` +
-      `Σ derivati  — market: €${fmt(cmp.totals.marketValue)} | ex CC&NP attuale: €${fmt(cmp.totals.currentExCCNP)} | solo intrinseco: €${fmt(cmp.totals.fullyIntrinsic)}\n` +
-      `NETTING totale:           €${fmt(cmp.finalMarket)}\n` +
-      `NETTING ex CC e NP (ATT.): €${fmt(cmp.finalCurrentExCCNP)}\n` +
-      `NETTING solo INTRINSECO:   €${fmt(cmp.finalFullyIntrinsic)}`
+      `Σ derivati  — market: €${fmt(cmp.totals.marketValue)} | intrinseco A: €${fmt(cmp.totals.intrinsicA)} | intrinseco B: €${fmt(cmp.totals.intrinsicB)}\n` +
+      `NETTING totale:          €${fmt(cmp.finalMarket)}\n` +
+      `NETTING INTRINSECO (A):  €${fmt(cmp.finalIntrinsicA)}\n` +
+      `NETTING INTRINSECO (B):  €${fmt(cmp.finalIntrinsicB)}`
     );
     /* eslint-enable no-console */
   }, [positions, summary, overrides, frozenUnderlyingPrices, strategyConfigs, portfolio?.name]);
@@ -345,8 +345,8 @@ export function Dashboard() {
             summary={summary} 
             portfolio={portfolio}
             nettingTotal={netting.nettingTotal}
-            nettingExCC={netting.nettingExCoveredCall}
-            nettingExCCAndNP={netting.nettingExCCAndNP}
+            nettingIntrinsicA={netting.nettingIntrinsicA}
+            nettingIntrinsicB={netting.nettingIntrinsicB}
             viewMode={viewMode}
             historicalData={historicalData}
             selectedHistoricalDate={selectedHistoricalDate}
@@ -390,7 +390,8 @@ export function Dashboard() {
                     isLoading={isUpserting}
                     currentTotalValue={summary?.totalValue ?? 0}
                     currentNettingTotal={netting.nettingTotal}
-                    currentNettingExCCNP={netting.nettingExCCAndNP}
+                    currentNettingIntrinsicA={netting.nettingIntrinsicA}
+                    currentNettingIntrinsicB={netting.nettingIntrinsicB}
                     currentEquityExposurePct={equityExposurePct}
                     currentUsdExposurePct={usdExposurePct}
                   />
@@ -438,9 +439,9 @@ export function Dashboard() {
             viewMode={viewMode}
             onViewModeChange={setViewMode}
             currentValue={
-              viewMode === 'base' ? summary?.totalValue ?? 0
-              : viewMode === 'netting_total' ? netting.nettingTotal
-              : netting.nettingExCCAndNP
+              viewMode === 'netting_total' ? netting.nettingTotal
+              : viewMode === 'netting_intrinsic_a' ? netting.nettingIntrinsicA
+              : netting.nettingIntrinsicB
             }
             currentDate={portfolio?.snapshot_date ?? null}
             deposits={allDepositsForCharts}

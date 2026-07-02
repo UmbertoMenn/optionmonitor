@@ -17,7 +17,8 @@ interface HistoricalDataFormProps {
   isLoading?: boolean;
   currentTotalValue: number;
   currentNettingTotal: number;
-  currentNettingExCCNP: number;
+  currentNettingIntrinsicA: number;
+  currentNettingIntrinsicB: number;
   currentEquityExposurePct: number;
   currentUsdExposurePct: number;
 }
@@ -29,7 +30,8 @@ export function HistoricalDataForm({
   isLoading,
   currentTotalValue,
   currentNettingTotal,
-  currentNettingExCCNP,
+  currentNettingIntrinsicA,
+  currentNettingIntrinsicB,
   currentEquityExposurePct,
   currentUsdExposurePct,
 }: HistoricalDataFormProps) {
@@ -40,7 +42,8 @@ export function HistoricalDataForm({
   const [formDate, setFormDate] = useState<Date | undefined>(undefined);
   const [formTotalValue, setFormTotalValue] = useState('');
   const [formNettingTotal, setFormNettingTotal] = useState('');
-  const [formNettingExCCNP, setFormNettingExCCNP] = useState('');
+  const [formNettingIntrinsicA, setFormNettingIntrinsicA] = useState('');
+  const [formNettingIntrinsicB, setFormNettingIntrinsicB] = useState('');
   const [formEquityExposure, setFormEquityExposure] = useState('');
   const [formUsdExposure, setFormUsdExposure] = useState('');
 
@@ -52,7 +55,8 @@ export function HistoricalDataForm({
     setFormDate(undefined);
     setFormTotalValue('');
     setFormNettingTotal('');
-    setFormNettingExCCNP('');
+    setFormNettingIntrinsicA('');
+    setFormNettingIntrinsicB('');
     setFormEquityExposure('');
     setFormUsdExposure('');
     setIsAddingNew(false);
@@ -73,7 +77,8 @@ export function HistoricalDataForm({
       snapshot_date: format(formDate, 'yyyy-MM-dd'),
       total_value: parseValue(formTotalValue),
       netting_total: parseValue(formNettingTotal),
-      netting_ex_cc_np: parseValue(formNettingExCCNP),
+      netting_ex_cc_np: parseValue(formNettingIntrinsicA),
+      netting_intrinsic_b: parseValue(formNettingIntrinsicB),
       deposits: 0,
       average_balance: 0,
       equity_exposure_pct: equityPct,
@@ -88,7 +93,8 @@ export function HistoricalDataForm({
     setFormDate(new Date(entry.snapshot_date));
     setFormTotalValue(entry.total_value.toString());
     setFormNettingTotal(entry.netting_total.toString());
-    setFormNettingExCCNP((entry.netting_ex_cc_np ?? 0).toString());
+    setFormNettingIntrinsicA((entry.netting_ex_cc_np ?? 0).toString());
+    setFormNettingIntrinsicB((entry.netting_intrinsic_b ?? entry.netting_ex_cc_np ?? 0).toString());
     const equityPct = entry.equity_exposure_pct ?? 0.6;
     setFormEquityExposure((equityPct * 100).toFixed(1));
     const usdPct = entry.usd_exposure_pct ?? 0.8;
@@ -104,7 +110,8 @@ export function HistoricalDataForm({
   const useCurrent = () => {
     setFormTotalValue(currentTotalValue.toString());
     setFormNettingTotal(currentNettingTotal.toString());
-    setFormNettingExCCNP(currentNettingExCCNP.toString());
+    setFormNettingIntrinsicA(currentNettingIntrinsicA.toString());
+    setFormNettingIntrinsicB(currentNettingIntrinsicB.toString());
     setFormEquityExposure((currentEquityExposurePct * 100).toFixed(1));
     setFormUsdExposure((currentUsdExposurePct * 100).toFixed(1));
   };
@@ -145,12 +152,22 @@ export function HistoricalDataForm({
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Netting ex. CC e NP ($)</Label>
+          <Label className="text-xs">Netting Intrinseco A ($)</Label>
           <Input
             type="text"
             placeholder="es. 99.000"
-            value={formNettingExCCNP}
-            onChange={(e) => setFormNettingExCCNP(e.target.value)}
+            value={formNettingIntrinsicA}
+            onChange={(e) => setFormNettingIntrinsicA(e.target.value)}
+            className="font-mono text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Netting Intrinseco B ($)</Label>
+          <Input
+            type="text"
+            placeholder="es. 98.000"
+            value={formNettingIntrinsicB}
+            onChange={(e) => setFormNettingIntrinsicB(e.target.value)}
             className="font-mono text-sm"
           />
         </div>
@@ -267,7 +284,8 @@ export function HistoricalDataForm({
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                                   <span>Patrimonio: <span className="font-mono text-foreground">{formatCurrency(entry.total_value)}</span></span>
                                   <span>Netting Tot: <span className="font-mono text-foreground">{formatCurrency(entry.netting_total)}</span></span>
-                                  <span>Netting ex. CC e NP: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc_np ?? 0)}</span></span>
+                                  <span>Netting Intr. A: <span className="font-mono text-foreground">{formatCurrency(entry.netting_ex_cc_np ?? 0)}</span></span>
+                                  <span>Netting Intr. B: <span className="font-mono text-foreground">{formatCurrency(entry.netting_intrinsic_b ?? entry.netting_ex_cc_np ?? 0)}</span></span>
                                   <span>Equity Exp.: <span className="font-mono text-foreground">{((entry.equity_exposure_pct ?? 0.6) * 100).toFixed(0)}%</span></span>
                                   <span>USD Exp.: <span className="font-mono text-foreground">{((entry.usd_exposure_pct ?? 0.8) * 100).toFixed(0)}%</span></span>
                                 </div>

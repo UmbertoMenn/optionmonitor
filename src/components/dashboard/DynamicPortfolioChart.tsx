@@ -1,6 +1,4 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { PortfolioDonutChart } from '@/components/dashboard/PortfolioDonutChart';
-import { AssetAllocationLegend } from '@/components/dashboard/AssetAllocationLegend';
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
 import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode, computeLegDecomposition, STRATEGY_SECTION_LABELS, StrategySectionCategory } from '@/hooks/useDerivativeNetting';
 import { NettingLegDetailTable } from '@/components/dashboard/NettingLegDetailTable';
@@ -282,13 +280,14 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
 // ─── Main Component ───────────────────────────────────────────
 const NETTING_DESCRIPTIONS: Record<string, string> = {
   netting_total: 'Valore portafoglio al quale abbiamo sottratto i costi di chiusura di tutte le posizioni in derivati, ai prezzi di mercato.',
-  netting_ex_cc_np: 'Valore del portafoglio al netto del costo di chiusura delle posizioni in derivati, ai prezzi di mercato. Non vengono sottratti i costi di chiusura posizioni per le covered call OTM o naked put OTM. Le covered call ITM e le naked put ITM vengono calcolate sottraendo il valore intrinseco (es. Covered CALL 300 GOOGL, il sottostante vale 320, sottraggo 20 × numero contratti).',
+  netting_intrinsic_a: 'Valore del portafoglio con PUT e CALL vendute valutate al solo valore intrinseco (negativo se ITM, zero se OTM) e PUT e CALL comprate al valore di mercato.',
+  netting_intrinsic_b: 'Valore del portafoglio con tutte le opzioni valutate al solo valore intrinseco: PUT e CALL vendute negative se ITM (zero se OTM), PUT e CALL comprate positive se ITM (zero se OTM).',
 };
 
 const CHART_TITLES: Record<ViewMode, string> = {
-  base: 'Composizione Portafoglio (Derivati esclusi)',
   netting_total: 'Valore Portafoglio (Netting Totale Derivati)',
-  netting_ex_cc_np: 'Valore Portafoglio (Netting ex. Covered Call e Naked Put OTM)',
+  netting_intrinsic_a: 'Valore Portafoglio (Netting Intrinseco A)',
+  netting_intrinsic_b: 'Valore Portafoglio (Netting Intrinseco B)',
 };
 
 
@@ -312,10 +311,10 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
   const scrollTo = useCallback((index: number) => { api?.scrollTo(index); }, [api]);
 
   const { items: breakdownItems, finalValue } = useMemo(() => {
-    if (viewMode === 'base' || !summary) return { items: [], finalValue: 0 };
+    if (!summary) return { items: [], finalValue: 0 };
     return getBreakdownForViewMode(
       netting.breakdown,
-      viewMode as 'netting_total' | 'netting_ex_cc' | 'netting_ex_cc_np',
+      viewMode,
       positions,
       summary,
       overrides,
@@ -325,22 +324,13 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
   }, [viewMode, netting.breakdown, positions, summary, overrides, underlyingPrices, strategyConfigs]);
 
   const legRows = useMemo(() => {
-    if (viewMode === 'base') return [];
     return computeLegDecomposition(viewMode, positions, overrides, underlyingPrices, strategyConfigs);
   }, [viewMode, positions, overrides, underlyingPrices, strategyConfigs]);
 
   const hasDer = positions.some(p => p.asset_type === 'derivative');
 
   const renderChart = () => {
-    if (viewMode === 'base') {
-      if (summary && positions.length > 0) {
-        return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <PortfolioDonutChart summary={summary} portfolio={portfolio} />
-            <AssetAllocationLegend summary={summary} />
-          </div>
-        );
-      }
+    if (!summary || positions.length === 0) {
       return (
         <div className="text-center py-12 text-muted-foreground">
           <Upload className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -390,7 +380,7 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
             </CarouselItem>
             {/* Slide: Dettaglio per gamba (intrinseco + valore temporale) */}
             <CarouselItem>
-              <NettingLegDetailTable rows={legRows} viewMode={viewMode as 'netting_total' | 'netting_ex_cc_np'} />
+              <NettingLegDetailTable rows={legRows} viewMode={viewMode} />
             </CarouselItem>
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
@@ -430,9 +420,9 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="base">Base</SelectItem>
-                <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
                 <SelectItem value="netting_total">Netting Totale</SelectItem>
+                <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
+                <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
               </SelectContent>
             </Select>
           )}

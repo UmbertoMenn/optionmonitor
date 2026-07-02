@@ -34,9 +34,9 @@ interface HistoricalChartsCarouselProps {
 }
 
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
-  base: 'Base',
   netting_total: 'Netting Totale',
-  netting_ex_cc_np: 'Netting ex. CC e NP',
+  netting_intrinsic_a: 'Netting Intrinseco (A)',
+  netting_intrinsic_b: 'Netting Intrinseco (B)',
 };
 
 const slides = [
@@ -119,9 +119,9 @@ export function HistoricalChartsCarousel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="base">Base</SelectItem>
-                <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
                 <SelectItem value="netting_total">Netting Totale</SelectItem>
+                <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
+                <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -188,9 +188,9 @@ export function HistoricalChartsCarousel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="base">Base</SelectItem>
-                <SelectItem value="netting_ex_cc_np">Netting ex. CC e NP</SelectItem>
                 <SelectItem value="netting_total">Netting Totale</SelectItem>
+                <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
+                <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
               </SelectContent>
             </Select>
           </div>

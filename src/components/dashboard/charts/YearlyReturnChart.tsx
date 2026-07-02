@@ -94,14 +94,13 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
 
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
   switch (viewMode) {
-    case 'base':
-      return entry.total_value;
-    case 'netting_total':
-      return entry.netting_total;
-    case 'netting_ex_cc_np':
+    case 'netting_intrinsic_a':
       return entry.netting_ex_cc_np ?? entry.netting_ex_cc;
+    case 'netting_intrinsic_b':
+      return entry.netting_intrinsic_b ?? entry.netting_ex_cc_np ?? entry.netting_ex_cc;
+    case 'netting_total':
     default:
-      return entry.total_value;
+      return entry.netting_total;
   }
 }
 

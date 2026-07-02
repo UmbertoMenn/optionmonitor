@@ -17,8 +17,8 @@ interface StatsCardsProps {
   summary: PortfolioSummary;
   portfolio: Portfolio | null;
   nettingTotal: number;
-  nettingExCC: number;
-  nettingExCCAndNP: number;
+  nettingIntrinsicA: number;
+  nettingIntrinsicB: number;
   viewMode: ViewMode;
   historicalData: HistoricalDataEntry[];
   selectedHistoricalDate: string | null;
@@ -39,17 +39,17 @@ interface StatsCardsProps {
 import { calculateTimeWeightedAverage } from '@/lib/timeWeightedAverage';
 
 const VIEW_LABELS: Record<ViewMode, { patrimonio: string; pl: string }> = {
-  base: { patrimonio: 'Valore Assets (ex. Derivatives)', pl: 'Profitto/Perdita' },
   netting_total: { patrimonio: 'Patrimonio (Netting Totale)', pl: 'P/L (Netting Totale)' },
-  netting_ex_cc_np: { patrimonio: 'Patrimonio (Netting ex. Covered Call e NP)', pl: 'P/L (Netting ex. Covered Call e NP)' },
+  netting_intrinsic_a: { patrimonio: 'Patrimonio (Netting Intrinseco A)', pl: 'P/L (Netting Intrinseco A)' },
+  netting_intrinsic_b: { patrimonio: 'Patrimonio (Netting Intrinseco B)', pl: 'P/L (Netting Intrinseco B)' },
 };
 
 export function StatsCards({ 
   summary, 
   portfolio, 
   nettingTotal, 
-  nettingExCC,
-  nettingExCCAndNP,
+  nettingIntrinsicA,
+  nettingIntrinsicB,
   viewMode,
   historicalData,
   selectedHistoricalDate,
@@ -81,6 +81,20 @@ export function StatsCards({
   console.log('[StatsCards] Selected historical entry:', selectedHistoricalEntry?.snapshot_date);
   console.log('[StatsCards] All deposits count:', allDeposits?.length);
   
+  // Valore storico coerente con la vista corrente
+  const historicalValueFor = (entry: typeof selectedHistoricalEntry): number => {
+    if (!entry) return 0;
+    switch (viewMode) {
+      case 'netting_intrinsic_a':
+        return entry.netting_ex_cc_np ?? entry.netting_ex_cc;
+      case 'netting_intrinsic_b':
+        return entry.netting_intrinsic_b ?? entry.netting_ex_cc_np ?? entry.netting_ex_cc;
+      case 'netting_total':
+      default:
+        return entry.netting_total;
+    }
+  };
+
   // Calculate time-weighted average and deposits in period
   const timeWeightedData = useMemo(() => {
     if (!selectedHistoricalEntry || !snapshotDate) {
@@ -105,17 +119,7 @@ export function StatsCards({
     });
 
     // Get historical value based on viewMode
-    let historicalValue: number;
-    switch (viewMode) {
-      case 'netting_total':
-        historicalValue = selectedHistoricalEntry.netting_total;
-        break;
-      case 'netting_ex_cc_np':
-        historicalValue = selectedHistoricalEntry.netting_ex_cc_np ?? selectedHistoricalEntry.netting_ex_cc;
-        break;
-      default:
-        historicalValue = selectedHistoricalEntry.total_value;
-    }
+    const historicalValue = historicalValueFor(selectedHistoricalEntry);
 
     const result = calculateTimeWeightedAverage(startDate, endDate, historicalValue, allDeposits);
     console.log('[StatsCards] Time-weighted result:', result);
@@ -139,9 +143,10 @@ export function StatsCards({
   // Patrimonio value based on viewMode
   const getPatrimonioValue = () => {
     switch (viewMode) {
-      case 'netting_total': return nettingTotal;
-      case 'netting_ex_cc_np': return nettingExCCAndNP;
-      default: return summary.totalValue;
+      case 'netting_intrinsic_a': return nettingIntrinsicA;
+      case 'netting_intrinsic_b': return nettingIntrinsicB;
+      case 'netting_total':
+      default: return nettingTotal;
     }
   };
 
@@ -153,22 +158,8 @@ export function StatsCards({
     }
 
     const historical = selectedHistoricalEntry!;
-    let currentValue: number;
-    let historicalValue: number;
-
-    switch (viewMode) {
-      case 'netting_total':
-        currentValue = nettingTotal;
-        historicalValue = historical.netting_total;
-        break;
-      case 'netting_ex_cc_np':
-        currentValue = nettingExCCAndNP;
-        historicalValue = historical.netting_ex_cc_np ?? historical.netting_ex_cc;
-        break;
-      default:
-        currentValue = summary.totalValue;
-        historicalValue = historical.total_value;
-    }
+    const currentValue = getPatrimonioValue();
+    const historicalValue = historicalValueFor(historical);
 
     // P/L = Current Value - Historical Value - Deposits
     const absolutePL = currentValue - historicalValue - deposits;
@@ -225,13 +216,7 @@ export function StatsCards({
       key: 'iniziale',
       label: 'Patrimonio Iniziale',
       value: hasHistoricalData 
-        ? formatCurrency(
-            viewMode === 'netting_total' 
-              ? selectedHistoricalEntry!.netting_total 
-              : viewMode === 'netting_ex_cc_np'
-                ? (selectedHistoricalEntry!.netting_ex_cc_np ?? selectedHistoricalEntry!.netting_ex_cc)
-                : selectedHistoricalEntry!.total_value
-          )
+        ? formatCurrency(historicalValueFor(selectedHistoricalEntry!))
         : '—',
       icon: Target,
       change: null,

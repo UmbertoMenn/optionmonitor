@@ -75,7 +75,7 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
 
     // 3b. Fetch strategy configurations — DEVONO essere lette PRIMA del netting:
     //     determinano come i derivati vengono raggruppati in strategie (covered call,
-    //     naked put, put spread, …) e quindi il valore di netting Ex-CC-e-NP.
+    //     naked put, put spread, …) e quindi i valori di Netting Intrinseco (A/B).
     //     In precedenza venivano lette dopo e NON passate al netting: lo snapshot
     //     ricalcolava il netting ignorando del tutto la configurazione appena salvata.
     const { data: configsRaw } = await supabase
@@ -142,7 +142,8 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
       strategyConfigs,
     );
     const nettingTotal = totalValue + nettingResult.totalNetting;
-    const nettingExCCAndNP = totalValue + nettingResult.nettingExCCAndNP;
+    const nettingIntrinsicA = totalValue + nettingResult.nettingIntrinsicA;
+    const nettingIntrinsicB = totalValue + nettingResult.nettingIntrinsicB;
 
     // 6. Compute equity exposure — formula allineata al Risk Analyzer:
     //    numeratore = grandTotal (stock+ETF+commodity+naked put+leap+strategie+sintetiche CC/DR-CC)
@@ -184,8 +185,9 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
         snapshot_date: snapshotDate,
         total_value: totalValue,
         netting_total: nettingTotal,
-        netting_ex_cc: nettingExCCAndNP, // mapped for compatibility
-        netting_ex_cc_np: nettingExCCAndNP,
+        netting_ex_cc: nettingIntrinsicA, // mapped for compatibility
+        netting_ex_cc_np: nettingIntrinsicA, // Netting Intrinseco (A)
+        netting_intrinsic_b: nettingIntrinsicB,
         equity_exposure_pct: equityExposurePct,
         usd_exposure_pct: usdExposurePct,
         snapshot_underlying_prices: frozen as unknown as Record<string, number>,

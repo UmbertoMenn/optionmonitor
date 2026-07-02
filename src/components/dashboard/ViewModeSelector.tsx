@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 
-export type ViewMode = 'base' | 'netting_total' | 'netting_ex_cc_np';
+export type ViewMode = 'netting_total' | 'netting_intrinsic_a' | 'netting_intrinsic_b';
 
 interface ViewModeSelectorProps {
   viewMode: ViewMode;
@@ -8,12 +8,12 @@ interface ViewModeSelectorProps {
 }
 
 const VIEW_LABELS: Record<ViewMode, string> = {
-  base: 'Base',
-  netting_ex_cc_np: 'Netting ex. Covered Call e Naked Put OTM',
   netting_total: 'Netting Totale',
+  netting_intrinsic_a: 'Netting Intrinseco (A)',
+  netting_intrinsic_b: 'Netting Intrinseco (B)',
 };
 
-const VIEWS: ViewMode[] = ['netting_total', 'netting_ex_cc_np', 'base'];
+const VIEWS: ViewMode[] = ['netting_total', 'netting_intrinsic_a', 'netting_intrinsic_b'];
 
 export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelectorProps) {
   return (

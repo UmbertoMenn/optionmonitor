@@ -69,7 +69,8 @@ export async function computeAndUpsertStagingValues({ portfolioId, positions, ca
 
     const nettingResult = computeSinglePortfolioNetting(fullPositions, overrides);
     const nettingTotal = totalValue + nettingResult.totalNetting;
-    const nettingExCCAndNP = totalValue + nettingResult.nettingExCCAndNP;
+    const nettingIntrinsicA = totalValue + nettingResult.nettingIntrinsicA;
+    const nettingIntrinsicB = totalValue + nettingResult.nettingIntrinsicB;
 
     // 5. Fetch strategy configurations
     const { data: configsRaw } = await supabase
@@ -112,7 +113,8 @@ export async function computeAndUpsertStagingValues({ portfolioId, positions, ca
         portfolio_id: portfolioId,
         total_value: totalValue,
         netting_total: nettingTotal,
-        netting_ex_cc_np: nettingExCCAndNP,
+        netting_ex_cc_np: nettingIntrinsicA, // Netting Intrinseco (A)
+        netting_intrinsic_b: nettingIntrinsicB,
         equity_exposure_pct: equityExposurePct,
         usd_exposure_pct: usdExposurePct,
       }, { onConflict: 'portfolio_id' });
@@ -124,7 +126,8 @@ export async function computeAndUpsertStagingValues({ portfolioId, positions, ca
         portfolioId,
         totalValue: Math.round(totalValue),
         nettingTotal: Math.round(nettingTotal),
-        nettingExCCAndNP: Math.round(nettingExCCAndNP),
+        nettingIntrinsicA: Math.round(nettingIntrinsicA),
+        nettingIntrinsicB: Math.round(nettingIntrinsicB),
         equityExposurePct: (equityExposurePct * 100).toFixed(1) + '%',
         usdExposurePct: (usdExposurePct * 100).toFixed(1) + '%',
       });

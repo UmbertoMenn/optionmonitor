@@ -5,7 +5,10 @@ export interface HistoricalDataEntry {
   total_value: number;
   netting_total: number;
   netting_ex_cc: number;
+  /** Netting Intrinseco (A) — colonna DB storica `netting_ex_cc_np` */
   netting_ex_cc_np: number;
+  /** Netting Intrinseco (B) — null per snapshot precedenti all'introduzione della vista */
+  netting_intrinsic_b: number | null;
   deposits: number;
   average_balance: number;
   equity_exposure_pct: number; // 0-1, default 0.6
@@ -20,7 +23,10 @@ export interface HistoricalDataInput {
   snapshot_date: string;
   total_value: number;
   netting_total: number;
+  /** Netting Intrinseco (A) — colonna DB storica `netting_ex_cc_np` */
   netting_ex_cc_np: number;
+  /** Netting Intrinseco (B) */
+  netting_intrinsic_b: number;
   deposits: number;
   average_balance: number;
   equity_exposure_pct: number; // 0-1

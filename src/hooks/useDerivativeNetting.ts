@@ -23,9 +23,11 @@ export interface NettingBreakdownItem {
 }
 
 export interface NettingResult {
-  nettingExCoveredCall: number;
   nettingTotal: number;
-  nettingExCCAndNP: number;
+  /** Netting Intrinseco (A): vendute a intrinseco, comprate a market value */
+  nettingIntrinsicA: number;
+  /** Netting Intrinseco (B): vendute e comprate entrambe a solo intrinseco */
+  nettingIntrinsicB: number;
   breakdown: NettingBreakdownItem[];
 }
 
@@ -180,16 +182,52 @@ function makeAcc(): CategoryAccumulator {
   return { value: 0, details: [] };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// VALUTAZIONE INTRINSECA PER GAMBA
+// Le due viste intrinseche si applicano a OGNI gamba opzione, indipendentemente
+// dalla categoria di strategia (non più solo Covered Call e Naked Put):
+//   • Netting Intrinseco (A): opzioni VENDUTE a solo valore intrinseco
+//     (negativo se ITM, 0 se OTM); opzioni COMPRATE a valore di mercato.
+//   • Netting Intrinseco (B): opzioni VENDUTE a solo valore intrinseco
+//     (negativo se ITM, 0 se OTM); opzioni COMPRATE a solo valore intrinseco
+//     (positivo se ITM, 0 se OTM).
+// Gambe non-opzione: sempre valore di mercato. Se il prezzo del sottostante
+// non è risolvibile, fallback prudente al valore di mercato (mai 0 silenzioso).
+// ─────────────────────────────────────────────────────────────────────────────
+function computeIntrinsicContribs(
+  p: Position,
+  spot: number,
+  marketValue: number,
+  exchangeRate: number
+): { a: number; b: number } {
+  const isCall = p.option_type === 'call';
+  const isPut = p.option_type === 'put';
+  if (!isCall && !isPut) return { a: marketValue, b: marketValue };
+  if (!(spot > 0)) return { a: marketValue, b: marketValue }; // spot ignoto → fallback a MTM
+
+  const strike = p.strike_price ?? 0;
+  const perShare = isCall ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
+  const contracts = Math.abs(p.quantity);
+  const intrinsicMag = (contracts * 100 * perShare) / exchangeRate; // ≥ 0
+
+  if (p.quantity < 0) {
+    // venduta: −intrinseco (ITM), 0 (OTM) — identico in A e B
+    return { a: -intrinsicMag, b: -intrinsicMag };
+  }
+  // comprata: A → market value; B → +intrinseco (ITM), 0 (OTM)
+  return { a: marketValue, b: intrinsicMag };
+}
+
 /** Compute netting per un singolo portafoglio usando la fonte canonica */
 export function computeSinglePortfolioNetting(
   positions: Position[],
   overrides: DerivativeOverride[],
   underlyingPrices?: Record<string, UnderlyingPrice>,
   strategyConfigs: StrategyConfiguration[] = []
-): { totalNetting: number; nettingExCoveredCall: number; nettingExCCAndNP: number; breakdown: NettingBreakdownItem[] } {
+): { totalNetting: number; nettingIntrinsicA: number; nettingIntrinsicB: number; breakdown: NettingBreakdownItem[] } {
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   if (derivatives.length === 0) {
-    return { totalNetting: 0, nettingExCoveredCall: 0, nettingExCCAndNP: 0, breakdown: [] };
+    return { totalNetting: 0, nettingIntrinsicA: 0, nettingIntrinsicB: 0, breakdown: [] };
   }
 
   const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
@@ -210,8 +248,8 @@ export function computeSinglePortfolioNetting(
   };
 
   let totalNetting = 0;
-  let nettingExCoveredCall = 0;
-  let nettingExCCAndNP = 0;
+  let nettingIntrinsicA = 0;
+  let nettingIntrinsicB = 0;
 
   for (const leg of legs) {
     const p = leg.position;
@@ -236,7 +274,7 @@ export function computeSinglePortfolioNetting(
     acc[cat].value += nettingValue;
     acc[cat].details.push(detail);
 
-    // Risoluzione prezzo underlying per CC/NP (intrinsic value)
+    // Risoluzione prezzo underlying (per valutazione intrinseca)
     const resolveUnderlyingPrice = (): number => {
       if (leg.associatedUnderlying) {
         const up = leg.associatedUnderlying.snapshot_price ?? leg.associatedUnderlying.current_price ?? 0;
@@ -247,45 +285,9 @@ export function computeSinglePortfolioNetting(
       return 0;
     };
 
-    // Calcolo netting ex CC e netting ex CC&NP
-    if (cat === 'covered_call' || cat === 'derisking_cc') {
-      // Solo le sold CALL contribuiscono con perdita intrinseca; le altre gambe (put protezione,
-      // syntheticPut) contribuiscono a market value pieno
-      if (p.option_type === 'call' && quantity < 0) {
-        const strikePrice = p.strike_price ?? 0;
-        const underlyingPrice = resolveUnderlyingPrice();
-        if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
-          const contracts = Math.abs(quantity);
-          const intrinsicValue = (contracts * multiplier * (underlyingPrice - strikePrice)) / exchangeRate;
-          // Cap: perdita intrinseca non può superare costo di chiusura
-          const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
-          nettingExCoveredCall += cappedIntrinsic;
-          nettingExCCAndNP += cappedIntrinsic;
-        }
-        // OTM: 0 contributo
-      } else {
-        // protection put / synthetic put / etc → market value pieno
-        nettingExCoveredCall += nettingValue;
-        nettingExCCAndNP += nettingValue;
-      }
-    } else if (cat === 'naked_put') {
-      // ex CC: sempre market value
-      nettingExCoveredCall += nettingValue;
-      // ex CC&NP: solo perdita intrinseca ITM
-      const strikePrice = p.strike_price ?? 0;
-      const uprice = resolveUnderlyingPrice();
-      if (uprice > 0 && strikePrice >= uprice) {
-        const contracts = Math.abs(quantity);
-        const intrinsicValue = (contracts * multiplier * (strikePrice - uprice)) / exchangeRate;
-        const cappedIntrinsic = Math.max(-intrinsicValue, nettingValue);
-        nettingExCCAndNP += cappedIntrinsic;
-      }
-      // OTM: 0 contributo per ex CC&NP
-    } else {
-      // Tutte le altre categorie + orphans: market value pieno per entrambe
-      nettingExCoveredCall += nettingValue;
-      nettingExCCAndNP += nettingValue;
-    }
+    const { a, b } = computeIntrinsicContribs(p, resolveUnderlyingPrice(), nettingValue, exchangeRate);
+    nettingIntrinsicA += a;
+    nettingIntrinsicB += b;
   }
 
   // Aggrega dettagli per ticker dentro ogni categoria
@@ -317,19 +319,16 @@ export function computeSinglePortfolioNetting(
     }
   }
 
-  return { totalNetting, nettingExCoveredCall, nettingExCCAndNP, breakdown };
+  return { totalNetting, nettingIntrinsicA, nettingIntrinsicB, breakdown };
 }
 
 /**
  * Confronto metodologico per-gamba: per ogni gamba canonica calcola
- *  - marketValue        = price * qty * 100 / fx  (mark-to-market pieno, segno incluso)
- *  - currentExCCNP      = contributo col metodo ATTUALE "netting ex CC e NP"
- *                         (CALL vendute CC/DCC e PUT vendute nude a valore intrinseco ITM,
- *                          0 se OTM; ogni altra gamba a market value)
- *  - fullyIntrinsic     = contributo valutando OGNI opzione SOLO al valore intrinseco
- *                         (short → -intrinseco, long → +intrinseco, 0 se OTM), con lo
- *                          stesso cap del metodo attuale (la perdita/valore intrinseco non
- *                          supera mai il market value della gamba).
+ *  - marketValue  = price * qty * 100 / fx  (mark-to-market pieno, segno incluso)
+ *  - intrinsicA   = contributo alla vista Netting Intrinseco (A):
+ *                   vendute a intrinseco (ITM negativo, OTM 0), comprate a market value
+ *  - intrinsicB   = contributo alla vista Netting Intrinseco (B):
+ *                   vendute e comprate entrambe a solo intrinseco (OTM 0)
  *
  * Gestisce automaticamente il caso multi-portfolio (somma per portfolio).
  */
@@ -345,17 +344,17 @@ export interface NettingCompareRow {
   price: number;
   underlyingPrice: number;
   marketValue: number;
-  currentExCCNP: number;
-  fullyIntrinsic: number;
+  intrinsicA: number;
+  intrinsicB: number;
 }
 
 export interface NettingCompareResult {
   rows: NettingCompareRow[];
-  totals: { marketValue: number; currentExCCNP: number; fullyIntrinsic: number };
+  totals: { marketValue: number; intrinsicA: number; intrinsicB: number };
   baseValue: number;
-  finalMarket: number;        // baseValue + Σ marketValue   (= netting totale)
-  finalCurrentExCCNP: number; // baseValue + Σ currentExCCNP  (= netting ex CC e NP attuale)
-  finalFullyIntrinsic: number;// baseValue + Σ fullyIntrinsic (= ipotesi "tutto intrinseco")
+  finalMarket: number;      // baseValue + Σ marketValue  (= netting totale)
+  finalIntrinsicA: number;  // baseValue + Σ intrinsicA   (= Netting Intrinseco A)
+  finalIntrinsicB: number;  // baseValue + Σ intrinsicB   (= Netting Intrinseco B)
 }
 
 export function compareNettingMethods(
@@ -400,8 +399,6 @@ export function compareNettingMethods(
       const multiplier = 100;
       const fx = getEffectiveExchangeRate(p);
       const marketValue = (price * quantity * multiplier) / fx;
-      const contracts = Math.abs(quantity);
-      const strike = p.strike_price ?? 0;
 
       const underlyingPrice = (() => {
         if (leg.associatedUnderlying) {
@@ -412,41 +409,7 @@ export function compareNettingMethods(
         return underlyingPrices?.[key]?.price ?? 0;
       })();
 
-      // ---- metodo ATTUALE (ex CC e NP) ----
-      let currentExCCNP = marketValue;
-      if (cat === 'covered_call' || cat === 'derisking_cc') {
-        if (p.option_type === 'call' && quantity < 0) {
-          if (underlyingPrice > 0 && strike < underlyingPrice) {
-            const intrinsic = (contracts * multiplier * (underlyingPrice - strike)) / fx;
-            currentExCCNP = Math.max(-intrinsic, marketValue);
-          } else {
-            currentExCCNP = 0;
-          }
-        }
-      } else if (cat === 'naked_put') {
-        if (underlyingPrice > 0 && strike >= underlyingPrice) {
-          const intrinsic = (contracts * multiplier * (strike - underlyingPrice)) / fx;
-          currentExCCNP = Math.max(-intrinsic, marketValue);
-        } else {
-          currentExCCNP = 0;
-        }
-      }
-
-      // ---- ipotesi: SOLO valore intrinseco, qualsiasi posizione ----
-      let fullyIntrinsic = marketValue;
-      if (p.option_type === 'call' || p.option_type === 'put') {
-        const perShare = p.option_type === 'call'
-          ? Math.max(0, underlyingPrice - strike)
-          : Math.max(0, strike - underlyingPrice);
-        const intrinsicMag = (contracts * multiplier * perShare) / fx; // ≥ 0
-        if (underlyingPrice <= 0) {
-          fullyIntrinsic = marketValue; // prezzo sottostante ignoto → fallback prudente a market
-        } else if (quantity < 0) {
-          fullyIntrinsic = Math.max(-intrinsicMag, marketValue); // short: -intrinseco, cappato al market
-        } else {
-          fullyIntrinsic = Math.min(intrinsicMag, marketValue);  // long: +intrinseco, cappato al market
-        }
-      }
+      const { a, b } = computeIntrinsicContribs(p, underlyingPrice, marketValue, fx);
 
       rows.push({
         portfolioId: pid,
@@ -460,8 +423,8 @@ export function compareNettingMethods(
         price,
         underlyingPrice,
         marketValue,
-        currentExCCNP,
-        fullyIntrinsic,
+        intrinsicA: a,
+        intrinsicB: b,
       });
     }
   }
@@ -469,11 +432,11 @@ export function compareNettingMethods(
   const totals = rows.reduce(
     (t, r) => {
       t.marketValue += r.marketValue;
-      t.currentExCCNP += r.currentExCCNP;
-      t.fullyIntrinsic += r.fullyIntrinsic;
+      t.intrinsicA += r.intrinsicA;
+      t.intrinsicB += r.intrinsicB;
       return t;
     },
-    { marketValue: 0, currentExCCNP: 0, fullyIntrinsic: 0 }
+    { marketValue: 0, intrinsicA: 0, intrinsicB: 0 }
   );
 
   return {
@@ -481,8 +444,8 @@ export function compareNettingMethods(
     totals,
     baseValue,
     finalMarket: baseValue + totals.marketValue,
-    finalCurrentExCCNP: baseValue + totals.currentExCCNP,
-    finalFullyIntrinsic: baseValue + totals.fullyIntrinsic,
+    finalIntrinsicA: baseValue + totals.intrinsicA,
+    finalIntrinsicB: baseValue + totals.intrinsicB,
   };
 }
 
@@ -496,9 +459,9 @@ export function useDerivativeNetting(
 ): NettingResult {
   return useMemo(() => {
     const emptyResult: NettingResult = {
-      nettingExCoveredCall: summary?.totalValue ?? 0,
       nettingTotal: summary?.totalValue ?? 0,
-      nettingExCCAndNP: summary?.totalValue ?? 0,
+      nettingIntrinsicA: summary?.totalValue ?? 0,
+      nettingIntrinsicB: summary?.totalValue ?? 0,
       breakdown: [],
     };
 
@@ -529,8 +492,8 @@ export function useDerivativeNetting(
       });
 
       let mergedTotalNetting = 0;
-      let mergedNettingExCC = 0;
-      let mergedNettingExCCAndNP = 0;
+      let mergedIntrinsicA = 0;
+      let mergedIntrinsicB = 0;
       const mergedBreakdown: NettingBreakdownItem[] = [];
 
       for (const [pid, pPositions] of byPortfolio) {
@@ -538,8 +501,8 @@ export function useDerivativeNetting(
         const pConfigs = configsByPortfolio.get(pid) || [];
         const result = computeSinglePortfolioNetting(pPositions, pOverrides, underlyingPrices, pConfigs);
         mergedTotalNetting += result.totalNetting;
-        mergedNettingExCC += result.nettingExCoveredCall;
-        mergedNettingExCCAndNP += result.nettingExCCAndNP;
+        mergedIntrinsicA += result.nettingIntrinsicA;
+        mergedIntrinsicB += result.nettingIntrinsicB;
         mergedBreakdown.push(...result.breakdown);
       }
 
@@ -556,8 +519,8 @@ export function useDerivativeNetting(
 
       return {
         nettingTotal: summary.totalValue + mergedTotalNetting,
-        nettingExCoveredCall: summary.totalValue + mergedNettingExCC,
-        nettingExCCAndNP: summary.totalValue + mergedNettingExCCAndNP,
+        nettingIntrinsicA: summary.totalValue + mergedIntrinsicA,
+        nettingIntrinsicB: summary.totalValue + mergedIntrinsicB,
         breakdown: [...byCat.values()].filter(b => Math.abs(b.value) > 0.01 || b.details.length > 0),
       };
     }
@@ -565,22 +528,22 @@ export function useDerivativeNetting(
     const result = computeSinglePortfolioNetting(positions, overrides, underlyingPrices, strategyConfigs);
 
     return {
-      nettingExCoveredCall: summary.totalValue + result.nettingExCoveredCall,
       nettingTotal: summary.totalValue + result.totalNetting,
-      nettingExCCAndNP: summary.totalValue + result.nettingExCCAndNP,
+      nettingIntrinsicA: summary.totalValue + result.nettingIntrinsicA,
+      nettingIntrinsicB: summary.totalValue + result.nettingIntrinsicB,
       breakdown: result.breakdown,
     };
   }, [positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs]);
 }
 
 /**
- * Per il view mode, il breakdown già contiene i valori CORRETTI a market value.
- * Per netting_ex_cc / netting_ex_cc_np dobbiamo ricalcolare CC/DCC/NP usando
- * la fonte canonica (stessa logica di computeSinglePortfolioNetting).
+ * Per la vista netting_total il breakdown già contiene i valori CORRETTI a market value.
+ * Per le viste intrinseche (A/B) ricalcoliamo ogni gamba usando la fonte canonica
+ * (stessa logica di computeSinglePortfolioNetting / computeIntrinsicContribs).
  */
 export function getBreakdownForViewMode(
   breakdown: NettingBreakdownItem[],
-  viewMode: 'netting_total' | 'netting_ex_cc' | 'netting_ex_cc_np',
+  viewMode: 'netting_total' | 'netting_intrinsic_a' | 'netting_intrinsic_b',
   positions: Position[],
   summary: PortfolioSummary | null,
   overrides: DerivativeOverride[] = [],
@@ -595,8 +558,7 @@ export function getBreakdownForViewMode(
     return { items, finalValue };
   }
 
-  // Per netting_ex_cc e netting_ex_cc_np: ricalcola usando la fonte canonica.
-  // Costruisci breakdown alternativo con valori intrinseci/market a seconda della categoria.
+  // Viste intrinseche: ricalcola per gamba usando la fonte canonica.
   const derivatives = positions.filter(p => p.asset_type === 'derivative');
   const legs = buildCanonicalLegs(derivatives, positions, overrides, strategyConfigs);
 
@@ -635,36 +597,8 @@ export function getBreakdownForViewMode(
       return 0;
     };
 
-    let contribValue = nettingValue;
-
-    if (cat === 'covered_call' || cat === 'derisking_cc') {
-      if (p.option_type === 'call' && quantity < 0) {
-        const strikePrice = p.strike_price ?? 0;
-        const underlyingPrice = resolveUnderlyingPrice();
-        if (underlyingPrice > 0 && strikePrice < underlyingPrice) {
-          const contracts = Math.abs(quantity);
-          const intrinsicValue = (contracts * multiplier * (underlyingPrice - strikePrice)) / exchangeRate;
-          contribValue = Math.max(-intrinsicValue, nettingValue);
-        } else {
-          contribValue = 0; // OTM: nessun contributo
-        }
-      }
-      // protection put / synthetic put → market value pieno (contribValue rimane = nettingValue)
-    } else if (cat === 'naked_put') {
-      if (viewMode === 'netting_ex_cc_np') {
-        const strikePrice = p.strike_price ?? 0;
-        const uprice = resolveUnderlyingPrice();
-        if (uprice > 0 && strikePrice >= uprice) {
-          const contracts = Math.abs(quantity);
-          const intrinsicValue = (contracts * multiplier * (strikePrice - uprice)) / exchangeRate;
-          contribValue = Math.max(-intrinsicValue, nettingValue);
-        } else {
-          contribValue = 0;
-        }
-      }
-      // viewMode === 'netting_ex_cc' → market value pieno
-    }
-    // Tutte le altre categorie + orphans: contribValue = nettingValue (market value)
+    const { a, b } = computeIntrinsicContribs(p, resolveUnderlyingPrice(), nettingValue, exchangeRate);
+    const contribValue = viewMode === 'netting_intrinsic_a' ? a : b;
 
     if (Math.abs(contribValue) > 0.0001) {
       acc[cat].value += contribValue;
@@ -694,13 +628,9 @@ export function getBreakdownForViewMode(
   for (const cat of ALL_CATEGORIES) {
     const a = acc[cat];
     if (Math.abs(a.value) > 0.01 || a.details.length > 0) {
-      const isIntrinsic = (cat === 'covered_call' || cat === 'derisking_cc') ||
-        (viewMode === 'netting_ex_cc_np' && cat === 'naked_put');
       items.push({
         category: cat,
-        label: isIntrinsic
-          ? `${STRATEGY_SECTION_LABELS[cat]} (intrinseco)`
-          : STRATEGY_SECTION_LABELS[cat],
+        label: STRATEGY_SECTION_LABELS[cat],
         value: a.value,
         color: a.value < 0 ? 'cost' : (a.value > 0 ? 'gain' : 'cost'),
         details: a.details,
@@ -719,8 +649,9 @@ export function getBreakdownForViewMode(
 //   • perdita/valore intrinseco  = max(0, S−K)|max(0, K−S) × q × mult / fx   (segno della posizione)
 //   • valore temporale           = MTM − intrinseco                          (segno della posizione)
 // La somma dei contributi conteggiati riconcilia con il netting della vista:
-//   Σ contribEUR (netting_total)     = totalNetting − baseValue
-//   Σ contribEUR (netting_ex_cc_np)  = nettingExCCAndNP − baseValue
+//   Σ contribEUR (netting_total)        = totalNetting − baseValue
+//   Σ contribEUR (netting_intrinsic_a)  = nettingIntrinsicA − baseValue
+//   Σ contribEUR (netting_intrinsic_b)  = nettingIntrinsicB − baseValue
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface LegDecompositionRow {
@@ -743,18 +674,18 @@ export interface LegDecompositionRow {
   intrinsicCountedEUR: number;
   /** contributo valore temporale conteggiato nel totale di QUESTA vista (EUR, con segno) */
   timeValueCountedEUR: number;
-  /** valore temporale ESCLUSO dal totale (CC/NP corte in vista ex CC e NP); 0 altrimenti */
+  /** valore temporale ESCLUSO dal totale (gambe valutate a intrinseco nelle viste A/B); 0 altrimenti */
   timeValueExcludedEUR: number;
   /** contributo totale della gamba a QUESTA vista = intrinsicCounted + timeValueCounted */
   contribEUR: number;
-  /** true se la gamba è valutata solo a intrinseco in questa vista (CC/NP corta in ex CC e NP) */
+  /** true se la gamba è valutata solo a intrinseco in questa vista */
   atIntrinsic: boolean;
-  /** true se la gamba è OTM ed esclusa integralmente (CC/NP corta OTM in ex CC e NP) */
+  /** true se la gamba è OTM ed esclusa integralmente (contributo 0) */
   isOTM: boolean;
 }
 
 export function computeLegDecomposition(
-  viewMode: 'netting_total' | 'netting_ex_cc_np',
+  viewMode: 'netting_total' | 'netting_intrinsic_a' | 'netting_intrinsic_b',
   positions: Position[],
   overrides: DerivativeOverride[] = [],
   underlyingPrices?: Record<string, UnderlyingPrice>,
@@ -814,23 +745,18 @@ export function computeLegDecomposition(
     let atIntrinsic = false;
     let isOTM = false;
 
-    if (viewMode === 'netting_ex_cc_np') {
-      const isShortCC = (cat === 'covered_call' || cat === 'derisking_cc') && isCall && quantity < 0;
-      const isShortNP = cat === 'naked_put' && isPut && quantity < 0;
+    if (viewMode !== 'netting_total' && (isCall || isPut) && spot != null && strike != null) {
+      // Vista A: solo le gambe VENDUTE sono valutate a intrinseco; le comprate restano a MTM.
+      // Vista B: TUTTE le gambe opzione sono valutate a intrinseco.
+      const valuedAtIntrinsic = quantity < 0 || viewMode === 'netting_intrinsic_b';
 
-      if (isShortCC || isShortNP) {
+      if (valuedAtIntrinsic) {
         atIntrinsic = true;
-        // ITM secondo la stessa convenzione del netting: CALL ITM ⇔ strike < spot, PUT ITM ⇔ strike ≥ spot
-        const itm = spot != null && strike != null
-          ? (isCall ? strike < spot : strike >= spot)
-          : false;
-        if (itm) {
-          // perdita intrinseca cappata al MTM (il cap scatta solo se l'opzione quota sotto intrinseco)
-          const cappedIntrinsic = Math.max(-intrinsicMagEUR, marketValueEUR);
-          intrinsicCountedEUR = cappedIntrinsic;
+        if (intrinsicMagEUR > 0) {
+          intrinsicCountedEUR = intrinsicSignedEUR;
           timeValueCountedEUR = 0;
-          timeValueExcludedEUR = marketValueEUR - cappedIntrinsic; // time value non pagato (hold to expiry)
-          contribEUR = cappedIntrinsic;
+          timeValueExcludedEUR = marketValueEUR - intrinsicSignedEUR; // time value non conteggiato
+          contribEUR = intrinsicSignedEUR;
         } else {
           isOTM = true;
           intrinsicCountedEUR = 0;
@@ -839,9 +765,9 @@ export function computeLegDecomposition(
           contribEUR = 0;
         }
       }
-      // altre categorie → MTM pieno, decomposizione naturale (già impostata sopra)
+      // gambe comprate in vista A → MTM pieno, decomposizione naturale (già impostata sopra)
     }
-    // netting_total → MTM pieno per tutte le gambe (già impostato sopra)
+    // netting_total (o spot ignoto → fallback a MTM) → MTM pieno per tutte le gambe
 
     rows.push({
       positionId: p.id,

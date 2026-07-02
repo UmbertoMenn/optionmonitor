@@ -86,10 +86,10 @@ export interface StressLabData {
   /** Patrimonio = NETTING TOTALE (stessa metrica della dashboard), coi toggle applicati */
   nettingTotal: number;
   /** Patrimonio = NETTING EX CC E NP (stessa metrica della dashboard), coi toggle applicati */
-  nettingExCCAndNP: number;
+  nettingIntrinsicA: number;
   /** Netting GREZZO (ambito 'total', senza ritaglio), per etichettare le opzioni di ambito */
   nettingTotalRaw: number;
-  nettingExCCAndNPRaw: number;
+  nettingIntrinsicARaw: number;
   /** Esposizione Potenziale in Equity (denominatore di P&L%/beta/delta), coi due sotto-toggle
    *  ETF/commodity e GP già applicati. */
   equityExposure: number;
@@ -788,12 +788,12 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     return Math.max(0, grossStock - netStock) + Math.max(0, grossSynth - netSynth);
   }, [riskAnalysis.stockDetails, riskAnalysis.syntheticCcDrccDetails, riskAnalysis.totalSyntheticCcDrccRisk]);
 
-  const { nettingTotal, nettingExCCAndNP, equityExposure } = useMemo(() => {
+  const { nettingTotal, nettingIntrinsicA, equityExposure } = useMemo(() => {
     let base = grandTotal;
     if (!inputs.includeProtections) base += protectionSavings; // esposizione lorda protezioni
     if (!inputs.includeEtfCommodity) base -= etfRiskEUR + commodityRiskEUR;
     if (inputs.gpEquity) base += patrimonyBreakdown.gpEquityEUR;
-    return { nettingTotal: base, nettingExCCAndNP: base, equityExposure: base };
+    return { nettingTotal: base, nettingIntrinsicA: base, equityExposure: base };
   }, [
     grandTotal,
     etfRiskEUR,
@@ -815,9 +815,9 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     effIV,
     ptfBaseMTM,
     nettingTotal,
-    nettingExCCAndNP,
+    nettingIntrinsicA,
     nettingTotalRaw: liveNetting.nettingTotal,
-    nettingExCCAndNPRaw: liveNetting.nettingExCCAndNP,
+    nettingIntrinsicARaw: liveNetting.nettingIntrinsicA,
     equityExposure,
     equityGrandTotal: grandTotal,
     equityEtfEUR: etfRiskEUR,

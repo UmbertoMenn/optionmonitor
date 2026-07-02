@@ -36,7 +36,7 @@ type SortKey = 'ticker' | 'gamba' | 'q' | 'spot' | 'px' | 'intr' | 'tv' | 'tot';
 
 interface Props {
   rows: LegDecompositionRow[];
-  viewMode: 'netting_total' | 'netting_ex_cc_np';
+  viewMode: 'netting_total' | 'netting_intrinsic_a' | 'netting_intrinsic_b';
 }
 
 export function NettingLegDetailTable({ rows, viewMode }: Props) {
@@ -51,7 +51,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
         case 'spot': return r.spot ?? -Infinity;
         case 'px': return r.optionPrice;
         case 'intr': return r.intrinsicCountedEUR;
-        case 'tv': return viewMode === 'netting_ex_cc_np' && r.atIntrinsic ? r.timeValueExcludedEUR : r.timeValueCountedEUR;
+        case 'tv': return viewMode !== 'netting_total' && r.atIntrinsic ? r.timeValueExcludedEUR : r.timeValueCountedEUR;
         case 'tot': return r.contribEUR;
       }
     };
@@ -86,7 +86,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
     );
   }
 
-  const isEx = viewMode === 'netting_ex_cc_np';
+  const isEx = viewMode !== 'netting_total';
 
   const th = (label: string, key: SortKey, align: 'left' | 'right', title: string) => (
     <th
@@ -126,8 +126,8 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
         <b style={{ color: C.text }}>valore temporale</b>.{' '}
         {isEx ? (
           <>
-            In questa vista le Covered Call / Naked Put corte OTM sono escluse e le ITM contano solo l'intrinseco:
-            il loro <span style={{ color: C.amber }}>time value è escluso</span> (badge{' '}
+            In questa vista le gambe valutate a intrinseco (OTM escluse, ITM al solo intrinseco) hanno il{' '}
+            <span style={{ color: C.amber }}>time value escluso</span> (badge{' '}
             <span style={{ color: C.amber, fontWeight: 800 }}>INT</span>, hold to expiry).
           </>
         ) : (
@@ -178,7 +178,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
                   (r.spot != null ? `Spot ${fmtN(r.spot, 2)}\n` : '') +
                   `${intrLine}\n` +
                   (r.isOTM
-                    ? `OTM in vista ex CC e NP: gamba esclusa, contributo 0.\n`
+                    ? `OTM in vista intrinseca: gamba esclusa, contributo 0.\n`
                     : `ITM: conta solo l'intrinseco (${fmtEUR(r.intrinsicCountedEUR)}).\n`) +
                   `Valore temporale ESCLUSO = MTM (${fmtEUR(r.marketValueEUR)}) − intrinseco (${fmtEUR(r.intrinsicCountedEUR)}) = ${fmtEUR(r.timeValueExcludedEUR)} (hold to expiry, non pagato).\n` +
                   `Totale gamba = ${fmtEUR(r.contribEUR)}`
@@ -197,7 +197,7 @@ export function NettingLegDetailTable({ rows, viewMode }: Props) {
                     {excluded && (
                       <span
                         style={{ color: C.amber, fontSize: 8.5, fontWeight: 800, marginLeft: 4 }}
-                        title={r.isOTM ? 'OTM: gamba esclusa (ex CC e NP)' : 'ITM: valutata a intrinseco, time value escluso (ex CC e NP)'}
+                        title={r.isOTM ? 'OTM: gamba esclusa (vista intrinseca)' : 'ITM: valutata a intrinseco, time value escluso'}
                       >
                         INT
                       </span>

@@ -32,6 +32,9 @@ function interpolateValue(
     netting_ex_cc: before.netting_ex_cc + (after.netting_ex_cc - before.netting_ex_cc) * ratio,
     netting_ex_cc_np: (before.netting_ex_cc_np ?? before.netting_ex_cc) + 
       ((after.netting_ex_cc_np ?? after.netting_ex_cc) - (before.netting_ex_cc_np ?? before.netting_ex_cc)) * ratio,
+    netting_intrinsic_b: (before.netting_intrinsic_b ?? before.netting_ex_cc_np ?? before.netting_ex_cc) +
+      ((after.netting_intrinsic_b ?? after.netting_ex_cc_np ?? after.netting_ex_cc) -
+        (before.netting_intrinsic_b ?? before.netting_ex_cc_np ?? before.netting_ex_cc)) * ratio,
     equity_exposure_pct: before.equity_exposure_pct,
     usd_exposure_pct: before.usd_exposure_pct,
   };
@@ -40,20 +43,20 @@ function interpolateValue(
 // Helper: get value based on view mode
 function getValueForViewMode(entry: HistoricalDataEntry, viewMode: ViewMode): number {
   switch (viewMode) {
-    case 'netting_total':
-      return entry.netting_total;
-    case 'netting_ex_cc_np':
+    case 'netting_intrinsic_a':
       return entry.netting_ex_cc_np ?? entry.netting_ex_cc;
-    case 'base':
+    case 'netting_intrinsic_b':
+      return entry.netting_intrinsic_b ?? entry.netting_ex_cc_np ?? entry.netting_ex_cc;
+    case 'netting_total':
     default:
-      return entry.total_value;
+      return entry.netting_total;
   }
 }
 
 // Aggregazione intelligente con interpolazione lineare e apporti sintetici
 function aggregateHistoricalWithInterpolation(
   data: HistoricalDataEntry[],
-  viewMode: ViewMode = 'base'
+  viewMode: ViewMode = 'netting_total'
 ): AggregatedHistoricalResult {
   if (data.length === 0) return { entries: [], syntheticDeposits: [] };
   
@@ -96,6 +99,7 @@ function aggregateHistoricalWithInterpolation(
     let nettingTotal = 0;
     let nettingExCC = 0;
     let nettingExCCNP = 0;
+    let nettingIntrinsicB = 0;
     let sumEquityPct = 0;
     let sumUsdPct = 0;
     let totalWeight = 0;
@@ -108,6 +112,7 @@ function aggregateHistoricalWithInterpolation(
         nettingTotal += exact.netting_total;
         nettingExCC += exact.netting_ex_cc;
         nettingExCCNP += exact.netting_ex_cc_np ?? exact.netting_ex_cc;
+        nettingIntrinsicB += exact.netting_intrinsic_b ?? exact.netting_ex_cc_np ?? exact.netting_ex_cc;
         sumEquityPct += exact.equity_exposure_pct * exact.total_value;
         sumUsdPct += exact.usd_exposure_pct * exact.total_value;
         totalWeight += exact.total_value;
@@ -129,6 +134,7 @@ function aggregateHistoricalWithInterpolation(
             nettingTotal += interpolated.netting_total || 0;
             nettingExCC += interpolated.netting_ex_cc || 0;
             nettingExCCNP += interpolated.netting_ex_cc_np || 0;
+            nettingIntrinsicB += interpolated.netting_intrinsic_b || 0;
             sumEquityPct += (before.equity_exposure_pct || 0) * (interpolated.total_value || 0);
             sumUsdPct += (before.usd_exposure_pct || 0) * (interpolated.total_value || 0);
             totalWeight += interpolated.total_value || 0;
@@ -139,6 +145,7 @@ function aggregateHistoricalWithInterpolation(
           nettingTotal += before.netting_total;
           nettingExCC += before.netting_ex_cc;
           nettingExCCNP += before.netting_ex_cc_np ?? before.netting_ex_cc;
+          nettingIntrinsicB += before.netting_intrinsic_b ?? before.netting_ex_cc_np ?? before.netting_ex_cc;
           sumEquityPct += before.equity_exposure_pct * before.total_value;
           sumUsdPct += before.usd_exposure_pct * before.total_value;
           totalWeight += before.total_value;
@@ -159,6 +166,7 @@ function aggregateHistoricalWithInterpolation(
       netting_total: nettingTotal,
       netting_ex_cc: nettingExCC,
       netting_ex_cc_np: nettingExCCNP,
+      netting_intrinsic_b: nettingIntrinsicB,
       deposits: 0,
       average_balance: 0,
       equity_exposure_pct: avgEquityPct,
@@ -175,7 +183,7 @@ function aggregateHistoricalWithInterpolation(
   };
 }
 
-export function useHistoricalData(portfolioId: string | undefined, viewMode: ViewMode = 'base') {
+export function useHistoricalData(portfolioId: string | undefined, viewMode: ViewMode = 'netting_total') {
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
   const isGlobalAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
@@ -194,7 +202,7 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
           .select('*')
           .order('snapshot_date', { ascending: false });
         if (error) throw error;
-        return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], 'base');
+        return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], 'netting_total');
       }
       
       // Per-user aggregated: fetch for user's portfolios
@@ -207,7 +215,7 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
         if (error) throw error;
         // Only aggregate if multiple portfolios
         if (userPortfolioIds.length > 1) {
-          return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], 'base');
+          return aggregateHistoricalWithInterpolation(data as unknown as HistoricalDataEntry[], 'netting_total');
         }
         return { entries: data as unknown as HistoricalDataEntry[], syntheticDeposits: [] };
       }
@@ -258,6 +266,7 @@ export function useHistoricalData(portfolioId: string | undefined, viewMode: Vie
         portfolio_id: portfolioId, snapshot_date: entry.snapshot_date,
         total_value: entry.total_value, netting_total: entry.netting_total,
         netting_ex_cc: entry.netting_ex_cc_np, netting_ex_cc_np: entry.netting_ex_cc_np,
+        netting_intrinsic_b: entry.netting_intrinsic_b,
         deposits: entry.deposits, average_balance: entry.average_balance,
         equity_exposure_pct: entry.equity_exposure_pct, usd_exposure_pct: entry.usd_exposure_pct,
         ...(entry.id && { id: entry.id }),
