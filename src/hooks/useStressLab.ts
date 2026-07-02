@@ -324,6 +324,33 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     [resolveUnderlying, gpDynamicAliases, bookTickerByName],
   );
 
+  // Risolve il TICKER CANONICO di una posizione del DEPOSITO (stock/ETF/commodity). La
+  // colonna positions.ticker viene valorizzata dal cron di update prezzi con una mappa
+  // nome→ticker molto più piccola di quella canonica (tickerIdentity.ts): quando quel cron
+  // non risolve un nome (es. "AZ. ZSCALER INC"), ticker resta NULL in DB e la posizione
+  // finiva raggruppata sotto la sua descrizione grezza, in una riga SEPARATA dalle gambe
+  // opzione dello stesso sottostante (che invece risolvono correttamente via
+  // underlying_mappings) — causando doppioni in tabella e beta fallback 1.00. Stessa catena
+  // già usata per le azioni GP in resolveGpTicker.
+  const resolveStockTicker = useCallback(
+    (p: Position): string => {
+      const t = normTick(p.ticker);
+      if (t && VALID_TICKER_RE.test(t)) return t;
+
+      const viaDesc = resolveUnderlying(p.description);
+      if (viaDesc && /[A-Z]/.test(viaDesc)) return viaDesc;
+
+      const id = resolveUnderlyingIdentity(
+        { rawTicker: p.ticker, description: p.description },
+        { dynamicAliases: gpDynamicAliases },
+      );
+      if (id.displayTicker && /[A-Z]/.test(id.displayTicker)) return normTick(id.displayTicker);
+
+      return t; // '' se nulla risolve
+    },
+    [resolveUnderlying, gpDynamicAliases],
+  );
+
   /* ---------- 3. Tickers che ci servono: derivati + equity (+ GP se il toggle è ON) ---------- */
 
   const allTickers = useMemo(() => {
@@ -333,7 +360,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       if (k && VALID_TICKER_RE.test(k)) set.add(k);
     });
     [...stocks, ...etfs, ...commodities].forEach((s) => {
-      const t = normTick(s.ticker);
+      const t = resolveStockTicker(s);
       if (t && VALID_TICKER_RE.test(t)) set.add(t);
     });
     // Azioni della Gestione Patrimoniale: senza questo, il loro ticker canonico
@@ -350,7 +377,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         });
     }
     return [...set].sort();
-  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, getOptionUnderlyingKey, resolveGpTicker]);
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, getOptionUnderlyingKey, resolveGpTicker, resolveStockTicker]);
 
   /* ---------- 4. Spot prices via useUnderlyingPrices ---------- */
 
@@ -499,7 +526,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     //    frozen + spot live → IV instabile e numeri diversi tra una visita e l'altra
     //    (il layer prezzi live viene mutato in memoria dalla dashboard).
     [...stocks, ...etfs, ...commodities].forEach((s) => {
-      const t = normTick(s.ticker);
+      const t = resolveStockTicker(s);
       if (!t) return;
       const px = s.snapshot_price ?? s.current_price;
       if (typeof px === 'number' && px > 0 && !m[t]) {
@@ -541,7 +568,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
     m['EURUSD'] = { S: fx.USD, beta: 0 };
 
     return m;
-  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey, resolveGpTicker]);
+  }, [derivatives, stocks, etfs, commodities, gpHoldings, inputs.gpEquity, underlyingPrices, betaMap, fx.USD, getOptionUnderlyingKey, resolveGpTicker, resolveStockTicker]);
 
   /* ---------- 9. Costruzione legs (con IV calcolata) ---------- */
 
@@ -599,7 +626,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
       const mv = p.snapshot_market_value ?? p.market_value;
       if (typeof px !== 'number' || px <= 0) return null;
       if (typeof mv !== 'number') return null;
-      const t = normTick(p.ticker);
+      const t = resolveStockTicker(p);
       const beta = betaOverride ?? (t ? betaMap[t] ?? DEFAULT_BETA_UNKNOWN : 1.0);
       return {
         nm: p.description || t || 'N/A',
@@ -642,7 +669,7 @@ export function useStressLab(inputs: StressLabInputs): StressLabData {
         });
     }
     return out;
-  }, [stocks, etfs, gpHoldings, betaMap, inputs.includeEtfCommodity, inputs.gpEquity, resolveGpTicker]);
+  }, [stocks, etfs, gpHoldings, betaMap, inputs.includeEtfCommodity, inputs.gpEquity, resolveGpTicker, resolveStockTicker]);
 
   /* ---------- 11. Patrimonio MTM (totale, per il rapporto di margine) ---------- */
 
