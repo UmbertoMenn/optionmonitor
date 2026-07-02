@@ -794,42 +794,42 @@ export type Database = {
       }
       portfolio_full_snapshots: {
         Row: {
-          id: string
-          portfolio_id: string
-          snapshot_date: string
-          positions: Json
-          strategy_configurations: Json
+          cash_value: number
+          created_at: string | null
           derivative_overrides: Json
           gp_holdings: Json
-          cash_value: number
           gp_total_value: number | null
-          created_at: string | null
+          id: string
+          portfolio_id: string
+          positions: Json
+          snapshot_date: string
+          strategy_configurations: Json
           updated_at: string | null
         }
         Insert: {
-          id?: string
-          portfolio_id: string
-          snapshot_date: string
-          positions?: Json
-          strategy_configurations?: Json
+          cash_value?: number
+          created_at?: string | null
           derivative_overrides?: Json
           gp_holdings?: Json
-          cash_value?: number
           gp_total_value?: number | null
-          created_at?: string | null
+          id?: string
+          portfolio_id: string
+          positions?: Json
+          snapshot_date: string
+          strategy_configurations?: Json
           updated_at?: string | null
         }
         Update: {
-          id?: string
-          portfolio_id?: string
-          snapshot_date?: string
-          positions?: Json
-          strategy_configurations?: Json
+          cash_value?: number
+          created_at?: string | null
           derivative_overrides?: Json
           gp_holdings?: Json
-          cash_value?: number
           gp_total_value?: number | null
-          created_at?: string | null
+          id?: string
+          portfolio_id?: string
+          positions?: Json
+          snapshot_date?: string
+          strategy_configurations?: Json
           updated_at?: string | null
         }
         Relationships: [
