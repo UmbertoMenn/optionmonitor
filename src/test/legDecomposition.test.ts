@@ -95,17 +95,6 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
     }
   });
 
-  it('netting_intrinsic_a: Σ contrib = nettingIntrinsicA', () => {
-    const { positions, configs, prices } = buildScenario();
-    const netting = computeSinglePortfolioNetting(positions, [], prices, configs);
-    const rows = computeLegDecomposition('netting_intrinsic_a', positions, [], prices, configs);
-
-    const sumContrib = rows.reduce((s, r) => s + r.contribEUR, 0);
-    expect(sumContrib).toBeCloseTo(netting.nettingIntrinsicA, 6);
-    // −2000 (short CALL ITM) − 1000 (short PUT ITM) + 0 (short PUT OTM) + 400 (long CALL a MTM)
-    expect(sumContrib).toBeCloseTo(-2600, 6);
-  });
-
   it('netting_intrinsic_b: Σ contrib = nettingIntrinsicB', () => {
     const { positions, configs, prices } = buildScenario();
     const netting = computeSinglePortfolioNetting(positions, [], prices, configs);
@@ -113,13 +102,24 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
 
     const sumContrib = rows.reduce((s, r) => s + r.contribEUR, 0);
     expect(sumContrib).toBeCloseTo(netting.nettingIntrinsicB, 6);
-    // come A ma la long CALL OTM vale 0 anziché MTM +400
+    // −2000 (short CALL ITM) − 1000 (short PUT ITM) + 0 (short PUT OTM) + 400 (long CALL a MTM, vista B)
+    expect(sumContrib).toBeCloseTo(-2600, 6);
+  });
+
+  it('netting_intrinsic_a: Σ contrib = nettingIntrinsicA', () => {
+    const { positions, configs, prices } = buildScenario();
+    const netting = computeSinglePortfolioNetting(positions, [], prices, configs);
+    const rows = computeLegDecomposition('netting_intrinsic_a', positions, [], prices, configs);
+
+    const sumContrib = rows.reduce((s, r) => s + r.contribEUR, 0);
+    expect(sumContrib).toBeCloseTo(netting.nettingIntrinsicA, 6);
+    // come B ma la long CALL OTM vale 0 anziché MTM +400 (vista A: comprate anch'esse a intrinseco)
     expect(sumContrib).toBeCloseTo(-3000, 6);
   });
 
-  it('netting_intrinsic_a: short CALL ITM valutata a solo intrinseco, time value escluso', () => {
+  it('netting_intrinsic_b: short CALL ITM valutata a solo intrinseco, time value escluso', () => {
     const { positions, configs, prices, ids } = buildScenario();
-    const rows = computeLegDecomposition('netting_intrinsic_a', positions, [], prices, configs);
+    const rows = computeLegDecomposition('netting_intrinsic_b', positions, [], prices, configs);
     const r = rows.find(x => x.positionId === ids.cegShortCall)!;
     expect(r).toBeTruthy();
     expect(r.atIntrinsic).toBe(true);
@@ -133,9 +133,9 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
     expect(r.contribEUR).toBeCloseTo(-2000, 6);
   });
 
-  it('netting_intrinsic_a: short PUT OTM esclusa integralmente (contributo 0)', () => {
+  it('netting_intrinsic_b: short PUT OTM esclusa integralmente (contributo 0)', () => {
     const { positions, configs, prices, ids } = buildScenario();
-    const rows = computeLegDecomposition('netting_intrinsic_a', positions, [], prices, configs);
+    const rows = computeLegDecomposition('netting_intrinsic_b', positions, [], prices, configs);
     const r = rows.find(x => x.positionId === ids.nvdaPutOtm)!;
     expect(r).toBeTruthy();
     expect(r.atIntrinsic).toBe(true);
@@ -147,9 +147,9 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
     expect(r.timeValueExcludedEUR).toBeCloseTo(-300, 6);
   });
 
-  it('netting_intrinsic_a: gamba long CALL a MTM pieno (comprate a valore di mercato)', () => {
+  it('netting_intrinsic_b: gamba long CALL a MTM pieno (comprate a valore di mercato)', () => {
     const { positions, configs, prices, ids } = buildScenario();
-    const rows = computeLegDecomposition('netting_intrinsic_a', positions, [], prices, configs);
+    const rows = computeLegDecomposition('netting_intrinsic_b', positions, [], prices, configs);
     const r = rows.find(x => x.positionId === ids.cegLongCall)!;
     expect(r).toBeTruthy();
     expect(r.atIntrinsic).toBe(false);
@@ -158,9 +158,9 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
     expect(r.contribEUR).toBeCloseTo(400, 6);
   });
 
-  it('netting_intrinsic_b: long CALL OTM esclusa (contributo 0), long ITM a +intrinseco', () => {
+  it('netting_intrinsic_a: long CALL OTM esclusa (contributo 0), long ITM a +intrinseco', () => {
     const { positions, configs, prices, ids } = buildScenario();
-    const rows = computeLegDecomposition('netting_intrinsic_b', positions, [], prices, configs);
+    const rows = computeLegDecomposition('netting_intrinsic_a', positions, [], prices, configs);
 
     // long CALL K350, spot 300 → OTM: contributo 0, tutto MTM è time value escluso
     const otm = rows.find(x => x.positionId === ids.cegLongCall)!;
@@ -170,12 +170,12 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
     expect(otm.timeValueExcludedEUR).toBeCloseTo(400, 6);
   });
 
-  it('netting_intrinsic_b: long PUT ITM valutata a +intrinseco, time value escluso', () => {
+  it('netting_intrinsic_a: long PUT ITM valutata a +intrinseco, time value escluso', () => {
     const { positions, configs, prices } = buildScenario();
     const EXP = '2026-12-18';
     const longPut = pos({ option_type: 'put', quantity: 1, strike_price: 120, expiry_date: EXP, underlying: 'NVDA', ticker: 'NVDA', snapshot_price: 32 });
     const all = [...positions, longPut];
-    const rows = computeLegDecomposition('netting_intrinsic_b', all, [], prices, configs);
+    const rows = computeLegDecomposition('netting_intrinsic_a', all, [], prices, configs);
     const r = rows.find(x => x.positionId === longPut.id)!;
     expect(r).toBeTruthy();
     expect(r.atIntrinsic).toBe(true);
@@ -185,9 +185,9 @@ describe('computeLegDecomposition — riconciliazione con computeSinglePortfolio
     expect(r.contribEUR).toBeCloseTo(3000, 6);
     expect(r.timeValueExcludedEUR).toBeCloseTo(200, 6);
 
-    // riconciliazione col netting B
+    // riconciliazione col netting A
     const netting = computeSinglePortfolioNetting(all, [], prices, configs);
     const sumContrib = rows.reduce((s, x) => s + x.contribEUR, 0);
-    expect(sumContrib).toBeCloseTo(netting.nettingIntrinsicB, 6);
+    expect(sumContrib).toBeCloseTo(netting.nettingIntrinsicA, 6);
   });
 });

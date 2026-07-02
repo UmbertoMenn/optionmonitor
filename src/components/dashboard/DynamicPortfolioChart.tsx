@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { PatrimonyProjectionCard } from '@/components/dashboard/PatrimonyProjectionCard';
+import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTooltip';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface DynamicPortfolioChartProps {
@@ -280,8 +281,8 @@ function TopCostlyPositions({ items }: { items: NettingBreakdownItem[] }) {
 // ─── Main Component ───────────────────────────────────────────
 const NETTING_DESCRIPTIONS: Record<string, string> = {
   netting_total: 'Valore portafoglio al quale abbiamo sottratto i costi di chiusura di tutte le posizioni in derivati, ai prezzi di mercato.',
-  netting_intrinsic_a: 'Valore del portafoglio con PUT e CALL vendute valutate al solo valore intrinseco (negativo se ITM, zero se OTM) e PUT e CALL comprate al valore di mercato.',
-  netting_intrinsic_b: 'Valore del portafoglio con tutte le opzioni valutate al solo valore intrinseco: PUT e CALL vendute negative se ITM (zero se OTM), PUT e CALL comprate positive se ITM (zero se OTM).',
+  netting_intrinsic_a: 'Valore del portafoglio con tutte le opzioni valutate al solo valore intrinseco: PUT e CALL vendute negative se ITM (zero se OTM), PUT e CALL comprate positive se ITM (zero se OTM).',
+  netting_intrinsic_b: 'Valore del portafoglio con PUT e CALL vendute valutate al solo valore intrinseco (negativo se ITM, zero se OTM) e PUT e CALL comprate al valore di mercato.',
 };
 
 const CHART_TITLES: Record<ViewMode, string> = {
@@ -415,16 +416,19 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-lg">{CHART_TITLES[viewMode]}</CardTitle>
           {onViewModeChange && (
-            <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
-              <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="netting_total">Netting Totale</SelectItem>
-                <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
-                <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
+                <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="netting_total">Netting Totale</SelectItem>
+                  <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
+                  <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
+                </SelectContent>
+              </Select>
+              <NettingViewInfoTooltip />
+            </div>
           )}
         </div>
       </CardHeader>

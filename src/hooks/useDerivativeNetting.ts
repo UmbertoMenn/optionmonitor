@@ -24,9 +24,9 @@ export interface NettingBreakdownItem {
 
 export interface NettingResult {
   nettingTotal: number;
-  /** Netting Intrinseco (A): vendute a intrinseco, comprate a market value */
+  /** Netting Intrinseco (A): vendute e comprate entrambe a solo intrinseco */
   nettingIntrinsicA: number;
-  /** Netting Intrinseco (B): vendute e comprate entrambe a solo intrinseco */
+  /** Netting Intrinseco (B): vendute a intrinseco, comprate a market value */
   nettingIntrinsicB: number;
   breakdown: NettingBreakdownItem[];
 }
@@ -187,10 +187,11 @@ function makeAcc(): CategoryAccumulator {
 // Le due viste intrinseche si applicano a OGNI gamba opzione, indipendentemente
 // dalla categoria di strategia (non più solo Covered Call e Naked Put):
 //   • Netting Intrinseco (A): opzioni VENDUTE a solo valore intrinseco
-//     (negativo se ITM, 0 se OTM); opzioni COMPRATE a valore di mercato.
+//     (negativo se ITM, 0 se OTM); opzioni COMPRATE anch'esse a solo valore
+//     intrinseco (positivo se ITM, 0 se OTM). Il valore temporale non conta mai.
 //   • Netting Intrinseco (B): opzioni VENDUTE a solo valore intrinseco
-//     (negativo se ITM, 0 se OTM); opzioni COMPRATE a solo valore intrinseco
-//     (positivo se ITM, 0 se OTM).
+//     (negativo se ITM, 0 se OTM); opzioni COMPRATE a valore di mercato pieno
+//     (premio compreso).
 // Gambe non-opzione: sempre valore di mercato. Se il prezzo del sottostante
 // non è risolvibile, fallback prudente al valore di mercato (mai 0 silenzioso).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,8 +215,8 @@ function computeIntrinsicContribs(
     // venduta: −intrinseco (ITM), 0 (OTM) — identico in A e B
     return { a: -intrinsicMag, b: -intrinsicMag };
   }
-  // comprata: A → market value; B → +intrinseco (ITM), 0 (OTM)
-  return { a: marketValue, b: intrinsicMag };
+  // comprata: A → +intrinseco (ITM), 0 (OTM); B → market value
+  return { a: intrinsicMag, b: marketValue };
 }
 
 /** Compute netting per un singolo portafoglio usando la fonte canonica */
@@ -326,9 +327,9 @@ export function computeSinglePortfolioNetting(
  * Confronto metodologico per-gamba: per ogni gamba canonica calcola
  *  - marketValue  = price * qty * 100 / fx  (mark-to-market pieno, segno incluso)
  *  - intrinsicA   = contributo alla vista Netting Intrinseco (A):
- *                   vendute a intrinseco (ITM negativo, OTM 0), comprate a market value
- *  - intrinsicB   = contributo alla vista Netting Intrinseco (B):
  *                   vendute e comprate entrambe a solo intrinseco (OTM 0)
+ *  - intrinsicB   = contributo alla vista Netting Intrinseco (B):
+ *                   vendute a intrinseco (ITM negativo, OTM 0), comprate a market value
  *
  * Gestisce automaticamente il caso multi-portfolio (somma per portfolio).
  */
@@ -650,8 +651,8 @@ export function getBreakdownForViewMode(
 //   • valore temporale           = MTM − intrinseco                          (segno della posizione)
 // La somma dei contributi conteggiati riconcilia con il netting della vista:
 //   Σ contribEUR (netting_total)        = totalNetting − baseValue
-//   Σ contribEUR (netting_intrinsic_a)  = nettingIntrinsicA − baseValue
-//   Σ contribEUR (netting_intrinsic_b)  = nettingIntrinsicB − baseValue
+//   Σ contribEUR (netting_intrinsic_a)  = nettingIntrinsicA − baseValue  (tutte le opzioni a intrinseco)
+//   Σ contribEUR (netting_intrinsic_b)  = nettingIntrinsicB − baseValue  (solo vendute a intrinseco)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface LegDecompositionRow {
@@ -746,9 +747,9 @@ export function computeLegDecomposition(
     let isOTM = false;
 
     if (viewMode !== 'netting_total' && (isCall || isPut) && spot != null && strike != null) {
-      // Vista A: solo le gambe VENDUTE sono valutate a intrinseco; le comprate restano a MTM.
-      // Vista B: TUTTE le gambe opzione sono valutate a intrinseco.
-      const valuedAtIntrinsic = quantity < 0 || viewMode === 'netting_intrinsic_b';
+      // Vista A: TUTTE le gambe opzione (vendute e comprate) sono valutate a intrinseco.
+      // Vista B: solo le gambe VENDUTE sono valutate a intrinseco; le comprate restano a MTM.
+      const valuedAtIntrinsic = quantity < 0 || viewMode === 'netting_intrinsic_a';
 
       if (valuedAtIntrinsic) {
         atIntrinsic = true;

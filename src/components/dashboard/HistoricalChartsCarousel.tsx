@@ -18,6 +18,7 @@ import {
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { DepositEntry } from '@/types/deposits';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
+import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTooltip';
 import { PerformanceEvolutionChart } from './charts/PerformanceEvolutionChart';
 import { YearlyReturnChart } from './charts/YearlyReturnChart';
 import { PortfolioEvolutionChart } from './charts/PortfolioEvolutionChart';
@@ -114,16 +115,19 @@ export function HistoricalChartsCarousel({
               })()}
               {slides[current].title}
             </CardTitle>
-            <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
-              <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="netting_total">Netting Totale</SelectItem>
-                <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
-                <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
+                <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="netting_total">Netting Totale</SelectItem>
+                  <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
+                  <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
+                </SelectContent>
+              </Select>
+              <NettingViewInfoTooltip />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">{slides[current].description}</p>
         </CardHeader>
@@ -183,16 +187,19 @@ export function HistoricalChartsCarousel({
               <BarChart3 className="w-5 h-5" />
               Rendimento per Anno
             </CardTitle>
-            <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
-              <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="netting_total">Netting Totale</SelectItem>
-                <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
-                <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5">
+              <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
+                <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="netting_total">Netting Totale</SelectItem>
+                  <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
+                  <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
+                </SelectContent>
+              </Select>
+              <NettingViewInfoTooltip />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">Rendimento % annuo</p>
         </CardHeader>

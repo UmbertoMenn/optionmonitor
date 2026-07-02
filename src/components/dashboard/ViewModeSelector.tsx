@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTooltip';
 
 export type ViewMode = 'netting_total' | 'netting_intrinsic_a' | 'netting_intrinsic_b';
 
@@ -18,7 +19,7 @@ const VIEWS: ViewMode[] = ['netting_total', 'netting_intrinsic_a', 'netting_intr
 export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelectorProps) {
   return (
     <div className="mb-4 border border-border rounded-xl bg-card p-1">
-      <div className="flex flex-wrap justify-center gap-1">
+      <div className="flex flex-wrap items-center justify-center gap-1">
         {VIEWS.map((v) => {
           const active = viewMode === v;
           return (
@@ -37,6 +38,7 @@ export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelecto
             </button>
           );
         })}
+        <NettingViewInfoTooltip className="w-4 h-4 text-muted-foreground cursor-help shrink-0 ml-1" />
       </div>
     </div>
   );
