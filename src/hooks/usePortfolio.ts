@@ -6,12 +6,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Portfolio, Position, PortfolioSummary, AssetType } from '@/types/portfolio';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { remapOverridesAfterUpload } from '@/lib/overrideMatching';
+import { useFullSnapshot } from '@/hooks/useFullSnapshot';
 import { toast } from 'sonner';
 
 export function usePortfolio() {
-  const { selectedPortfolio, isAggregatedView, selectedPortfolioId } = usePortfolioContext();
+  const { selectedPortfolio, isAggregatedView, selectedPortfolioId, isHistoricalView, historicalViewDate } = usePortfolioContext();
   const { isAdmin, user } = useAuth();
   const queryClient = useQueryClient();
+  const { snapshot: fullSnapshot, isLoading: isSnapshotLoading, isHistoricalActive } = useFullSnapshot();
 
   const portfolio = selectedPortfolio;
   const selectedId = selectedPortfolioId;
@@ -148,8 +150,26 @@ export function usePortfolio() {
     created_at: new Date().toISOString(),
   } : null;
 
-  const effectivePortfolio = isAggregatedView ? aggregatedPortfolio : portfolio;
-  const summary: PortfolioSummary | null = positionsQuery.data ? calculateSummary(positionsQuery.data, effectivePortfolio?.cash_value || 0) : null;
+  // Visualizzazione storica: posizioni, cash e snapshot_date arrivano dallo
+  // snapshot completo congelato alla data selezionata. Sola lettura.
+  const historicalPortfolio: Portfolio | null = isHistoricalActive && portfolio && fullSnapshot ? {
+    ...portfolio,
+    snapshot_date: fullSnapshot.snapshot_date,
+    cash_value: fullSnapshot.cash_value,
+    gp_total_value: fullSnapshot.gp_total_value ?? (portfolio as Portfolio & { gp_total_value?: number | null }).gp_total_value ?? null,
+  } as Portfolio : null;
+
+  const effectivePortfolio = isHistoricalActive
+    ? (historicalPortfolio ?? portfolio)
+    : (isAggregatedView ? aggregatedPortfolio : portfolio);
+
+  const effectivePositions: Position[] = isHistoricalActive
+    ? (fullSnapshot?.positions ?? [])
+    : (positionsQuery.data || []);
+
+  const summary: PortfolioSummary | null = (isHistoricalActive ? fullSnapshot : positionsQuery.data)
+    ? calculateSummary(effectivePositions, effectivePortfolio?.cash_value || 0)
+    : null;
 
   const updatePositionsMutation = useMutation({
     mutationFn: async ({ 
@@ -158,6 +178,7 @@ export function usePortfolio() {
       positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]; 
       targetPortfolioId?: string;
     }) => {
+      if (isHistoricalView) throw new Error('Visualizzazione storica attiva: portafoglio in sola lettura');
       const portfolioId = targetPortfolioId || portfolio?.id;
       if (!portfolioId) throw new Error('Portfolio non trovato');
       
@@ -234,10 +255,12 @@ export function usePortfolio() {
 
   return {
     portfolio: effectivePortfolio,
-    positions: positionsQuery.data || [],
+    positions: effectivePositions,
     summary,
-    isLoading: positionsQuery.isLoading,
-    isReadOnly: isAggregatedView,
+    isLoading: isHistoricalActive ? isSnapshotLoading : positionsQuery.isLoading,
+    isReadOnly: isAggregatedView || isHistoricalActive,
+    isHistoricalView: isHistoricalActive,
+    historicalViewDate: isHistoricalActive ? historicalViewDate : null,
     updatePositions: (args: { 
       positions: Omit<Position, 'id' | 'portfolio_id' | 'created_at' | 'updated_at'>[]; 
       targetPortfolioId?: string;

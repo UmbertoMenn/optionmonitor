@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
+import { useFullSnapshot } from '@/hooks/useFullSnapshot';
 
 interface CreateSingleOverrideParams {
   positionId: string;
@@ -29,8 +30,9 @@ export function useDerivativeOverrides() {
   const isGlobalAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
   const isAggregated = isAnyAggregatedId(portfolioId);
   const { portfolioIds: userPortfolioIds, isUserAggregated } = useUserPortfolioIds(portfolioId);
+  const { snapshot: fullSnapshot, isLoading: isSnapshotLoading, isHistoricalActive } = useFullSnapshot();
 
-  const { data: overrides = [], isLoading } = useQuery({
+  const { data: liveOverrides = [], isLoading: isLiveLoading } = useQuery({
     queryKey: ['derivative-overrides', portfolioId],
     queryFn: async () => {
       if (!portfolioId) return [];
@@ -57,12 +59,19 @@ export function useDerivativeOverrides() {
       if (error) throw error;
       return data as DerivativeOverride[];
     },
-    enabled: !!portfolioId && (!isGlobalAggregated || isAdmin) && (!isUserAggregated || userPortfolioIds.length > 0),
+    enabled: !isHistoricalActive && !!portfolioId && (!isGlobalAggregated || isAdmin) && (!isUserAggregated || userPortfolioIds.length > 0),
   });
+
+  // Visualizzazione storica: override congelati dallo snapshot completo
+  const overrides = isHistoricalActive
+    ? (fullSnapshot?.derivative_overrides ?? [])
+    : liveOverrides;
+  const isLoading = isHistoricalActive ? isSnapshotLoading : isLiveLoading;
 
   // Create or update a single override
   const createSingleOverrideMutation = useMutation({
     mutationFn: async ({ positionId, targetCategory, linkedStockId }: CreateSingleOverrideParams) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       if (!portfolioId) throw new Error('No portfolio selected');
       const { data, error } = await supabase
         .from('derivative_overrides')
@@ -78,6 +87,7 @@ export function useDerivativeOverrides() {
   // Create a multi-leg override (Iron Condor / Double Diagonal)
   const createMultiLegOverrideMutation = useMutation({
     mutationFn: async ({ strategyType, soldPutId, boughtPutId, soldCallId, boughtCallId }: CreateMultiLegOverrideParams) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       if (!portfolioId) throw new Error('No portfolio selected');
       const { data, error } = await supabase
         .from('derivative_overrides')
@@ -93,6 +103,7 @@ export function useDerivativeOverrides() {
   // Remove an override by position ID (for single overrides)
   const removeOverrideMutation = useMutation({
     mutationFn: async (positionId: string) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       if (!portfolioId) throw new Error('No portfolio selected');
       const { error } = await supabase.from('derivative_overrides').delete().eq('portfolio_id', portfolioId).eq('position_id', positionId);
       if (error) throw error;
@@ -104,6 +115,7 @@ export function useDerivativeOverrides() {
   // Remove a multi-leg override by ID
   const removeMultiLegOverrideMutation = useMutation({
     mutationFn: async (overrideId: string) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       const { error } = await supabase.from('derivative_overrides').delete().eq('id', overrideId);
       if (error) throw error;
     },

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
@@ -9,9 +10,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart, LayoutDashboard, FlaskConical } from 'lucide-react';
+import { TrendingUp, Menu, ShieldAlert, Settings, Sun, Moon, LogOut, LineChart, LayoutDashboard, FlaskConical, History } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { PortfolioSelector } from '@/components/portfolio/PortfolioSelector';
+import { HistoricalViewDialog } from '@/components/historical/HistoricalViewDialog';
 
 interface AppHeaderMenuProps {
   includePortfolioSelector?: boolean;
@@ -20,6 +23,8 @@ interface AppHeaderMenuProps {
 export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenuProps) {
   const { isAdmin, signOut } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { isHistoricalView, exitHistoricalView } = usePortfolioContext();
+  const [historicalDialogOpen, setHistoricalDialogOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const isDashboard = location.pathname === '/';
@@ -73,6 +78,18 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
             <LineChart className="w-4 h-4 mr-2" />
             Option Analyzer
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {isHistoricalView ? (
+            <DropdownMenuItem onClick={exitHistoricalView}>
+              <History className="w-4 h-4 mr-2" />
+              Esci da Visualizzazione Storica
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={() => setHistoricalDialogOpen(true)}>
+              <History className="w-4 h-4 mr-2" />
+              Visualizzazione Storica
+            </DropdownMenuItem>
+          )}
           {isAdmin && (
             <DropdownMenuItem onClick={() => navigate('/admin')}>
               <Settings className="w-4 h-4 mr-2" />
@@ -90,6 +107,7 @@ export function AppHeaderMenu({ includePortfolioSelector = true }: AppHeaderMenu
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <HistoricalViewDialog open={historicalDialogOpen} onOpenChange={setHistoricalDialogOpen} />
     </div>
   );
 }

@@ -48,7 +48,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const { isAggregatedView, selectedPortfolioId } = usePortfolioContext();
   const isGlobalAggregate = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
-  const { portfolio, positions, summary: rawSummary, isLoading } = usePortfolio();
+  const { portfolio, positions, summary: rawSummary, isLoading, isHistoricalView } = usePortfolio();
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs, hasConfigurations } = useStrategyConfigurations();
   const { gpHoldings, gpSummary } = useGPHoldings();
@@ -404,21 +404,23 @@ export function Dashboard() {
                   />
                 </div>
               </div>
-              <div className="space-y-3">
-                <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
-                <GpSnapshotMissingBanner />
-                <FileUploader />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
-                  onClick={() => setClearDialogOpen(true)}
-                  disabled={positions.length === 0 || isClearing}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Pulisci Dati Portfolio
-                </Button>
-              </div>
+              {!isHistoricalView && (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-2">Carica Portfolio</h3>
+                  <GpSnapshotMissingBanner />
+                  <FileUploader />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-destructive hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => setClearDialogOpen(true)}
+                    disabled={positions.length === 0 || isClearing}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Pulisci Dati Portfolio
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>

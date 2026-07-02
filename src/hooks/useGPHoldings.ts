@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID, isUserAggregatedId, getUserIdFromAggregatedId } from '@/contexts/PortfolioContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFullSnapshot } from '@/hooks/useFullSnapshot';
 
 export interface GPHoldingRow {
   id: string;
@@ -36,6 +37,7 @@ export function useGPHoldings() {
   const isGlobalAgg = selectedPortfolioId === AGGREGATED_PORTFOLIO_ID;
   const isUserAgg = isUserAggregatedId(selectedPortfolioId);
   const targetUserId = isUserAgg && selectedPortfolioId ? getUserIdFromAggregatedId(selectedPortfolioId) : null;
+  const { snapshot: fullSnapshot, isLoading: isSnapshotLoading, isHistoricalActive } = useFullSnapshot();
 
   const query = useQuery({
     queryKey: ['gp-holdings', isAggregatedView ? selectedPortfolioId : selectedPortfolio?.id],
@@ -64,11 +66,16 @@ export function useGPHoldings() {
       if (error) throw error;
       return data as GPHoldingRow[];
     },
-    enabled: !!selectedPortfolio?.id || (isGlobalAgg && isAdmin) || !!targetUserId,
+    enabled: !isHistoricalActive && (!!selectedPortfolio?.id || (isGlobalAgg && isAdmin) || !!targetUserId),
   });
 
+  // Visualizzazione storica: holdings GP congelati dallo snapshot completo
+  const effectiveHoldings = isHistoricalActive
+    ? (fullSnapshot?.gp_holdings ?? [])
+    : (query.data || []);
+
   const gpSummary: GPSummary = useMemo(() => {
-    const holdings = query.data || [];
+    const holdings = effectiveHoldings;
     const cashValue = holdings
       .filter(h => h.asset_type === 'cash')
       .reduce((sum, h) => sum + h.market_value, 0);
@@ -85,12 +92,12 @@ export function useGPHoldings() {
       bondValue,
       holdings,
     };
-  }, [query.data]);
+  }, [effectiveHoldings]);
 
   return {
-    gpHoldings: query.data || [],
+    gpHoldings: effectiveHoldings,
     gpSummary,
-    isLoading: query.isLoading,
+    isLoading: isHistoricalActive ? isSnapshotLoading : query.isLoading,
     refetch: query.refetch,
   };
 }

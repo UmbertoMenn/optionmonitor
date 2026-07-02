@@ -8,6 +8,8 @@ import { toast } from 'sonner';
 const SELECTED_PORTFOLIO_KEY = 'selectedPortfolioId';
 const ADMIN_VIEW_USER_KEY = 'adminViewUserId';
 const ADMIN_VIEW_PORTFOLIO_KEY = 'adminViewPortfolioId';
+const HISTORICAL_VIEW_DATE_KEY = 'historicalViewDate';
+const HISTORICAL_VIEW_PORTFOLIO_KEY = 'historicalViewPortfolioId';
 
 export const AGGREGATED_PORTFOLIO_ID = 'AGGREGATED';
 export const AGGREGATED_USER_PREFIX = 'AGGREGATED_USER:';
@@ -39,6 +41,11 @@ interface PortfolioContextType {
   exitAdminMode: () => void;
   isAggregatedView: boolean;
   selectedPortfolioId: string | null;
+  // Visualizzazione storica (portafoglio ad una data passata, sola lettura)
+  historicalViewDate: string | null;
+  isHistoricalView: boolean;
+  enterHistoricalView: (date: string) => void;
+  exitHistoricalView: () => void;
 }
 
 const PortfolioContext = createContext<PortfolioContextType | undefined>(undefined);
@@ -60,6 +67,17 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   });
   const isAdminMode = adminViewUserId !== null && adminViewUserId !== user?.id;
   const isAggregatedView = isAnyAggregatedId(selectedId);
+
+  // Visualizzazione storica: persiste in sessionStorage insieme al portfolio a
+  // cui si riferisce, così un refresh la mantiene ma un cambio portafoglio la chiude.
+  const [historicalViewDate, setHistoricalViewDate] = useState<string | null>(() => {
+    const date = sessionStorage.getItem(HISTORICAL_VIEW_DATE_KEY);
+    const pid = sessionStorage.getItem(HISTORICAL_VIEW_PORTFOLIO_KEY);
+    const currentPid = sessionStorage.getItem(ADMIN_VIEW_PORTFOLIO_KEY) || localStorage.getItem(SELECTED_PORTFOLIO_KEY);
+    if (date && pid && pid === currentPid) return date;
+    return null;
+  });
+  const isHistoricalView = historicalViewDate !== null;
 
   // Fetch user's own portfolios - ordered by last_updated DESC
   const portfoliosQuery = useQuery({
@@ -208,7 +226,34 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     ? adminPortfolioQuery.data || null 
     : portfolios.find(p => p.id === selectedId) || null;
 
+  const invalidateHistoricalScopedQueries = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['positions'] });
+    queryClient.invalidateQueries({ queryKey: ['strategy-configurations'] });
+    queryClient.invalidateQueries({ queryKey: ['derivative-overrides'] });
+    queryClient.invalidateQueries({ queryKey: ['gp-holdings'] });
+    queryClient.invalidateQueries({ queryKey: ['full-snapshot'] });
+  }, [queryClient]);
+
+  const enterHistoricalView = useCallback((date: string) => {
+    if (!selectedId || isAnyAggregatedId(selectedId)) return; // solo portafogli singoli
+    setHistoricalViewDate(date);
+    sessionStorage.setItem(HISTORICAL_VIEW_DATE_KEY, date);
+    sessionStorage.setItem(HISTORICAL_VIEW_PORTFOLIO_KEY, selectedId);
+    invalidateHistoricalScopedQueries();
+  }, [selectedId, invalidateHistoricalScopedQueries]);
+
+  const exitHistoricalView = useCallback(() => {
+    setHistoricalViewDate(null);
+    sessionStorage.removeItem(HISTORICAL_VIEW_DATE_KEY);
+    sessionStorage.removeItem(HISTORICAL_VIEW_PORTFOLIO_KEY);
+    invalidateHistoricalScopedQueries();
+  }, [invalidateHistoricalScopedQueries]);
+
   const selectPortfolio = useCallback((id: string) => {
+    // Cambio portafoglio → esce dalla vista storica (riferita al portafoglio precedente)
+    setHistoricalViewDate(null);
+    sessionStorage.removeItem(HISTORICAL_VIEW_DATE_KEY);
+    sessionStorage.removeItem(HISTORICAL_VIEW_PORTFOLIO_KEY);
     setSelectedId(id);
     // In admin mode aggiorna la chiave di sessione admin, non lo storage del portfolio personale
     if (adminViewUserId !== null && adminViewUserId !== user?.id) {
@@ -311,6 +356,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   // Admin mode functions
   const setAdminViewPortfolio = useCallback((portfolioId: string, ownerUserId: string) => {
+    // Cambio contesto → esce dalla vista storica
+    setHistoricalViewDate(null);
+    sessionStorage.removeItem(HISTORICAL_VIEW_DATE_KEY);
+    sessionStorage.removeItem(HISTORICAL_VIEW_PORTFOLIO_KEY);
     setAdminViewUserId(ownerUserId);
     setSelectedId(portfolioId);
     // Persisti la vista admin in sessionStorage per sopravvivere a remount/refresh token
@@ -324,6 +373,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   const exitAdminMode = useCallback(() => {
+    setHistoricalViewDate(null);
+    sessionStorage.removeItem(HISTORICAL_VIEW_DATE_KEY);
+    sessionStorage.removeItem(HISTORICAL_VIEW_PORTFOLIO_KEY);
     setAdminViewUserId(null);
     sessionStorage.removeItem(ADMIN_VIEW_USER_KEY);
     sessionStorage.removeItem(ADMIN_VIEW_PORTFOLIO_KEY);
@@ -355,6 +407,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         exitAdminMode,
         isAggregatedView,
         selectedPortfolioId: selectedId,
+        historicalViewDate,
+        isHistoricalView,
+        enterHistoricalView,
+        exitHistoricalView,
       }}
     >
       {children}

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { AGGREGATED_PORTFOLIO_ID, isAnyAggregatedId } from '@/contexts/PortfolioContext';
 import { useUserPortfolioIds } from '@/hooks/useUserPortfolioIds';
+import { useFullSnapshot } from '@/hooks/useFullSnapshot';
 import { recomputeLatestSnapshot } from '@/lib/uploadSnapshot';
 
 export interface PositionSignature {
@@ -60,8 +61,9 @@ export function useStrategyConfigurations() {
   const isGlobalAggregated = portfolioId === AGGREGATED_PORTFOLIO_ID;
   const isAggregated = isAnyAggregatedId(portfolioId);
   const { portfolioIds: userPortfolioIds, isUserAggregated } = useUserPortfolioIds(portfolioId);
+  const { snapshot: fullSnapshot, isLoading: isSnapshotLoading, isHistoricalActive } = useFullSnapshot();
 
-  const { data: configurations = [], isLoading } = useQuery({
+  const { data: liveConfigurations = [], isLoading: isLiveLoading } = useQuery({
     queryKey: ['strategy-configurations', portfolioId],
     queryFn: async () => {
       if (!portfolioId) return [];
@@ -86,11 +88,18 @@ export function useStrategyConfigurations() {
       if (error) throw error;
       return (data || []) as unknown as StrategyConfiguration[];
     },
-    enabled: !!portfolioId && (!isGlobalAggregated || isAdmin) && (!isUserAggregated || userPortfolioIds.length > 0),
+    enabled: !isHistoricalActive && !!portfolioId && (!isGlobalAggregated || isAdmin) && (!isUserAggregated || userPortfolioIds.length > 0),
   });
+
+  // Visualizzazione storica: configurazioni congelate dallo snapshot completo
+  const configurations = isHistoricalActive
+    ? (fullSnapshot?.strategy_configurations ?? [])
+    : liveConfigurations;
+  const isLoading = isHistoricalActive ? isSnapshotLoading : isLiveLoading;
 
   const upsertMutation = useMutation({
     mutationFn: async (params: UpsertConfigParams) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       if (!portfolioId) throw new Error('No portfolio selected');
       const { data, error } = await supabase
         .from('strategy_configurations')
@@ -124,6 +133,7 @@ export function useStrategyConfigurations() {
 
   const upsertBatchMutation = useMutation({
     mutationFn: async (configs: UpsertConfigParams[]) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       if (!portfolioId) throw new Error('No portfolio selected');
       
       // Delete existing configs for this portfolio first
@@ -163,6 +173,7 @@ export function useStrategyConfigurations() {
 
   const deleteMutation = useMutation({
     mutationFn: async (configId: string) => {
+      if (isHistoricalActive) throw new Error('Visualizzazione storica attiva: sola lettura');
       const { error } = await supabase.from('strategy_configurations').delete().eq('id', configId);
       if (error) throw error;
     },

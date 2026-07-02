@@ -10,6 +10,7 @@ import { AuthForm } from "@/components/auth/AuthForm";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ScrollArrows } from "@/components/ui/ScrollArrows";
 import { DisclaimerDialog } from "@/components/auth/DisclaimerDialog";
+import { HistoricalViewBanner } from "@/components/historical/HistoricalViewBanner";
 import { toast } from "sonner";
 import { ThemeProvider } from "next-themes";
 
@@ -118,6 +119,7 @@ function AppRoutes() {
     <PortfolioProvider>
       <InProgressRouteGuard />
       <ScrollArrows />
+      <HistoricalViewBanner />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/" element={

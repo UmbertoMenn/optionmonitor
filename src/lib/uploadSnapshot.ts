@@ -12,6 +12,7 @@ import { calculateCurrencyExposure } from './currencyExposure';
 import { computeSinglePortfolioNetting } from '@/hooks/useDerivativeNetting';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { fetchLocalPrices, UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { saveFullSnapshot } from '@/lib/fullSnapshot';
 
 interface UploadSnapshotInput {
   portfolioId: string;
@@ -194,6 +195,10 @@ export async function upsertUploadSnapshot({ portfolioId, snapshotDate, cashValu
         deposits: 0,
         average_balance: 0,
       }, { onConflict: 'portfolio_id,snapshot_date' });
+
+    // Congela anche lo snapshot COMPLETO (posizioni + configs + overrides + GP)
+    // per la Visualizzazione Storica. Non blocca il flusso in caso di errore.
+    await saveFullSnapshot(portfolioId, snapshotDate, cashValue);
 
     if (error) {
       console.error('[UploadSnapshot] Upsert failed:', error.message);
