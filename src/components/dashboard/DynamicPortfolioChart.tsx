@@ -55,47 +55,6 @@ const SECTION_COLORS: Record<string, string> = {
   orphans: 'hsl(0, 0%, 55%)',
 };
 
-// ─── Simple Bars Chart ────────────────────────────────────────
-function SimpleBarsChart({ baseValue, finalValue }: { baseValue: number; finalValue: number }) {
-  const data = [
-    { name: 'Valore Assets', value: baseValue, fill: 'hsl(var(--muted-foreground))' },
-    { name: 'Valore Nettato', value: finalValue, fill: 'hsl(217, 91%, 60%)' },
-  ];
-
-  return (
-    <div className="w-full h-[160px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 70, top: 5, bottom: 5 }} barCategoryGap="30%">
-          <XAxis type="number" hide domain={[0, 'dataMax']} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-            width={120}
-          />
-          <RechartsTooltip
-            cursor={false}
-            content={({ active, payload }) => {
-              if (!active || !payload?.[0]) return null;
-              return (
-                <div className="bg-popover border border-border rounded-lg shadow-lg p-2 text-sm">
-                  <span className="text-foreground">{formatEUR(payload[0].value as number)}</span>
-                </div>
-              );
-            }}
-          />
-          <Bar dataKey="value" barSize={28} radius={[0, 4, 4, 0]}>
-            {data.map((entry, index) => (
-              <Cell key={index} fill={entry.fill} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
 
 // ─── Missing Configuration Warning ───────────────────────────
 function MissingConfigWarning() {
