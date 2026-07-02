@@ -11,7 +11,13 @@ import { AlertTriangle, Check, X, Plus, Zap, Trash2, ChevronDown, Loader2, Sciss
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { ReconciliationItem, LegStatus } from '@/lib/strategyReconciliation';
 import { PutRollUpToggle } from '@/components/derivatives/PutRollUpToggle';
-import { isSoldPut } from '@/lib/strategyKeys';
+import { RollTargetInput } from '@/components/derivatives/RollTargetInput';
+import {
+  isSoldPut,
+  nakedPutKeyForPosition,
+  coveredCallKeyForPosition,
+  deRiskingCoveredCallKeyForPosition,
+} from '@/lib/strategyKeys';
 import { UpsertConfigParams, PositionSignature, StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { Position } from '@/types/portfolio';
 import { normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
@@ -891,6 +897,45 @@ export function StrategyReconciliationDialog({
                                   {rollUpPut && (
                                     <PutRollUpToggle option={rollUpPut} />
                                   )}
+
+                                  {(() => {
+                                    let targetKey: string | null = null;
+                                    let targetPortfolioId: string | null = null;
+                                    if (strategy.strategyType === 'naked_put') {
+                                      const leg = strategy.positions.find(isSoldPut);
+                                      if (leg) {
+                                        targetKey = nakedPutKeyForPosition(leg);
+                                        targetPortfolioId = leg.portfolio_id;
+                                      }
+                                    } else if (strategy.strategyType === 'covered_call' || strategy.strategyType === 'derisking_covered_call') {
+                                      const shortCall = strategy.positions.find(p => p.option_type === 'call' && p.quantity < 0);
+                                      if (shortCall) {
+                                        targetKey = strategy.strategyType === 'covered_call'
+                                          ? coveredCallKeyForPosition(shortCall)
+                                          : deRiskingCoveredCallKeyForPosition(shortCall);
+                                        targetPortfolioId = shortCall.portfolio_id;
+                                      } else {
+                                        // Fallback: CC/DR-CC senza short call (es. solo azioni "da rivendere")
+                                        const anyLeg = strategy.positions[0];
+                                        if (anyLeg) {
+                                          const underlying = anyLeg.underlying || anyLeg.description || '';
+                                          const prefix = strategy.strategyType === 'covered_call' ? 'cc' : 'dcc';
+                                          targetKey = `${prefix}_${underlying}_pending`;
+                                          targetPortfolioId = anyLeg.portfolio_id;
+                                        }
+                                      }
+                                    }
+                                    if (!targetKey || !targetPortfolioId) return null;
+                                    return (
+                                      <div className="flex items-center gap-1">
+                                        <Label className="text-[10px] text-muted-foreground">Target</Label>
+                                        <div className="w-24">
+                                          <RollTargetInput strategyKey={targetKey} portfolioId={targetPortfolioId} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+
                                 </div>
 
                                 <div className="flex items-center gap-1">
