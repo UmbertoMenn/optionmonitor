@@ -678,7 +678,7 @@ export function Derivatives() {
                   <h1 className="text-lg font-bold">Option Tech</h1>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help hidden sm:inline" />
+                      <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer hidden sm:inline" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs p-3">
                       <div className="space-y-2 text-sm">
@@ -767,7 +767,7 @@ export function Derivatives() {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                  <Info className="w-4 h-4 text-muted-foreground cursor-pointer" />
                 </TooltipTrigger>
                 <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
                   <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>
@@ -1384,7 +1384,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span 
-                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-bold cursor-help shrink-0"
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-bold cursor-pointer shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
                       S
@@ -1412,7 +1412,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span 
-                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help"
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-pointer"
                       onClick={(e) => e.stopPropagation()}
                     >
                       P!
@@ -1430,7 +1430,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
               <TooltipTrigger asChild>
                 <Badge 
                   variant="outline"
-                  className={`text-xs cursor-help ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                  className={`text-xs cursor-pointer ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {isITM ? 'ITM' : 'OTM'}
@@ -1476,7 +1476,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             <Tooltip>
               <TooltipTrigger asChild>
                 <span 
-                  className={`text-sm text-right cursor-help font-mono font-medium whitespace-nowrap ${
+                  className={`text-sm text-right cursor-pointer font-mono font-medium whitespace-nowrap ${
                     netPerShare !== undefined 
                       ? netPerShare >= 0 
                         ? 'text-green-500' 
@@ -1512,7 +1512,7 @@ function CoveredCallRow({ coveredCall, stockPositions, getOverrideForPosition, u
             {/* Col 11: PMC */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                <span className="text-sm text-muted-foreground text-right cursor-pointer truncate" onClick={(e) => e.stopPropagation()}>
                 {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
                 </span>
               </TooltipTrigger>
@@ -1621,7 +1621,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span 
-                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-bold cursor-help shrink-0"
+                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-500/20 border border-orange-500/50 text-orange-400 text-xs font-bold cursor-pointer shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
                       S
@@ -1636,7 +1636,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span
-                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-orange-500/15 border border-orange-500/40 text-orange-500 text-[10px] font-semibold uppercase tracking-wide cursor-help shrink-0"
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-orange-500/15 border border-orange-500/40 text-orange-500 text-[10px] font-semibold uppercase tracking-wide cursor-pointer shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <AlertTriangle className="w-3 h-3" /> Gamba mancante
@@ -1667,7 +1667,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
               <TooltipTrigger asChild>
                 <Badge 
                   variant="outline"
-                  className={`text-xs cursor-help ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                  className={`text-xs cursor-pointer ${isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {isITM ? 'ITM' : 'OTM'}
@@ -1713,7 +1713,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             <Tooltip>
               <TooltipTrigger asChild>
                 <span 
-                  className={`text-sm text-right cursor-help font-mono font-medium whitespace-nowrap ${
+                  className={`text-sm text-right cursor-pointer font-mono font-medium whitespace-nowrap ${
                     netPerShare !== undefined 
                       ? netPerShare >= 0 
                         ? 'text-green-500' 
@@ -1749,7 +1749,7 @@ function DeRiskingCoveredCallRow({ deRiskingCC, stockPositions, getOverrideForPo
             {/* Col 12: PMC */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                <span className="text-sm text-muted-foreground text-right cursor-pointer truncate" onClick={(e) => e.stopPropagation()}>
                 {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
                 </span>
               </TooltipTrigger>
@@ -1849,7 +1849,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_4.5rem_
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span 
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-help"
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-black border-2 border-yellow-400 text-yellow-400 text-xs font-bold cursor-pointer"
                     onClick={(e) => e.stopPropagation()}
                   >
                     P!
@@ -1867,7 +1867,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_4.5rem_
             <TooltipTrigger asChild>
               <Badge 
                 variant="outline"
-                className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                className={`text-xs cursor-pointer ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
                 onClick={(e) => e.stopPropagation()}
               >
                 {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
@@ -1890,7 +1890,7 @@ className="grid grid-cols-[1.25rem_2rem_minmax(12rem,1fr)_2rem_3rem_3rem_4.5rem_
           {/* Col 9: PMC */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+              <span className="text-sm text-muted-foreground text-right cursor-pointer truncate" onClick={(e) => e.stopPropagation()}>
               {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
               </span>
             </TooltipTrigger>
@@ -2086,7 +2086,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           {/* Col 6: PUT spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
+              <span className="text-xs text-muted-foreground cursor-pointer text-right truncate" onClick={(e) => e.stopPropagation()}>
                 PUT {putSpread}
               </span>
             </TooltipTrigger>
@@ -2098,7 +2098,7 @@ function IronCondorRow({ ironCondor, underlyingPrices, getPremiumByTickerAndSymb
           {/* Col 7: CALL spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
+              <span className="text-xs text-muted-foreground cursor-pointer text-right truncate" onClick={(e) => e.stopPropagation()}>
                 CALL {callSpread}
               </span>
             </TooltipTrigger>
@@ -2280,7 +2280,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
           {/* Col 5: PUT spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
+              <span className="text-xs text-muted-foreground cursor-pointer text-right truncate" onClick={(e) => e.stopPropagation()}>
                 PUT {putSpread}
               </span>
             </TooltipTrigger>
@@ -2292,7 +2292,7 @@ function DoubleDiagonalRow({ doubleDiagonal, underlyingPrices, getPremiumByTicke
           {/* Col 6: CALL spread */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground cursor-help text-right truncate" onClick={(e) => e.stopPropagation()}>
+              <span className="text-xs text-muted-foreground cursor-pointer text-right truncate" onClick={(e) => e.stopPropagation()}>
                 CALL {callSpread}
               </span>
             </TooltipTrigger>
@@ -2604,7 +2604,7 @@ function GroupedOtherStrategyRow({ group, stockPositions, getOverrideForPosition
           {/* Colonna 9: P/L */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1 cursor-help justify-end whitespace-nowrap ${hasSavedGP ? (combinedPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`} onClick={(e) => e.stopPropagation()}>
+              <div className={`flex items-center gap-1 cursor-pointer justify-end whitespace-nowrap ${hasSavedGP ? (combinedPL >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500'}`} onClick={(e) => e.stopPropagation()}>
                 <span className="text-xs text-muted-foreground">P/L:</span>
                 <span className="text-sm">{formatCurrency(combinedPL, legCurrency)}</span>
               </div>
@@ -2684,7 +2684,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
           <TooltipTrigger asChild>
             <Badge 
               variant="outline"
-              className={`text-xs shrink-0 cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+              className={`text-xs shrink-0 cursor-pointer ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
               onClick={(e) => e.stopPropagation()}
             >
               {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
@@ -2702,7 +2702,7 @@ function GroupedOptionLegRow({ otherStrategy, stockPositions, getOverrideForPosi
         </span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="text-sm text-muted-foreground cursor-help" onClick={(e) => e.stopPropagation()}>
+            <span className="text-sm text-muted-foreground cursor-pointer" onClick={(e) => e.stopPropagation()}>
                PMC: {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
             </span>
           </TooltipTrigger>
@@ -2782,7 +2782,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
               <TooltipTrigger asChild>
                 <Badge 
                   variant="outline"
-                  className={`text-xs cursor-help ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
+                  className={`text-xs cursor-pointer ${!hasUnderlyingPrice ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isITM ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-primary/20 border-primary/50 text-primary'}`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {!hasUnderlyingPrice ? '-' : isITM ? 'ITM' : 'OTM'}
@@ -2831,7 +2831,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             <Tooltip>
               <TooltipTrigger asChild>
                 <span 
-                  className={`text-sm text-right cursor-help font-mono font-medium whitespace-nowrap ${
+                  className={`text-sm text-right cursor-pointer font-mono font-medium whitespace-nowrap ${
                     netPerShare !== undefined 
                       ? netPerShare >= 0 
                         ? 'text-green-500' 
@@ -2865,7 +2865,7 @@ function NakedPutRow({ nakedPut, stockPositions, getOverrideForPosition, underly
             {/* Col 11: PMC */}
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm font-mono text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+                <span className="text-sm font-mono text-muted-foreground text-right cursor-pointer truncate" onClick={(e) => e.stopPropagation()}>
                   {formatCurrency(option.avg_cost || 0, getOptionCurrency(option))}
                 </span>
               </TooltipTrigger>
@@ -2980,7 +2980,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
             <TooltipTrigger asChild>
               <Badge 
                 variant="outline"
-                className={`text-xs cursor-help ${!hasValidPrices ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isInGain ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
+                className={`text-xs cursor-pointer ${!hasValidPrices ? 'bg-muted border-muted-foreground/50 text-muted-foreground' : isInGain ? 'bg-green-500/20 border-green-500/50 text-green-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}
                 onClick={(e) => e.stopPropagation()}
               >
                 {!hasValidPrices ? '-' : isInGain ? 'G' : 'L'}
@@ -3005,7 +3005,7 @@ function LeapCallRow({ leapCall, stockPositions, getOverrideForPosition, underly
           {/* Col 9: PMC */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-sm text-muted-foreground text-right cursor-help truncate" onClick={(e) => e.stopPropagation()}>
+              <span className="text-sm text-muted-foreground text-right cursor-pointer truncate" onClick={(e) => e.stopPropagation()}>
                 {formatCurrency(avgCost, getOptionCurrency(option))}
               </span>
             </TooltipTrigger>

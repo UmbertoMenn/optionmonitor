@@ -281,7 +281,7 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
           <TooltipProvider delayDuration={150}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1 text-blue-500 cursor-help">
+                <span className="inline-flex items-center gap-1 text-blue-500 cursor-pointer">
                   <Info className="w-3 h-3" /> {inputs.derivSummary.length} derivati ({fmtEURc(inputs.derivMVT0)})
                 </span>
               </TooltipTrigger>
@@ -304,7 +304,7 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
           <TooltipProvider delayDuration={150}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1 text-amber-500 cursor-help">
+                <span className="inline-flex items-center gap-1 text-amber-500 cursor-pointer">
                   <Info className="w-3 h-3" /> {inputs.partialBonds.length} bond senza cedola
                 </span>
               </TooltipTrigger>

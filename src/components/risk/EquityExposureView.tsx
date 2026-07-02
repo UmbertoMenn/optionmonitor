@@ -599,7 +599,7 @@ export function EquityExposureView({
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer" />
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs text-sm">
                         <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>
@@ -772,7 +772,7 @@ export function EquityExposureView({
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="text-xs text-red-400 ml-1 cursor-help">
+                            <span className="text-xs text-red-400 ml-1 cursor-pointer">
                               [{nakedPutVsBondPct.toFixed(0)}% vs Bond]
                             </span>
                           </TooltipTrigger>
@@ -1094,7 +1094,7 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                                   <TooltipTrigger asChild>
                                     <Badge
                                       variant="outline"
-                                      className="bg-red-500/15 text-red-500 border-red-500 cursor-help"
+                                      className="bg-red-500/15 text-red-500 border-red-500 cursor-pointer"
                                     >
                                       ● Spot non risolto
                                     </Badge>
@@ -1372,7 +1372,7 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-sm">
                     <p>Aggregazione dell'esposizione per sottostante: Stock diretti, Naked PUT (strike × contratti × 100), Leap Call (prezzo di mercato × contratti × 100) e Max Loss delle strategie complesse.</p>
@@ -1392,7 +1392,7 @@ Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                    <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer" />
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs text-sm">
                     <p>Quando attivo, il rischio stock è calcolato al netto delle protezioni PUT. Quando disattivo, mostra il valore pieno.</p>

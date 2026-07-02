@@ -238,9 +238,9 @@ function CustomLegend({
           <span className="text-foreground">Portafoglio</span>
         </div>
         {isAdmin && hasBenchmarkData && (
-          <UITooltip delayDuration={0}>
+          <UITooltip>
             <TooltipTrigger 
-              className="flex items-center gap-1.5 cursor-help"
+              className="flex items-center gap-1.5 cursor-pointer"
               onMouseEnter={() => onBenchmarkHover(true)}
               onMouseLeave={() => onBenchmarkHover(false)}
             >
@@ -296,7 +296,7 @@ function CustomLegend({
         
         {/* Currency toggle */}
         {isAdmin && hasBenchmarkData && hasUsdData && (
-          <UITooltip delayDuration={0}>
+          <UITooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-1.5">
                 <label 

@@ -230,7 +230,7 @@ export function RiskAnalyzer() {
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Info className="w-4 h-4 text-muted-foreground cursor-help" />
+                      <Info className="w-4 h-4 text-muted-foreground cursor-pointer" />
                     </TooltipTrigger>
                     <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
                       <p><strong>Dashboard e Risk Analyzer:</strong> dati aggiornati ai prezzi del file Excel caricato.</p>

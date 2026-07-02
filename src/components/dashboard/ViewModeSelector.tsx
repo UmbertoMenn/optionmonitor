@@ -38,7 +38,7 @@ export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelecto
             </button>
           );
         })}
-        <NettingViewInfoTooltip className="w-4 h-4 text-muted-foreground cursor-help shrink-0 ml-1" />
+        <NettingViewInfoTooltip className="w-4 h-4 text-muted-foreground cursor-pointer shrink-0 ml-1" />
       </div>
     </div>
   );

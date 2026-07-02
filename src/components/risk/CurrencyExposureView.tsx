@@ -343,7 +343,7 @@ export function CurrencyExposureView({
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-help" />
+                        <HelpCircle className="w-4 h-4 text-muted-foreground cursor-pointer" />
                       </TooltipTrigger>
                       <TooltipContent side="bottom" className="max-w-xs text-sm">
                         <p className="mb-2">Usa i toggle per includere/escludere componenti dal totale:</p>

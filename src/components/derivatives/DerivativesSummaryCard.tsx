@@ -77,7 +77,7 @@ function CompactSection({
           <Tooltip>
             <TooltipTrigger asChild>
               <span 
-                className={`inline-flex items-center rounded-full border text-[10px] px-1.5 py-0 h-4 cursor-help ${statusBadge.colorClass}`}
+                className={`inline-flex items-center rounded-full border text-[10px] px-1.5 py-0 h-4 cursor-pointer ${statusBadge.colorClass}`}
                 onClick={(e) => e.stopPropagation()}
               >
                 {statusBadge.label}

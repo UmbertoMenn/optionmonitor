@@ -16,7 +16,7 @@ export function NettingViewInfoTooltip({ className, side = 'bottom' }: NettingVi
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Info className={className ?? 'w-4 h-4 text-muted-foreground cursor-help shrink-0'} />
+          <Info className={className ?? 'w-4 h-4 text-muted-foreground cursor-pointer shrink-0'} />
         </TooltipTrigger>
         <TooltipContent side={side} className="max-w-sm text-xs leading-relaxed space-y-2">
           <p>

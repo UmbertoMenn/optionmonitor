@@ -16,7 +16,7 @@ export function StalePriceIndicator({ className, ticker }: StalePriceIndicatorPr
     <Tooltip>
       <TooltipTrigger asChild>
         <AlertTriangle 
-          className={`w-3 h-3 text-destructive animate-pulse ml-1 cursor-help ${className || ''}`}
+          className={`w-3 h-3 text-destructive animate-pulse ml-1 cursor-pointer ${className || ''}`}
         />
       </TooltipTrigger>
       <TooltipContent>
