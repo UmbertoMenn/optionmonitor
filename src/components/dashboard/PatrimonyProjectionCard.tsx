@@ -355,14 +355,18 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
 
       <p className="text-[11px] text-muted-foreground leading-snug">
         Per ogni mese da oggi fino alla scadenza massima tra bond e derivati: i derivati sono
-        rivalutati al market value tramite Black-Scholes inverso (IV implicita dal prezzo
-        attuale, poi repricing con vita residua decrescente → il premio temporale scende). A
-        scadenza le opzioni ITM vengono <strong>esercitate</strong>: per le covered call le azioni
-        sono consegnate al strike, per le short put sono acquistate al strike (l'effetto si
-        materializza nel bucket Equity). I bond convergono al valore di rimborso (pull-to-par) e
-        le cedole staccate incrementano il patrimonio. Azioni/ETF/cash restano costanti nello
-        scenario base. Il toggle <strong>Equity</strong> = azioni + ETF + GP azionaria
-        (esclusa la liquidità GP) + Netting Totale derivati a t0.
+        rivalutati tramite Black-Scholes inverso (IV implicita dal prezzo attuale, poi repricing
+        con vita residua decrescente → il premio temporale scende), con calibrazione che ancora
+        la curva esattamente al patrimonio di oggi. A scadenza le opzioni ITM vengono{' '}
+        <strong>esercitate</strong>: per le covered call le azioni sono consegnate al strike, per
+        le short put sono acquistate al strike (l'effetto si materializza nel bucket Equity). I
+        bond convergono al valore di rimborso (pull-to-par) e le cedole staccate incrementano il
+        patrimonio. Azioni/ETF/cash restano costanti nello scenario base. Nel{' '}
+        <strong>Monte Carlo titoli</strong> le azioni in portafoglio che sono anche sottostanti di
+        opzioni condividono lo stesso shock del sottostante (le covered call restano coperte) e i
+        sottostanti sono correlati tra loro tramite un fattore di mercato comune. Il toggle{' '}
+        <strong>Equity</strong> = azioni + ETF + GP azionaria (esclusa la liquidità GP) + Netting
+        Totale derivati a t0.
       </p>
     </div>
   );

@@ -209,3 +209,91 @@ describe('portfolioProjection — ZC e indicizzati', () => {
     expect(bc[bc.length - 1].patrimony).toBeCloseTo(100000, -2); // bond a par
   });
 });
+
+// ─────────────── Fix: ancoraggio a t0, griglia monotona, MC coerente ───────────────
+import { projectMonteCarlo, DEFAULT_MC } from '@/lib/portfolioProjection';
+
+describe('ancoraggio a t0 (P/L parte da 0%)', () => {
+  it('resta ancorato anche con opzione deep ITM prezzata sotto intrinseco (IV non risolvibile)', () => {
+    // AAA spot 120; call strike 20 quotata 98 < intrinseco 100 → solver IV fallisce
+    const positions = [
+      pos({ asset_type: 'stock', market_value: 50000, snapshot_market_value: 50000, description: 'ALTRO TITOLO' }),
+      pos({ asset_type: 'derivative', option_type: 'call', quantity: -2, strike_price: 20,
+        expiry_date: new Date(Date.now() + 300 * 86400000).toISOString().slice(0, 10),
+        underlying: 'AAA', current_price: 98, snapshot_price: 98, exchange_rate: 1 }),
+    ];
+    const underlyingPrices = { AAA: { price: 120, currency: 'USD' } } as any;
+    const inp = buildProjectionInputs(positions, 50000, underlyingPrices);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    expect(det[0].patrimony).toBeCloseTo(inp.patrimonyT0, 4);
+    expect(det[0].pnlPct).toBeCloseTo(0, 6);
+  });
+
+  it('resta ancorato con opzione già scaduta nello snapshot (T0 = 0)', () => {
+    const positions = [
+      pos({ asset_type: 'derivative', option_type: 'put', quantity: -1, strike_price: 150,
+        expiry_date: new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10), // scaduta
+        underlying: 'AAA', current_price: 31, snapshot_price: 31, exchange_rate: 1 }),
+      pos({ asset_type: 'derivative', option_type: 'call', quantity: -1, strike_price: 100,
+        expiry_date: new Date(Date.now() + 100 * 86400000).toISOString().slice(0, 10),
+        underlying: 'AAA', current_price: 25, snapshot_price: 25, exchange_rate: 1 }),
+    ];
+    const underlyingPrices = { AAA: { price: 120, currency: 'USD' } } as any;
+    const inp = buildProjectionInputs(positions, 0, underlyingPrices);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    expect(det[0].patrimony).toBeCloseTo(inp.patrimonyT0, 4);
+  });
+
+  it('bond: la curva parte esattamente dal MV corrente (ratio normalizzato sul modello)', () => {
+    const positions = [
+      pos({ asset_type: 'bond', description: 'BOND 4% 31/12/2030',
+        snapshot_price: 95, current_price: 95, snapshot_market_value: 95000, market_value: 95000 }),
+    ];
+    const inp = buildProjectionInputs(positions, 95000, { } as any);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    expect(det[0].patrimony).toBeCloseTo(95000, 0);
+    expect(det[0].pnlPct).toBeCloseTo(0, 5);
+  });
+});
+
+describe('buildTimeGrid', () => {
+  it('è monotona, non supera l\'orizzonte e termina esattamente sull\'orizzonte', () => {
+    const t0 = new Date(Date.UTC(2026, 6, 3));
+    const horizon = new Date(Date.UTC(2031, 8, 17)); // ~5.2 anni → step > 1
+    const grid = buildTimeGrid(t0, horizon, 60);
+    for (let i = 1; i < grid.length; i++) {
+      expect(grid[i].date.getTime()).toBeGreaterThan(grid[i - 1].date.getTime());
+    }
+    expect(grid[0].tYears).toBe(0);
+    expect(grid[grid.length - 1].date.getTime()).toBe(horizon.getTime());
+    expect(grid.length).toBeLessThanOrEqual(63);
+  });
+});
+
+describe('Monte Carlo titoli — coerenza covered call', () => {
+  it('l\'upside di una covered call resta limitato dallo strike (azione e opzione condividono lo shock)', () => {
+    // 1000 azioni AAA @120 (MV 120k) + 10 call vendute K=130 → payoff a scadenza cap ≈ 130k
+    const expiryDays = 365;
+    const positions = [
+      pos({ asset_type: 'stock', description: 'AAA CORP', ticker: 'AAA',
+        market_value: 120000, snapshot_market_value: 120000 }),
+      pos({ asset_type: 'derivative', option_type: 'call', quantity: -10, strike_price: 130,
+        expiry_date: new Date(Date.now() + expiryDays * 86400000).toISOString().slice(0, 10),
+        underlying: 'AAA', current_price: 8, snapshot_price: 8, exchange_rate: 1 }),
+    ];
+    const underlyingPrices = { AAA: { price: 120, currency: 'USD' } } as any;
+    const inp = buildProjectionInputs(positions, 120000, underlyingPrices);
+    // l'azione è agganciata al sottostante dell'opzione
+    expect(Object.values(inp.equityByKey).reduce((s, v) => s + v, 0)).toBeCloseTo(120000, 0);
+    expect(inp.equityFlat).toBeCloseTo(0, 0);
+
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 24);
+    const mc = projectMonteCarlo(inp, grid, { ...DEFAULT_MC, enableVolRates: false, enableUnderlying: true, paths: 200 });
+    const lastP95 = mc[mc.length - 1].p95!;
+    // cap teorico: 1000 azioni consegnate a 130 = 130.000 (+ tolleranza per drift/percentile discreto)
+    expect(lastP95).toBeLessThanOrEqual(133000);
+  });
+});
