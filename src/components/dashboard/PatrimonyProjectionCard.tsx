@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid,
+  ComposedChart, Line, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer, Tooltip as RechartsTooltip,
 } from 'recharts';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -15,8 +14,8 @@ import {
 } from '@/components/ui/tooltip';
 import { Info, ChevronDown, Wrench } from 'lucide-react';
 import {
-  buildProjectionInputs, buildTimeGrid, projectDeterministic, projectMonteCarlo,
-  DEFAULT_MC, ResolvedBondOverride, ProjectionScope,
+  buildProjectionInputs, buildTimeGrid, projectDeterministic,
+  ResolvedBondOverride, ProjectionScope, INFLATION_TARGET,
 } from '@/lib/portfolioProjection';
 import { parseBondPartial } from '@/lib/bondMath';
 import { useBondOverrides, BondOverride } from '@/hooks/useBondOverrides';
@@ -38,6 +37,26 @@ const fmtEURcompact = (n: number) => {
   return '€' + n.toFixed(0);
 };
 const toISO = (d: Date) => d.toISOString().slice(0, 10);
+const fmtDateIT = (iso: string) => {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+/** Spiegazione di cosa include ciascuna vista "Analizza" — mostrata sotto ai bottoni, dinamica. */
+const SCOPE_INFO: Record<ProjectionScope, { label: string; desc: string }> = {
+  all: {
+    label: 'Tutto',
+    desc: 'Patrimonio complessivo: azioni + ETF + GP (azionaria e liquidità) + bond + materie prime + cash + Netting Totale derivati.',
+  },
+  equity: {
+    label: 'Equity (incl. derivati)',
+    desc: 'Solo componente azionaria: azioni + ETF + GP azionaria (esclusa la liquidità GP) + Netting Totale derivati a t0. Esclude bond, materie prime e cash.',
+  },
+  bond_commodity: {
+    label: 'Bond/Comm.',
+    desc: 'Solo obbligazioni (rivalutate a modello, vedi sotto) e materie prime (tenute al valore corrente). Esclude azioni, ETF, GP, derivati e cash.',
+  },
+};
 
 // ── Riga editor per risolvere un bond ──────────────────────────
 function BondFixRow({ position, override, onSave, saving }: {
@@ -102,8 +121,6 @@ function BondFixRow({ position, override, onSave, saving }: {
 }
 
 export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices, gpEquityValue = 0, derivativesNettingT0 }: Props) {
-  const [mcVolRates, setMcVolRates] = useState(false);
-  const [mcUnderlying, setMcUnderlying] = useState(false);
   const [rangeYears, setRangeYears] = useState<number | null>(null); // null = Max
   const [scope, setScope] = useState<ProjectionScope>('all');
   const [fixOpen, setFixOpen] = useState(false);
@@ -137,21 +154,11 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   const grid = useMemo(() => buildTimeGrid(inputs.t0, effectiveHorizon, 60), [inputs, effectiveHorizon]);
   const deterministic = useMemo(() => projectDeterministic(inputs, grid, scope), [inputs, grid, scope]);
 
-  const mcOn = mcVolRates || mcUnderlying;
-  const mc = useMemo(() => {
-    if (!mcOn) return null;
-    return projectMonteCarlo(inputs, grid, { ...DEFAULT_MC, enableVolRates: mcVolRates, enableUnderlying: mcUnderlying }, scope);
-  }, [mcOn, mcVolRates, mcUnderlying, inputs, grid, scope]);
-
-  const data = useMemo(() => deterministic.map((d, i) => {
-    const m = mc?.[i];
-    return {
-      label: d.label,
-      patrimony: Math.round(d.patrimony),
-      pnlPct: +d.pnlPct.toFixed(2),
-      ...(m ? { p5: Math.round(m.p5 ?? 0), p50: Math.round(m.p50 ?? 0), p95: Math.round(m.p95 ?? 0), range: [Math.round(m.p5 ?? 0), Math.round(m.p95 ?? 0)] as [number, number] } : {}),
-    };
-  }), [deterministic, mc]);
+  const data = useMemo(() => deterministic.map(d => ({
+    label: d.label,
+    patrimony: Math.round(d.patrimony),
+    pnlPct: +d.pnlPct.toFixed(2),
+  })), [deterministic]);
 
   const last = deterministic[deterministic.length - 1];
   const horizonLabel = grid[grid.length - 1]?.label ?? '';
@@ -174,29 +181,19 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   ].filter(p => p.years! <= maxYears + 0.5);
   presets.push({ label: 'Max', years: null });
 
+  const bondModeledMV = inputs.bondSummary.reduce((s, b) => s + b.mvT0, 0);
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-start justify-between gap-2 flex-wrap">
-        <div>
-          <p className="text-sm font-medium text-foreground">Evoluzione patrimonio alle scadenze</p>
-          <p className="text-xs text-muted-foreground">
-            Proiezione fino a {horizonLabel}. Patrimonio finale stimato{' '}
-            <span className="font-semibold text-blue-500">{last ? fmtEURc(last.patrimony) : '—'}</span>{' '}
-            <span className={last && last.pnlPct >= 0 ? 'text-green-500' : 'text-red-500'}>
-              ({last ? (last.pnlPct >= 0 ? '+' : '') + last.pnlPct.toFixed(1) + '%' : ''})
-            </span>
-          </p>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-            <Switch checked={mcVolRates} onCheckedChange={setMcVolRates} />
-            Monte Carlo: vol &amp; tassi
-          </label>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-            <Switch checked={mcUnderlying} onCheckedChange={setMcUnderlying} />
-            Monte Carlo: variazione titoli
-          </label>
-        </div>
+      <div>
+        <p className="text-sm font-medium text-foreground">Evoluzione patrimonio alle scadenze</p>
+        <p className="text-xs text-muted-foreground">
+          Proiezione fino a {horizonLabel}. Patrimonio finale stimato{' '}
+          <span className="font-semibold text-blue-500">{last ? fmtEURc(last.patrimony) : '—'}</span>{' '}
+          <span className={last && last.pnlPct >= 0 ? 'text-green-500' : 'text-red-500'}>
+            ({last ? (last.pnlPct >= 0 ? '+' : '') + last.pnlPct.toFixed(1) + '%' : ''})
+          </span>
+        </p>
       </div>
 
       {/* Selettore arco temporale asse X + analisi per bucket */}
@@ -216,24 +213,28 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
           </button>
         ))}
         <span className="text-[11px] text-muted-foreground ml-3 mr-1">Analizza:</span>
-        {([
-          { v: 'all', l: 'Tutto' },
-          { v: 'equity', l: 'Equity (incl. derivati)' },
-          { v: 'bond_commodity', l: 'Bond/Comm.' },
-        ] as { v: ProjectionScope; l: string }[]).map(s => (
-          <button
-            key={s.v}
-            onClick={() => setScope(s.v)}
-            className={`px-2 py-0.5 rounded text-[11px] border transition-colors ${
-              scope === s.v
-                ? 'border-primary bg-primary/15 text-primary'
-                : 'border-border text-muted-foreground hover:bg-muted'
-            }`}
-          >
-            {s.l}
-          </button>
-        ))}
+        <TooltipProvider delayDuration={150}>
+          {(Object.keys(SCOPE_INFO) as ProjectionScope[]).map(v => (
+            <Tooltip key={v}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setScope(v)}
+                  className={`px-2 py-0.5 rounded text-[11px] border transition-colors ${
+                    scope === v
+                      ? 'border-primary bg-primary/15 text-primary'
+                      : 'border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {SCOPE_INFO[v].label}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[280px] text-xs">{SCOPE_INFO[v].desc}</TooltipContent>
+            </Tooltip>
+          ))}
+        </TooltipProvider>
       </div>
+      {/* Spiegazione persistente (non solo al passaggio del mouse) di cosa mostra la vista corrente */}
+      <p className="text-[11px] text-muted-foreground/80 italic -mt-1">{SCOPE_INFO[scope].desc}</p>
 
       <div className="w-full h-[230px]">
         <ResponsiveContainer width="100%" height="100%">
@@ -253,22 +254,11 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
                     <div className={row.pnlPct >= 0 ? 'text-green-500' : 'text-red-500'}>
                       P/L: {row.pnlPct >= 0 ? '+' : ''}{row.pnlPct.toFixed(2)}%
                     </div>
-                    {'p5' in row && row.p5 !== undefined && (
-                      <div className="text-muted-foreground pt-0.5 border-t border-border/50 mt-0.5">
-                        MC p5–p95: {fmtEURc(row.p5!)} … {fmtEURc(row.p95!)}
-                      </div>
-                    )}
                   </div>
                 );
               }}
             />
-            {mcOn && (
-              <Area yAxisId="eur" dataKey="range" stroke="none" fill="hsl(217, 91%, 60%)" fillOpacity={0.12} isAnimationActive={false} connectNulls />
-            )}
             <Line yAxisId="eur" type="monotone" dataKey="patrimony" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={false} isAnimationActive={false} name="Patrimonio" />
-            {mcOn && (
-              <Line yAxisId="eur" type="monotone" dataKey="p50" stroke="hsl(217, 91%, 60%)" strokeWidth={1} strokeDasharray="4 3" dot={false} isAnimationActive={false} name="MC mediana" />
-            )}
             <Line yAxisId="pct" type="monotone" dataKey="pnlPct" stroke="hsl(142, 71%, 45%)" strokeWidth={1.5} dot={false} isAnimationActive={false} name="P/L %" />
           </ComposedChart>
         </ResponsiveContainer>
@@ -300,6 +290,39 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
             </Tooltip>
           </TooltipProvider>
         )}
+        {inputs.bondSummary.length > 0 && (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1 text-blue-500 cursor-pointer">
+                  <Info className="w-3 h-3" /> {inputs.bondSummary.length} bond nel modello ({fmtEURc(bondModeledMV)})
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[360px] text-xs">
+                <div className="font-semibold mb-1">Valori usati per la rivalutazione (pull-to-par):</div>
+                <ul className="list-disc pl-4 max-h-[240px] overflow-y-auto space-y-1">
+                  {inputs.bondSummary.slice(0, 20).map((b, i) => (
+                    <li key={i}>
+                      <div className="font-medium text-foreground">{b.description}</div>
+                      <div>
+                        {b.inflationLinked
+                          ? `Indicizzato inflazione — accredito ~${(INFLATION_TARGET * 100).toFixed(1)}%/anno (nessun pull-to-par)`
+                          : b.couponsModeled
+                            ? `Cedola ${b.couponRatePct.toFixed(2)}% × ${b.frequency}/anno · scadenza ${fmtDateIT(b.maturity)} · YTM stimato ${b.ytmPct.toFixed(2)}%`
+                            : `Cedola non modellata (solo pull-to-par) · scadenza ${fmtDateIT(b.maturity)} · YTM stimato ${b.ytmPct.toFixed(2)}%`}
+                        {b.overridden && <span className="text-blue-400"> · valori manuali</span>}
+                      </div>
+                    </li>
+                  ))}
+                  {inputs.bondSummary.length > 20 && <li>… e altri {inputs.bondSummary.length - 20}</li>}
+                </ul>
+                <div className="mt-1 text-muted-foreground">
+                  YTM = rendimento a scadenza implicito dal prezzo corrente (usato per scontare i flussi futuri).
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         {inputs.partialBonds.length > 0 && (
           <TooltipProvider delayDuration={150}>
             <Tooltip>
@@ -317,9 +340,20 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
           </TooltipProvider>
         )}
         {inputs.unparsedBonds.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-amber-500">
-            <Info className="w-3 h-3" /> {inputs.unparsedBonds.length} bond piatti (no scadenza)
-          </span>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1 text-amber-500 cursor-pointer">
+                  <Info className="w-3 h-3" /> {inputs.unparsedBonds.length} bond piatti (no scadenza)
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[280px] text-xs">
+                <div className="font-semibold mb-1">Scadenza non deducibile dalla descrizione: tenuti al valore corrente, nessuna rivalutazione:</div>
+                <ul className="list-disc pl-4">{inputs.unparsedBonds.slice(0, 8).map((b, i) => <li key={i}>{b}</li>)}</ul>
+                <div className="mt-1">Risolvili qui sotto inserendo scadenza (e cedola).</div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
       </div>
 
@@ -360,13 +394,15 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
         la curva esattamente al patrimonio di oggi. A scadenza le opzioni ITM vengono{' '}
         <strong>esercitate</strong>: per le covered call le azioni sono consegnate al strike, per
         le short put sono acquistate al strike (l'effetto si materializza nel bucket Equity). I
-        bond convergono al valore di rimborso (pull-to-par) e le cedole staccate incrementano il
-        patrimonio. Azioni/ETF/cash restano costanti nello scenario base. Nel{' '}
-        <strong>Monte Carlo titoli</strong> le azioni in portafoglio che sono anche sottostanti di
-        opzioni condividono lo stesso shock del sottostante (le covered call restano coperte) e i
-        sottostanti sono correlati tra loro tramite un fattore di mercato comune. Il toggle{' '}
-        <strong>Equity</strong> = azioni + ETF + GP azionaria (esclusa la liquidità GP) + Netting
-        Totale derivati a t0.
+        bond sono rivalutati a <strong>pull-to-par</strong>: dal prezzo corrente si calcola il
+        rendimento a scadenza (YTM) implicito, poi si sconta il flusso di cedole + rimborso a quel
+        rendimento fino a convergere al valore di rimborso (100) alla scadenza; le cedole staccate
+        incrementano il patrimonio in cassa. I bond indicizzati all'inflazione non convergono a
+        100: accreditano sul target BCE ({(INFLATION_TARGET * 100).toFixed(1)}%/anno). Passa il
+        mouse su <strong>"N bond nel modello"</strong> qui sopra per vedere cedola, scadenza e YTM
+        usati per ciascun bond. Azioni/ETF/cash restano costanti nello scenario base (nessuna
+        simulazione stocastica: la proiezione è deterministica). Il toggle <strong>Equity</strong>{' '}
+        = azioni + ETF + GP azionaria (esclusa la liquidità GP) + Netting Totale derivati a t0.
       </p>
     </div>
   );

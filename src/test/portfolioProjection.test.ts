@@ -210,8 +210,7 @@ describe('portfolioProjection — ZC e indicizzati', () => {
   });
 });
 
-// ─────────────── Fix: ancoraggio a t0, griglia monotona, MC coerente ───────────────
-import { projectMonteCarlo, DEFAULT_MC } from '@/lib/portfolioProjection';
+// ─────────────── Fix: ancoraggio a t0, griglia monotona ───────────────
 
 describe('ancoraggio a t0 (P/L parte da 0%)', () => {
   it('resta ancorato anche con opzione deep ITM prezzata sotto intrinseco (IV non risolvibile)', () => {
@@ -273,27 +272,42 @@ describe('buildTimeGrid', () => {
   });
 });
 
-describe('Monte Carlo titoli — coerenza covered call', () => {
-  it('l\'upside di una covered call resta limitato dallo strike (azione e opzione condividono lo shock)', () => {
-    // 1000 azioni AAA @120 (MV 120k) + 10 call vendute K=130 → payoff a scadenza cap ≈ 130k
-    const expiryDays = 365;
+describe('bondSummary — valori esposti in UI per la rivalutazione', () => {
+  it('espone cedola, scadenza, frequenza e YTM per un bond auto-parsato', () => {
     const positions = [
-      pos({ asset_type: 'stock', description: 'AAA CORP', ticker: 'AAA',
-        market_value: 120000, snapshot_market_value: 120000 }),
-      pos({ asset_type: 'derivative', option_type: 'call', quantity: -10, strike_price: 130,
-        expiry_date: new Date(Date.now() + expiryDays * 86400000).toISOString().slice(0, 10),
-        underlying: 'AAA', current_price: 8, snapshot_price: 8, exchange_rate: 1 }),
+      pos({ asset_type: 'bond', isin: 'IT000TEST01', description: 'BTP TF 3.50% 01/03/2032',
+        snapshot_price: 97, current_price: 97, snapshot_market_value: 97000, market_value: 97000 }),
     ];
-    const underlyingPrices = { AAA: { price: 120, currency: 'USD' } } as any;
-    const inp = buildProjectionInputs(positions, 120000, underlyingPrices);
-    // l'azione è agganciata al sottostante dell'opzione
-    expect(Object.values(inp.equityByKey).reduce((s, v) => s + v, 0)).toBeCloseTo(120000, 0);
-    expect(inp.equityFlat).toBeCloseTo(0, 0);
+    const inp = buildProjectionInputs(positions, 97000, {} as any);
+    expect(inp.bondSummary).toHaveLength(1);
+    const b = inp.bondSummary[0];
+    expect(b.couponRatePct).toBeCloseTo(3.5);
+    expect(b.couponsModeled).toBe(true);
+    expect(b.maturity).toBe('2032-03-01');
+    expect(b.overridden).toBe(false);
+    expect(b.currentClean).toBeCloseTo(97);
+    expect(b.ytmPct).toBeGreaterThan(0); // sotto la pari → rendimento > cedola
+  });
 
-    const grid = buildTimeGrid(inp.t0, inp.horizon, 24);
-    const mc = projectMonteCarlo(inp, grid, { ...DEFAULT_MC, enableVolRates: false, enableUnderlying: true, paths: 200 });
-    const lastP95 = mc[mc.length - 1].p95!;
-    // cap teorico: 1000 azioni consegnate a 130 = 130.000 (+ tolleranza per drift/percentile discreto)
-    expect(lastP95).toBeLessThanOrEqual(133000);
+  it('marca come "overridden" i bond risolti manualmente', () => {
+    const positions = [
+      pos({ asset_type: 'bond', isin: 'IT000TEST02', description: 'OBBLIGAZIONE STEP-UP',
+        snapshot_price: 100, current_price: 100, snapshot_market_value: 50000, market_value: 50000,
+        portfolio_id: 'pf1' }),
+    ];
+    const overrides = { 'pf1::IT000TEST02': { couponRatePct: 2, maturityMs: Date.UTC(2029, 5, 1), frequency: 1 } };
+    const inp = buildProjectionInputs(positions, 50000, {} as any, overrides);
+    expect(inp.bondSummary).toHaveLength(1);
+    expect(inp.bondSummary[0].overridden).toBe(true);
+    expect(inp.bondSummary[0].couponRatePct).toBe(2);
+  });
+
+  it('ordina i bond per scadenza crescente', () => {
+    const positions = [
+      pos({ asset_type: 'bond', description: 'BOND 2% 31/12/2035', snapshot_price: 90, current_price: 90, snapshot_market_value: 10000, market_value: 10000 }),
+      pos({ asset_type: 'bond', description: 'BOND 2% 31/12/2028', snapshot_price: 95, current_price: 95, snapshot_market_value: 10000, market_value: 10000 }),
+    ];
+    const inp = buildProjectionInputs(positions, 20000, {} as any);
+    expect(inp.bondSummary.map(b => b.maturity)).toEqual(['2028-12-31', '2035-12-31']);
   });
 });

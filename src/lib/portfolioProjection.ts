@@ -2,14 +2,11 @@ import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { bsPrice, impliedVolatility } from '@/lib/blackScholes';
 import { parseBondPartial, bondYTM, couponDates, BondInfo } from '@/lib/bondMath';
-import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 
 const MS_YEAR = 365.25 * 24 * 3600 * 1000;
-const DEFAULT_RATE = 0.04;        // risk-free di base per il pricing opzioni
+const DEFAULT_RATE = 0.04;        // risk-free di base per il pricing opzioni e lo sconto dei bond
 const DEFAULT_OPT_VOL = 0.30;     // vol di fallback quando l'IV non è risolvibile
-const DEFAULT_EQUITY_VOL = 0.20;  // vol annua per lo shock aggregato azioni/ETF (MC titoli)
-const INFLATION_TARGET = 0.02;    // target BCE per i bond indicizzati all'inflazione
-const MC_MARKET_CORR = 0.6;       // correlazione dei sottostanti col fattore di mercato (MC titoli)
+export const INFLATION_TARGET = 0.02; // target BCE per i bond indicizzati all'inflazione
 
 /** Filtro di analisi: tutto, solo azionario+derivati, solo bond+commodities. */
 export type ProjectionScope = 'all' | 'equity' | 'bond_commodity';
@@ -23,7 +20,6 @@ function yearFrac(a: Date, b: Date): number {
 interface DerivInput {
   description: string;
   underlying: string;    // nome grezzo (chiave in underlyingPrices)
-  key: string;           // ticker canonico (chiave degli shock MC, condivisa con le azioni)
   type: 'call' | 'put';
   S0: number;            // prezzo sottostante corrente
   K: number;
@@ -43,15 +39,31 @@ interface BondInput {
   description: string;
   info: BondInfo;
   ytm: number;
+  currentClean: number;        // prezzo di mercato corrente (%) usato come base
   mvT0: number;                // market value EUR a t0
   cleanT0Model: number;        // prezzo modello a t0 (denominatore del ratio: ancora la curva a t0)
   couponCashPerPeriod: number; // EUR per cedola (0 se cedola non modellata o ZC)
   couponsModeled: boolean;
   inflationLinked: boolean;
+  overridden: boolean;         // true se cedola/scadenza vengono da un override manuale
   maturityT: number;           // anni a scadenza da t0
   // flussi precomputati (evita Date math dentro patrimonyAt / bondCleanPrice):
   flowT: number[];             // anni da t0 di ogni flusso futuro (cedole; l'ultimo coincide con la scadenza)
   flowAmt: number[];           // importo % del face per flusso (cedola; +100 sull'ultimo per il rimborso)
+}
+
+/** Riepilogo di un bond modellato, per la UI (mostra i valori usati per la rivalutazione). */
+export interface BondSummaryLeg {
+  description: string;
+  couponRatePct: number;   // cedola annua % usata nel modello (0 = zero coupon / non modellata)
+  couponsModeled: boolean; // false = cedola sconosciuta → pull-to-par senza flussi cedolari
+  frequency: number;
+  maturity: string;        // ISO yyyy-mm-dd
+  ytmPct: number;          // rendimento a scadenza implicito dal prezzo corrente (%), 0 per indicizzati
+  inflationLinked: boolean;
+  overridden: boolean;     // valori inseriti manualmente (editor "Risolvi bond") vs dedotti dalla description
+  currentClean: number;    // prezzo corrente (%) usato come base del ratio
+  mvT0: number;
 }
 
 /** Prezzo modello (face=100) a tYears da t0 con rendimento y — usa i flussi precomputati. */
@@ -88,8 +100,7 @@ export interface ProjectionInputs {
   t0: Date;
   horizon: Date;
   // bucket costanti (EUR)
-  equityFlat: number;        // azioni + ETF NON associate a sottostanti di opzioni — shock aggregato
-  equityByKey: Record<string, number>; // azioni/ETF associate a un sottostante opzionario (stesso shock MC)
+  equityFlat: number;        // azioni + ETF — shock aggregato (bucket Equity)
   gpEquityFlat: number;      // GP azionaria (gp_total - gp_cash) — piatta, in bucket Equity
   commodityFlat: number;     // materie prime — piatte
   cashResidual: number;      // cash + arrotondamenti — piatto
@@ -98,6 +109,7 @@ export interface ProjectionInputs {
   bonds: BondInput[];
   unparsedBonds: string[];   // bond senza scadenza deducibile → tenuti piatti
   partialBonds: string[];    // bond con scadenza ma senza cedola → pull-to-par, cedole non modellate
+  bondSummary: BondSummaryLeg[]; // valori (cedola, scadenza, YTM...) usati per ogni bond modellato — per UI
   derivsNoUnderlying: string[];
   derivMVT0: number;         // somma MV derivati a t0 (con segno)
   derivativesNettingT0: number; // valore "netting derivati" signed a t0 (= derivMVT0 se non override)
@@ -124,7 +136,6 @@ export function buildProjectionInputs(
   const derivs: DerivInput[] = [];
   const derivSummary: DerivSummaryLeg[] = [];
   const derivsNoUnderlying: string[] = [];
-  const derivKeys = new Set<string>();
   let maxExpiry = 0;
 
   for (const p of positions) {
@@ -142,8 +153,6 @@ export function buildProjectionInputs(
     const S0 = upx(underlyingName);
     const hasUnderlying = S0 > 0;
     if (!hasUnderlying) derivsNoUnderlying.push(p.description);
-    const key = getCanonicalTickerKey({ rawTicker: p.underlying, underlyingName, description: p.description });
-    derivKeys.add(key);
 
     let iv = DEFAULT_OPT_VOL;
     let ivResolved = false;
@@ -160,7 +169,6 @@ export function buildProjectionInputs(
     derivs.push({
       description: p.description,
       underlying: underlyingName,
-      key,
       type: p.option_type,
       S0, K, T0, iv, ivResolved,
       qtyMult, anchorPerShare: anchor, basisPerShare, hasUnderlying, mvT0,
@@ -177,12 +185,12 @@ export function buildProjectionInputs(
   }
 
   const bonds: BondInput[] = [];
+  const bondSummary: BondSummaryLeg[] = [];
   const unparsedBonds: string[] = [];
   const partialBonds: string[] = [];
   let parsedBondMV = 0;       // bond proiettati (sottratti dal flat, riaggiunti via bonds[])
   let unparsedBondFlat = 0;   // bond senza scadenza → bucket bond ma piatti
   let equityFlat = 0;
-  const equityByKey: Record<string, number> = {};
   let commodityFlat = 0;
 
   for (const p of positions) {
@@ -224,15 +232,27 @@ export function buildProjectionInputs(
         }
 
         const bTmp: BondInput = {
-          description: p.description, info, ytm, mvT0: mvEUR,
+          description: p.description, info, ytm, currentClean, mvT0: mvEUR,
           cleanT0Model: 0, couponCashPerPeriod, couponsModeled, inflationLinked,
-          maturityT, flowT, flowAmt,
+          overridden: !!ov, maturityT, flowT, flowAmt,
         };
         // Denominatore del ratio = prezzo MODELLO a t0: garantisce ratio(0) = 1, cioè la
         // curva parte esattamente dal MV corrente anche se il solve YTM è ricaduto sul fallback.
         bTmp.cleanT0Model = inflationLinked ? currentClean : bondModelPrice(bTmp, 0, ytm);
         if (!(bTmp.cleanT0Model > 0)) bTmp.cleanT0Model = currentClean;
         bonds.push(bTmp);
+        bondSummary.push({
+          description: p.description,
+          couponRatePct: info.couponRatePct,
+          couponsModeled,
+          frequency,
+          maturity: maturity.toISOString().slice(0, 10),
+          ytmPct: ytm * 100,
+          inflationLinked,
+          overridden: !!ov,
+          currentClean,
+          mvT0: mvEUR,
+        });
 
         // "parziale" solo se NON indicizzato e cedola sconosciuta (null). ZC (0) è modellato.
         if (!inflationLinked && couponRatePct == null) partialBonds.push(p.description);
@@ -241,26 +261,19 @@ export function buildProjectionInputs(
         unparsedBondFlat += mvEUR;
       }
     } else if (p.asset_type === 'stock' || p.asset_type === 'etf') {
-      // Le azioni/ETF che SONO sottostanti di opzioni in portafoglio condividono lo stesso
-      // fattore di shock MC del sottostante: senza questo le covered call risulterebbero
-      // "scoperte" nella simulazione (azione e opzione shockate in modo indipendente).
-      const key = getCanonicalTickerKey({ rawTicker: p.ticker, rawName: p.description, description: p.description, isin: p.isin });
-      if (derivKeys.has(key)) {
-        equityByKey[key] = (equityByKey[key] ?? 0) + mvEUR;
-      } else {
-        equityFlat += mvEUR;
-      }
+      equityFlat += mvEUR;
     } else if (p.asset_type === 'commodity') {
       commodityFlat += mvEUR;
     }
   }
+  // Bond più vicini a scadenza per primi: rende leggibile il tooltip riassuntivo in UI.
+  bondSummary.sort((a, b) => a.maturity.localeCompare(b.maturity));
 
   // GP equity (gp_total - gp_cash) viene scorporata dal cashResidual e messa nel bucket Equity.
   const gpEquityFlat = Math.max(0, gpEquityValue);
-  const linkedEquity = Object.values(equityByKey).reduce((s, v) => s + v, 0);
   // baseValue = non-derivati a MV + cash (include anche la GP totale). Sottraiamo i bucket espliciti
   // e la quota GP equity; ciò che resta è cash + GP cash + arrotondamenti.
-  const cashResidual = baseValue - parsedBondMV - unparsedBondFlat - equityFlat - linkedEquity - commodityFlat - gpEquityFlat;
+  const cashResidual = baseValue - parsedBondMV - unparsedBondFlat - equityFlat - commodityFlat - gpEquityFlat;
 
   const horizon = maxExpiry > 0 ? new Date(maxExpiry) : new Date(t0.getTime() + MS_YEAR);
 
@@ -269,13 +282,13 @@ export function buildProjectionInputs(
   const equityDerivOffset = derivativesNettingT0 - derivMVT0;
   const parsedBondT0 = bonds.reduce((s, b) => s + b.mvT0, 0);
   const patrimonyT0 = baseValue + derivativesNettingT0;
-  const equityT0 = equityFlat + linkedEquity + gpEquityFlat + derivativesNettingT0;
+  const equityT0 = equityFlat + gpEquityFlat + derivativesNettingT0;
   const bondCommodityT0 = parsedBondT0 + unparsedBondFlat + commodityFlat;
 
   return {
     t0, horizon,
-    equityFlat, equityByKey, gpEquityFlat, commodityFlat, cashResidual, unparsedBondFlat,
-    derivs, bonds, unparsedBonds, partialBonds, derivsNoUnderlying,
+    equityFlat, gpEquityFlat, commodityFlat, cashResidual, unparsedBondFlat,
+    derivs, bonds, unparsedBonds, partialBonds, bondSummary, derivsNoUnderlying,
     derivMVT0, derivativesNettingT0, equityDerivOffset, derivSummary,
     patrimonyT0, equityT0, bondCommodityT0,
   };
@@ -309,22 +322,13 @@ export function buildTimeGrid(t0: Date, horizon: Date, maxPoints = 60): TimePoin
   return points;
 }
 
-// ───────────────────────── Shock set ─────────────────────────
+// ───────────────────────── Valutazione a data fissa ─────────────────────────
 
-export interface ShockSet {
-  volMult: number;     // moltiplicatore IV (1 = invariata)
-  rateBump: number;    // +/- assoluto su tassi (es. 0.01 = +100bp)
-  equityMult: number;  // moltiplicatore prezzi azioni/ETF aggregate (1 = invariato)
-  underlyingMult: Record<string, number>; // override per ticker canonico (MC titoli)
-}
+/** Valore patrimonio a una data (senza shock: proiezione deterministica). */
+function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, scope: ProjectionScope = 'all'): number {
+  const r = DEFAULT_RATE;
 
-const NO_SHOCK: ShockSet = { volMult: 1, rateBump: 0, equityMult: 1, underlyingMult: {} };
-
-/** Valore patrimonio a una data sotto un set di shock. */
-function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: ProjectionScope = 'all'): number {
-  const r = DEFAULT_RATE + sh.rateBump;
-
-  // ── bucket EQUITY: azioni/ETF (shockabili) + derivati (decadimento + esercizio) ──
+  // ── bucket EQUITY: azioni/ETF (piatte) + derivati (decadimento + esercizio) ──
   let derivVal = 0;
   let equityAdjAtExpiry = 0; // P/L da esercizio: spostato dal bucket derivati al bucket equity
   for (const d of inp.derivs) {
@@ -341,8 +345,7 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
       continue;
     }
     const Tt = Math.max(0, d.T0 - tp.tYears);
-    const sMult = sh.underlyingMult[d.key] ?? sh.equityMult;
-    const S = d.S0 * sMult;
+    const S = d.S0;
     const expired = tp.tYears >= d.T0;
     if (expired) {
       // Esercizio a scadenza: il P/L intrinseco si materializza nel bucket equity (azioni
@@ -353,7 +356,7 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
       // BS + basis: la correzione decade linearmente a 0 → a t0 il valore è ESATTAMENTE
       // il MV corrente, a scadenza è l'intrinseco puro.
       const basis = d.basisPerShare * (Tt / d.T0);
-      derivVal += (bsPrice(S, d.K, Tt, r, d.iv * sh.volMult, d.type) + basis) * d.qtyMult;
+      derivVal += (bsPrice(S, d.K, Tt, r, d.iv, d.type) + basis) * d.qtyMult;
     } else {
       // Interpolazione lineare prezzo corrente → intrinseco a scadenza. NIENTE clamp sul
       // premio temporale: per quote sotto l'intrinseco (deep ITM) il clamp disancorerebbe t0.
@@ -363,11 +366,7 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
       derivVal += px * d.qtyMult;
     }
   }
-  let linkedEquityVal = 0;
-  for (const key in inp.equityByKey) {
-    linkedEquityVal += inp.equityByKey[key] * (sh.underlyingMult[key] ?? sh.equityMult);
-  }
-  const equitySleeve = inp.equityFlat * sh.equityMult + linkedEquityVal + inp.gpEquityFlat + derivVal + equityAdjAtExpiry + inp.equityDerivOffset;
+  const equitySleeve = inp.equityFlat + inp.gpEquityFlat + derivVal + equityAdjAtExpiry + inp.equityDerivOffset;
 
   // ── bucket BOND + COMMODITY ──
   let bondVal = 0;
@@ -375,13 +374,12 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, sh: ShockSet, scope: 
   for (const b of inp.bonds) {
     const tCapYears = Math.min(tp.tYears, b.maturityT);
     if (b.inflationLinked) {
-      // NON converge a 100: accredita sul target inflazione BCE (shockabile dai tassi).
-      const inflation = Math.max(0, INFLATION_TARGET + sh.rateBump);
-      bondVal += b.mvT0 * Math.pow(1 + inflation, tCapYears);
+      // NON converge a 100: accredita sul target inflazione BCE.
+      bondVal += b.mvT0 * Math.pow(1 + INFLATION_TARGET, tCapYears);
     } else if (tp.tYears >= b.maturityT) {
       bondVal += b.mvT0 * (100 / b.cleanT0Model); // rimborso a par
     } else {
-      const clean = bondModelPrice(b, tp.tYears, b.ytm + sh.rateBump);
+      const clean = bondModelPrice(b, tp.tYears, b.ytm);
       bondVal += b.mvT0 * (clean / b.cleanT0Model);
     }
     // cedole staccate in (t0, tp] — flussi precomputati, niente Date math
@@ -406,134 +404,20 @@ function baseForScope(inp: ProjectionInputs, scope: ProjectionScope): number {
   return inp.patrimonyT0;
 }
 
-// ───────────────────────── Proiezione deterministica ─────────────────────────
+// ───────────────────────── Proiezione ─────────────────────────
 
 export interface ProjectionRow {
   label: string;
   tYears: number;
   patrimony: number;
   pnlPct: number;
-  // bande MC (opzionali)
-  p5?: number; p50?: number; p95?: number;
 }
 
+/** Proiezione deterministica del patrimonio dal mese corrente all'orizzonte. */
 export function projectDeterministic(inp: ProjectionInputs, grid: TimePoint[], scope: ProjectionScope = 'all'): ProjectionRow[] {
   const base = baseForScope(inp, scope);
   return grid.map(tp => {
-    const v = patrimonyAt(inp, tp, NO_SHOCK, scope);
+    const v = patrimonyAt(inp, tp, scope);
     return { label: tp.label, tYears: tp.tYears, patrimony: v, pnlPct: base !== 0 ? ((v - base) / base) * 100 : 0 };
-  });
-}
-
-// ───────────────────────── Monte Carlo ─────────────────────────
-
-// RNG deterministico (mulberry32) + Box-Muller per normali.
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function gauss(rand: () => number): number {
-  let u = 0, v = 0;
-  while (u === 0) u = rand();
-  while (v === 0) v = rand();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-
-export interface MonteCarloConfig {
-  enableVolRates: boolean;
-  enableUnderlying: boolean;
-  volSigma: number;   // dev std relativa della vol (es. 0.25 = ±25%)
-  rateSigma: number;  // dev std assoluta tassi (es. 0.01 = ±100bp)
-  paths: number;
-}
-
-export const DEFAULT_MC: MonteCarloConfig = {
-  enableVolRates: true,
-  enableUnderlying: false,
-  volSigma: 0.25,
-  rateSigma: 0.01,
-  paths: 300,
-};
-
-/** Per ogni punto temporale calcola p5/p50/p95 del patrimonio simulando shock correlati. */
-export function projectMonteCarlo(
-  inp: ProjectionInputs,
-  grid: TimePoint[],
-  cfg: MonteCarloConfig,
-  scope: ProjectionScope = 'all',
-): ProjectionRow[] {
-  const rand = mulberry32(0xC0FFEE);
-  const base = baseForScope(inp, scope);
-  // chiavi canoniche: sottostanti dei derivati + azioni ad essi associate
-  const keys = Array.from(new Set([
-    ...inp.derivs.map(d => d.key),
-    ...Object.keys(inp.equityByKey),
-  ].filter(Boolean)));
-  // vol per sottostante: IV media dei derivati su quel ticker, fallback vol azionaria
-  const sigmaByKey: Record<string, number> = {};
-  for (const k of keys) {
-    const legs = inp.derivs.filter(d => d.key === k && d.ivResolved);
-    sigmaByKey[k] = legs.length > 0
-      ? legs.reduce((s, d) => s + d.iv, 0) / legs.length
-      : DEFAULT_EQUITY_VOL;
-  }
-
-  // matrice [point][path]
-  const samples: number[][] = grid.map(() => []);
-  const rho = MC_MARKET_CORR;
-  const rhoOrth = Math.sqrt(1 - rho * rho);
-
-  for (let p = 0; p < cfg.paths; p++) {
-    // shock costanti per path (vol/tassi); browniani correlati per i sottostanti (titoli):
-    // Z_u = ρ·Zm + √(1−ρ²)·ε_u, con Zm fattore di mercato condiviso con l'equity aggregata.
-    const volMult = cfg.enableVolRates ? Math.max(0.05, 1 + cfg.volSigma * gauss(rand)) : 1;
-    const rateBump = cfg.enableVolRates ? cfg.rateSigma * gauss(rand) : 0;
-
-    const zMarket = gauss(rand);
-    const uZ: Record<string, number> = {};
-    keys.forEach(k => { uZ[k] = rho * zMarket + rhoOrth * gauss(rand); });
-
-    for (let i = 0; i < grid.length; i++) {
-      const tp = grid[i];
-      let underlyingMult: Record<string, number> = {};
-      let equityMult = 1;
-      if (cfg.enableUnderlying) {
-        const t = Math.max(0, tp.tYears);
-        const sq = Math.sqrt(t);
-        underlyingMult = {};
-        keys.forEach(k => {
-          const sigma = sigmaByKey[k];
-          underlyingMult[k] = Math.exp((DEFAULT_RATE - 0.5 * sigma * sigma) * t + sigma * sq * uZ[k]);
-        });
-        equityMult = Math.exp((DEFAULT_RATE - 0.5 * DEFAULT_EQUITY_VOL * DEFAULT_EQUITY_VOL) * t + DEFAULT_EQUITY_VOL * sq * zMarket);
-      }
-      const sh: ShockSet = { volMult, rateBump, equityMult, underlyingMult };
-      samples[i].push(patrimonyAt(inp, tp, sh, scope));
-    }
-  }
-
-  const pct = (arr: number[], q: number): number => {
-    const s = [...arr].sort((a, b) => a - b);
-    const idx = Math.min(s.length - 1, Math.max(0, Math.floor(q * (s.length - 1))));
-    return s[idx];
-  };
-
-  return grid.map((tp, i) => {
-    const arr = samples[i];
-    const p50 = pct(arr, 0.5);
-    return {
-      label: tp.label,
-      tYears: tp.tYears,
-      patrimony: p50,
-      pnlPct: base !== 0 ? ((p50 - base) / base) * 100 : 0,
-      p5: pct(arr, 0.05),
-      p50,
-      p95: pct(arr, 0.95),
-    };
   });
 }
