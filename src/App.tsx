@@ -23,6 +23,7 @@ const RiskSimulator = lazy(() => import("@/pages/RiskSimulator").then(m => ({ de
 const OptionAnalyzer = lazy(() => import("@/pages/OptionAnalyzer").then(m => ({ default: m.OptionAnalyzer })));
 const ResetPassword = lazy(() => import("@/pages/ResetPassword").then(m => ({ default: m.ResetPassword })));
 const Simulator = lazy(() => import("@/pages/Simulator"));
+const OAuthConsent = lazy(() => import("@/pages/OAuthConsent"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
