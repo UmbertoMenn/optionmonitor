@@ -1821,6 +1821,20 @@ function StressLabContent() {
                 formatter={(v: number, n: string) => [plPct ? fmtN(v, 2) + '%' : fmtEUR(v), n]}
               />
               <Legend wrapperStyle={{ fontSize: 12, fontFamily: SANS }} />
+              {/* Le curve vengono disegnate PRIMA delle righe verticali: in SVG
+                * l'ordine dei nodi è l'ordine di rendering, così righe e badge
+                * (attuale / rovina / margin call) restano in primo piano. */}
+              <ReferenceLine y={0} stroke={C.border2} />
+              <Line type="monotone" dataKey="Totale" stroke={C.blue} strokeWidth={2.5} dot={false} />
+              <Line
+                type="monotone"
+                dataKey="Azioni/ETF"
+                stroke={C.mut}
+                strokeWidth={1.5}
+                dot={false}
+                strokeDasharray="5 4"
+              />
+              <Line type="monotone" dataKey="Opzioni" stroke={C.amber} strokeWidth={1.5} dot={false} />
               <ReferenceLine
                 x={0}
                 stroke={C.mut}
@@ -1882,17 +1896,6 @@ function StressLabContent() {
                   }}
                 />
               )}
-              <ReferenceLine y={0} stroke={C.border2} />
-              <Line type="monotone" dataKey="Totale" stroke={C.blue} strokeWidth={2.5} dot={false} />
-              <Line
-                type="monotone"
-                dataKey="Azioni/ETF"
-                stroke={C.mut}
-                strokeWidth={1.5}
-                dot={false}
-                strokeDasharray="5 4"
-              />
-              <Line type="monotone" dataKey="Opzioni" stroke={C.amber} strokeWidth={1.5} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
