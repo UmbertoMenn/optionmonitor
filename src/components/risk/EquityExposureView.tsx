@@ -1079,6 +1079,7 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                   const isCallVariant = s.syntheticType?.endsWith('call');
                   const spotUnresolved = isCallVariant
                     && (s.syntheticBreakdown?.spot == null || s.syntheticBreakdown?.spotSource === 'none');
+                  const pmcMissing = s.syntheticBreakdown?.pmcMissing === true;
                   return (
                     <div key={index} className="p-3 rounded-lg bg-muted/50 space-y-2">
                       <div className="flex justify-between items-start gap-3">
@@ -1103,6 +1104,27 @@ Rischio EUR = ${stock.currency} ${formatNumber(stock.riskOriginal, 0)} / ${stock
                                     Spot non trovato né nel portafoglio né nella cache prezzi per ticker
                                     {s.syntheticBreakdown?.spotTickerUsed ? ` (${s.syntheticBreakdown.spotTickerUsed})` : ''}.
                                     Uso fallback <b>mkt</b> della long CALL.
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                            {pmcMissing && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-red-500/15 text-red-500 border-red-500 cursor-pointer"
+                                    >
+                                      ⚠ PMC mancante
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-xs text-xs">
+                                    Il PMC (prezzo medio di carico) della long CALL non è disponibile nel
+                                    file caricato. Il rischio di questa posizione richiederebbe il PMC
+                                    (spot sopra lo strike della short call) ma è stato calcolato con PMC = 0:
+                                    <b> il valore mostrato sottostima il rischio reale</b>. Verrà corretto
+                                    automaticamente appena il PMC tornerà disponibile nei file.
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
@@ -1339,6 +1361,26 @@ Rischio EUR = ${formatEUR(lc.riskEUR)}`}
                               </Tooltip>
                             </TooltipProvider>
                           )}
+                          {strat.pmcMissing && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs px-1.5 py-0 h-5 bg-red-500/15 text-red-500 border-red-500 cursor-pointer"
+                                  >
+                                    ⚠ PMC mancante
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs text-xs">
+                                  Almeno una gamba di questa strategia non ha il PMC (prezzo medio di carico)
+                                  disponibile nel file caricato. Il premio netto usato nel calcolo del Max Loss
+                                  è stato posto a 0 per quella gamba: <b>il Max Loss mostrato non è affidabile</b>.
+                                  Verrà corretto automaticamente appena il PMC tornerà disponibile nei file.
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
                         </div>
                         <span className="text-xs text-muted-foreground">
                           ML: {strat.currency} {formatNumber(strat.maxLoss, 0)}
@@ -1351,7 +1393,7 @@ Rischio EUR = ${formatEUR(lc.riskEUR)}`}
 {`Strategia: ${strat.strategyName} — ${strat.underlying}
 ${strat.calculation ?? 'Max Loss sul payoff matematico a scadenza.'}
 Max Loss valuta: ${strat.currency} ${formatNumber(strat.maxLoss, 0)}
-Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠️ Rischio CALL teoricamente illimitato: il valore riflette solo il lato PUT definito.' : ''}`}
+Max Loss EUR = ${formatEUR(strat.maxLossEUR)}${strat.hasUnlimitedRisk ? '\n\n⚠️ Rischio CALL teoricamente illimitato: il valore riflette solo il lato PUT definito.' : ''}${strat.pmcMissing ? '\n\n⚠️ PMC mancante su almeno una gamba: il Max Loss mostrato NON è affidabile (premio netto calcolato con PMC=0).' : ''}`}
                       </CalcInfo>
                     </span>
                   </div>

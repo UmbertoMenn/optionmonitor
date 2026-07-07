@@ -65,6 +65,7 @@ export interface StockRiskDetail {
     spotTickerUsed?: string | null;
     pricePerShare?: number;
     priceSource?: 'PMC' | 'mkt';
+    pmcMissing?: boolean;       // true se avg_cost mancante e priceSource='PMC' -> rischio non affidabile
     putStrike?: number;
     putQty?: number;
     synPutStrike?: number;
@@ -111,6 +112,7 @@ export interface StrategyRiskDetail {
   exchangeRate: number;
   calculation: string;          // Descrizione calcolo per tooltip
   hasUnlimitedRisk: boolean;    // Flag per strategie con rischio illimitato (es. Short Strangle)
+  pmcMissing?: boolean;         // true se almeno una gamba ha PMC mancante -> max loss non affidabile
 }
 
 export interface CommodityRiskDetail {
@@ -517,7 +519,8 @@ function positionToLeg(p: Position): OptionLeg {
     type: (p.option_type || 'put') as 'call' | 'put',
     strike: p.strike_price || 0,
     quantity: p.quantity || 0,
-    avgCost: p.avg_cost || 0
+    avgCost: p.avg_cost || 0,
+    pmcMissing: p.avg_cost == null
   };
 }
 
@@ -525,7 +528,7 @@ function positionToLeg(p: Position): OptionLeg {
  * Calculate Iron Condor max loss using universal formula.
  * This replaces the old name-based calculation with a payoff-based approach.
  */
-function calculateIronCondorMaxLoss(ic: IronCondorPosition): { maxLoss: number; calculation: string } {
+function calculateIronCondorMaxLoss(ic: IronCondorPosition): { maxLoss: number; calculation: string; pmcMissing: boolean } {
   const legs: OptionLeg[] = [
     positionToLeg(ic.soldPut),
     positionToLeg(ic.boughtPut),
@@ -537,14 +540,15 @@ function calculateIronCondorMaxLoss(ic: IronCondorPosition): { maxLoss: number; 
   
   return {
     maxLoss: result.maxLoss,
-    calculation: result.calculation
+    calculation: result.calculation,
+    pmcMissing: result.anyPmcMissing === true
   };
 }
 
 /**
  * Calculate Double Diagonal max loss using universal formula.
  */
-function calculateDoubleDiagonalMaxLoss(dd: DoubleDiagonalPosition): { maxLoss: number; calculation: string } {
+function calculateDoubleDiagonalMaxLoss(dd: DoubleDiagonalPosition): { maxLoss: number; calculation: string; pmcMissing: boolean } {
   const legs: OptionLeg[] = [
     positionToLeg(dd.soldPut),
     positionToLeg(dd.boughtPut),
@@ -556,7 +560,8 @@ function calculateDoubleDiagonalMaxLoss(dd: DoubleDiagonalPosition): { maxLoss: 
   
   return {
     maxLoss: result.maxLoss,
-    calculation: result.calculation
+    calculation: result.calculation,
+    pmcMissing: result.anyPmcMissing === true
   };
 }
 
@@ -567,11 +572,12 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): {
   maxLoss: number; 
   calculation: string; 
   isUnlimited: boolean;
+  pmcMissing: boolean;
 } {
   const legs = positionsToLegs(group.options.map(o => o.option));
   
   if (legs.length === 0) {
-    return { maxLoss: 0, calculation: 'Nessuna gamba', isUnlimited: false };
+    return { maxLoss: 0, calculation: 'Nessuna gamba', isUnlimited: false, pmcMissing: false };
   }
   
   const result = calculateUniversalMaxLoss(legs);
@@ -582,7 +588,8 @@ function calculateGroupedStrategyMaxLoss(group: GroupedOtherStrategy): {
   return {
     maxLoss: result.maxLoss,
     calculation: `${strategyPrefix}${result.calculation}`,
-    isUnlimited: result.isUnlimited
+    isUnlimited: result.isUnlimited,
+    pmcMissing: result.anyPmcMissing === true
   };
 }
 
@@ -613,7 +620,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
   for (const ic of categories.ironCondors) {
     const exchangeRate = getEffectiveExchangeRate(ic.soldPut);
     const currency = ic.soldPut.currency || 'USD';
-    const { maxLoss, calculation } = calculateIronCondorMaxLoss(ic);
+    const { maxLoss, calculation, pmcMissing } = calculateIronCondorMaxLoss(ic);
     const identity = resolveUnderlyingIdentity({
       rawTicker: ic.soldPut.ticker,
       rawName: ic.underlying,
@@ -631,7 +638,8 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       currency,
       exchangeRate,
       calculation,
-      hasUnlimitedRisk: false
+      hasUnlimitedRisk: false,
+      pmcMissing
     });
   }
   
@@ -639,7 +647,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
   for (const dd of categories.doubleDiagonals) {
     const exchangeRate = getEffectiveExchangeRate(dd.soldPut);
     const currency = dd.soldPut.currency || 'USD';
-    const { maxLoss, calculation } = calculateDoubleDiagonalMaxLoss(dd);
+    const { maxLoss, calculation, pmcMissing } = calculateDoubleDiagonalMaxLoss(dd);
     const identity = resolveUnderlyingIdentity({
       rawTicker: dd.soldPut.ticker,
       rawName: dd.underlying,
@@ -657,7 +665,8 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       currency,
       exchangeRate,
       calculation,
-      hasUnlimitedRisk: false
+      hasUnlimitedRisk: false,
+      pmcMissing
     });
   }
   
@@ -696,7 +705,7 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
     const firstOption = effectiveGroup.options[0].option;
     const exchangeRate = getEffectiveExchangeRate(firstOption);
     const currency = firstOption.currency || 'USD';
-    const { maxLoss, calculation, isUnlimited } = calculateGroupedStrategyMaxLoss(effectiveGroup);
+    const { maxLoss, calculation, isUnlimited, pmcMissing } = calculateGroupedStrategyMaxLoss(effectiveGroup);
     const linkedFromOption = effectiveGroup.options.find(o => o.underlying)?.underlying || null;
     const identity = resolveUnderlyingIdentity({
       rawTicker: firstOption.ticker,
@@ -715,7 +724,8 @@ export function calculateStrategyRisk(categories: DerivativeCategories): Strateg
       currency,
       exchangeRate,
       calculation,
-      hasUnlimitedRisk: isUnlimited
+      hasUnlimitedRisk: isUnlimited,
+      pmcMissing
     });
   }
   
@@ -823,6 +833,7 @@ export function calculateSyntheticCcDrccRisk(
   ): StockRiskDetail => {
     const qty = longCall.quantity || 0;
     const longStrike = longCall.strike_price || 0;
+    const pmcMissing = longCall.avg_cost == null;
     const pmc = longCall.avg_cost || 0;
     const mkt = longCall.current_price ?? pmc;
     const resolution: SpotResolution = spotResolver
@@ -852,7 +863,8 @@ export function calculateSyntheticCcDrccRisk(
     const protPart = protectionPutStrike != null && protectionPutStrike > 0
       ? ` + Protezione PUT ${protectionPutStrike}`
       : '';
-    const composition = `Long CALL ${longStrike} ITM (${priceLabel}) + Short CALL ${shortStrike}${spotPart}${protPart}`;
+    const pmcWarningPart = priceSource === 'PMC' && pmcMissing ? ' [PMC MANCANTE]' : '';
+    const composition = `Long CALL ${longStrike} ITM (${priceLabel}) + Short CALL ${shortStrike}${spotPart}${protPart}${pmcWarningPart}`;
     return buildEntry(longCall, underlyingName, riskOriginal, 'cc_call', composition, {
       qty,
       longStrike,
@@ -864,6 +876,7 @@ export function calculateSyntheticCcDrccRisk(
       spotTickerUsed: resolution.tickerUsed,
       pricePerShare,
       priceSource,
+      pmcMissing: priceSource === 'PMC' && pmcMissing,
       protPutStrike: protectionPutStrike ?? undefined,
     });
   };

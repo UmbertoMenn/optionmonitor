@@ -256,12 +256,31 @@ export function HoldingBreakdownDialog({
                           </Tooltip>
                         </TooltipProvider>
                       )}
+                      {strat.pmcMissing && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge
+                                variant="outline"
+                                className="text-xs px-1.5 py-0 h-5 bg-red-500/15 text-red-500 border-red-500 cursor-pointer"
+                              >
+                                ⚠ PMC mancante
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs text-xs">
+                              Almeno una gamba di questa strategia non ha il PMC (prezzo medio di carico)
+                              disponibile nel file caricato. Il Max Loss mostrato non è affidabile
+                              (premio netto calcolato con PMC=0 per quella gamba).
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
                     </div>
                     <div className="text-right">
                       <div className="font-medium text-purple-500 flex items-center justify-end gap-1.5">
                         {formatEUR(strat.maxLossEUR)}
                         <CalcInfo>
-                          {`Strategia: ${strat.strategyName}\nMax Loss calcolato sul payoff matematico a scadenza.${strat.hasUnlimitedRisk ? '\n⚠️ Lato CALL con rischio teoricamente illimitato: il valore mostra solo il lato PUT (definito).' : ''}\nValore = ${formatEUR(strat.maxLossEUR)}`}
+                          {`Strategia: ${strat.strategyName}\nMax Loss calcolato sul payoff matematico a scadenza.${strat.hasUnlimitedRisk ? '\n⚠️ Lato CALL con rischio teoricamente illimitato: il valore mostra solo il lato PUT (definito).' : ''}${strat.pmcMissing ? '\n⚠️ PMC mancante su almeno una gamba: Max Loss NON affidabile.' : ''}\nValore = ${formatEUR(strat.maxLossEUR)}`}
                         </CalcInfo>
                       </div>
                     </div>
