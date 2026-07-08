@@ -29,6 +29,7 @@ import { useDerivativeNetting } from '@/hooks/useDerivativeNetting';
 import { useDerivativeOverrides } from '@/hooks/useDerivativeOverrides';
 import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { useUnderlyingPrices } from '@/hooks/useUnderlyingPrices';
+import { useFrozenUnderlyingPrices } from '@/hooks/useFrozenUnderlyingPrices';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { RiskViewModeSelector, RiskViewMode } from '@/components/risk/RiskViewModeSelector';
 import { EquityExposureView } from '@/components/risk/EquityExposureView';
@@ -69,7 +70,7 @@ export function RiskAnalyzer() {
     gpHoldings.filter(h => h.asset_type === 'stock'), 
     [gpHoldings]
   );
-  const { summary, positions } = usePortfolio();
+  const { summary, positions, portfolio } = usePortfolio();
   const { isAggregatedView } = usePortfolioContext();
   const { overrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs } = useStrategyConfigurations();
@@ -80,7 +81,9 @@ export function RiskAnalyzer() {
     [positions]
   );
   const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
-  const netting = useDerivativeNetting(positions, summary, overrides, underlyingPrices, isAggregatedView, strategyConfigs);
+  // Netting su PREZZI CONGELATI dello snapshot — identico a Dashboard e Stress Lab.
+  const frozenUnderlyingPrices = useFrozenUnderlyingPrices(portfolio, underlyingPrices);
+  const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
 
   if (typeof window !== 'undefined') {
     console.log('[RiskAnalyzer] render', {

@@ -377,7 +377,7 @@ export function Dashboard() {
             viewMode={viewMode}
             onViewModeChange={setViewMode}
             overrides={overrides}
-            underlyingPrices={underlyingPrices}
+            underlyingPrices={frozenUnderlyingPrices}
             hasConfigurations={hasConfigurations}
             strategyConfigs={strategyConfigs}
           />

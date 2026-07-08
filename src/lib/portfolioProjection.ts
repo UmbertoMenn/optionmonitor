@@ -17,11 +17,15 @@ function yearFrac(a: Date, b: Date): number {
 
 // ───────────────────────── Inputs precomputati ─────────────────────────
 
+/** Fonte con cui è stato risolto lo spot del sottostante (per diagnostica). */
+export type SpotSource = 'mappa' | 'mappa_norm' | 'portafoglio' | 'nessuna';
+
 interface DerivInput {
   description: string;
   underlying: string;    // nome grezzo (chiave in underlyingPrices)
   type: 'call' | 'put';
   S0: number;            // prezzo sottostante corrente
+  spotSource: SpotSource;
   K: number;
   T0: number;            // anni a scadenza da t0
   iv: number;            // IV implicita (o fallback)
@@ -94,6 +98,9 @@ export interface DerivSummaryLeg {
   strike: number;
   mvT0: number;
   hasUnderlying: boolean;
+  spot: number;              // spot usato (0 se non risolto)
+  spotSource: SpotSource;    // come è stato risolto
+  intrinsicAtExpiryEUR: number; // intrinseco EUR realizzato a scadenza (con spot costante); = mvT0 se spot non risolto
 }
 
 export interface ProjectionInputs {
@@ -131,7 +138,46 @@ export function buildProjectionInputs(
 ): ProjectionInputs {
   const t0 = new Date();
   const fxOf = (p: Position) => (p.exchange_rate && p.exchange_rate > 0 ? p.exchange_rate : 1);
-  const upx = (key: string) => underlyingPrices?.[key]?.price ?? 0;
+
+  // ── Risoluzione spot: catena completa, MAI lasciare una gamba senza prezzo se
+  // il sottostante è risolvibile in QUALSIASI fonte disponibile ──
+  //  1) mappa prezzi per chiave esatta (dopo il fix Dashboard è la mappa CONGELATA
+  //     dello snapshot, con fallback live) — stessa fonte del Netting Intrinseco A;
+  //  2) posizione stock/ETF in portafoglio il cui ticker/descrizione matcha il nome
+  //     del sottostante → snapshot_price (come il resolver del Risk Analyzer e come
+  //     l'associatedUnderlying del netting per le covered call);
+  //  3) mappa prezzi per nome normalizzato (maiuscole, punteggiatura, spazi).
+  const normKey = (s: string) => s.toUpperCase().replace(/[.,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const stocksIdx = positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+  const normalizedPriceMap = new Map<string, number>();
+  if (underlyingPrices) {
+    for (const [k, v] of Object.entries(underlyingPrices)) {
+      if (v.price > 0) {
+        const nk = normKey(k);
+        if (!normalizedPriceMap.has(nk)) normalizedPriceMap.set(nk, v.price);
+      }
+    }
+  }
+  const resolveSpot = (underlyingName: string): { spot: number; source: SpotSource } => {
+    // 1) mappa esatta
+    const exact = underlyingPrices?.[underlyingName]?.price ?? 0;
+    if (exact > 0) return { spot: exact, source: 'mappa' };
+    // 2) posizione in portafoglio (prezzo snapshot, congelato per natura)
+    const target = underlyingName.toUpperCase();
+    const match = stocksIdx.find(s => {
+      const t = (s.ticker || '').toUpperCase();
+      const d = (s.description || '').toUpperCase();
+      return (t.length > 0 && target.includes(t)) || (d.length > 0 && (target.includes(d) || d.includes(target)));
+    });
+    if (match) {
+      const px = match.snapshot_price ?? match.current_price ?? 0;
+      if (px > 0) return { spot: px, source: 'portafoglio' };
+    }
+    // 3) mappa per nome normalizzato
+    const norm = normalizedPriceMap.get(normKey(underlyingName));
+    if (norm && norm > 0) return { spot: norm, source: 'mappa_norm' };
+    return { spot: 0, source: 'nessuna' };
+  };
 
   const derivs: DerivInput[] = [];
   const derivSummary: DerivSummaryLeg[] = [];
@@ -150,7 +196,7 @@ export function buildProjectionInputs(
     const T0 = expiry ? Math.max(0, yearFrac(t0, expiry)) : 0;
     if (expiry && expiry.getTime() > maxExpiry) maxExpiry = expiry.getTime();
     const underlyingName = p.underlying || p.description || '';
-    const S0 = upx(underlyingName);
+    const { spot: S0, source: spotSource } = resolveSpot(underlyingName);
     const hasUnderlying = S0 > 0;
     if (!hasUnderlying) derivsNoUnderlying.push(p.description);
 
@@ -166,11 +212,17 @@ export function buildProjectionInputs(
       ? anchor - bsPrice(S0, K, T0, DEFAULT_RATE, iv, p.option_type)
       : 0;
 
+    // Intrinseco realizzato a scadenza (spot costante): è ciò che l'esercizio materializza
+    // nel bucket equity. Se lo spot non è risolvibile la gamba resta al MV corrente.
+    const intrinsicAtExpiryEUR = hasUnderlying && T0 > 0
+      ? (p.option_type === 'call' ? Math.max(0, S0 - K) : Math.max(0, K - S0)) * qtyMult
+      : mvT0;
+
     derivs.push({
       description: p.description,
       underlying: underlyingName,
       type: p.option_type,
-      S0, K, T0, iv, ivResolved,
+      S0, spotSource, K, T0, iv, ivResolved,
       qtyMult, anchorPerShare: anchor, basisPerShare, hasUnderlying, mvT0,
     });
     derivSummary.push({
@@ -181,6 +233,9 @@ export function buildProjectionInputs(
       strike: K,
       mvT0,
       hasUnderlying,
+      spot: S0,
+      spotSource,
+      intrinsicAtExpiryEUR,
     });
   }
 
@@ -333,9 +388,11 @@ function patrimonyAt(inp: ProjectionInputs, tp: TimePoint, scope: ProjectionScop
   let equityAdjAtExpiry = 0; // P/L da esercizio: spostato dal bucket derivati al bucket equity
   for (const d of inp.derivs) {
     if (!d.hasUnderlying) {
-      // Senza prezzo sottostante: decadimento lineare del MV verso 0 sulla vita residua.
-      const frac = d.T0 > 0 ? Math.max(0, (d.T0 - tp.tYears) / d.T0) : 0;
-      derivVal += d.mvT0 * frac;
+      // Spot non risolvibile da NESSUNA fonte (mappa congelata, portafoglio, mappa
+      // normalizzata): fallback prudente al MV corrente COSTANTE, identico al fallback
+      // del Netting Intrinseco A. Mai azzerare la gamba: distruggerebbe l'intrinseco
+      // delle comprate ITM e cancellerebbe la passività delle vendute ITM.
+      derivVal += d.mvT0;
       continue;
     }
     if (d.T0 <= 0) {
@@ -411,6 +468,77 @@ export interface ProjectionRow {
   tYears: number;
   patrimony: number;
   pnlPct: number;
+}
+
+// ───────────────────────── Scomposizione all'orizzonte (diagnostica) ─────────────────────────
+
+export interface HorizonDecomposition {
+  tYears: number;
+  equityFlat: number;          // azioni + ETF (costanti)
+  gpEquityFlat: number;        // GP azionaria (costante)
+  derivIntrinsic: number;      // Σ intrinseci esercitati (gambe con spot risolto e vita residua > 0)
+  derivNoSpotFlat: number;     // gambe senza spot risolvibile: MV corrente mantenuto
+  derivStaleFlat: number;      // gambe già scadute nello snapshot: MV corrente mantenuto
+  equityDerivOffset: number;   // offset costante = netting totale − Σ MV derivati locali
+  bondValue: number;           // bond a rimborso / accredito inflazione all'orizzonte
+  coupons: number;             // cedole staccate cumulate fino all'orizzonte
+  unparsedBondFlat: number;
+  commodityFlat: number;
+  cashResidual: number;
+  total: number;               // = patrimonyAt(orizzonte, 'all')
+}
+
+/**
+ * Scompone il valore della proiezione all'orizzonte (ultima scadenza) nei suoi bucket.
+ * Serve a confrontare, voce per voce, la curva con "patrimonio a Netting Intrinseco A":
+ *   base + Σ intrinseci  vs  base + rivalutazione bond + cedole + gambe non risolte.
+ * total coincide per costruzione con l'ultimo punto di projectDeterministic (scope 'all').
+ */
+export function decomposeAtHorizon(inp: ProjectionInputs): HorizonDecomposition {
+  const tYears = Math.max(0, yearFrac(inp.t0, inp.horizon));
+
+  let derivIntrinsic = 0;
+  let derivNoSpotFlat = 0;
+  let derivStaleFlat = 0;
+  for (const d of inp.derivs) {
+    if (!d.hasUnderlying) { derivNoSpotFlat += d.mvT0; continue; }
+    if (d.T0 <= 0) { derivStaleFlat += d.mvT0; continue; }
+    const intrinsic = d.type === 'call' ? Math.max(0, d.S0 - d.K) : Math.max(0, d.K - d.S0);
+    derivIntrinsic += intrinsic * d.qtyMult;
+  }
+
+  let bondValue = 0;
+  let coupons = 0;
+  for (const b of inp.bonds) {
+    const tCapYears = Math.min(tYears, b.maturityT);
+    if (b.inflationLinked) {
+      bondValue += b.mvT0 * Math.pow(1 + INFLATION_TARGET, tCapYears);
+    } else {
+      bondValue += b.mvT0 * (100 / b.cleanT0Model); // all'orizzonte ogni bond è scaduto → par
+    }
+    if (b.couponCashPerPeriod !== 0) {
+      let n = 0;
+      for (let i = 0; i < b.flowT.length; i++) if (b.flowT[i] <= tYears) n++;
+      coupons += n * b.couponCashPerPeriod;
+    }
+  }
+
+  const total = inp.equityFlat + inp.gpEquityFlat
+    + derivIntrinsic + derivNoSpotFlat + derivStaleFlat + inp.equityDerivOffset
+    + bondValue + coupons + inp.unparsedBondFlat + inp.commodityFlat + inp.cashResidual;
+
+  return {
+    tYears,
+    equityFlat: inp.equityFlat,
+    gpEquityFlat: inp.gpEquityFlat,
+    derivIntrinsic, derivNoSpotFlat, derivStaleFlat,
+    equityDerivOffset: inp.equityDerivOffset,
+    bondValue, coupons,
+    unparsedBondFlat: inp.unparsedBondFlat,
+    commodityFlat: inp.commodityFlat,
+    cashResidual: inp.cashResidual,
+    total,
+  };
 }
 
 /** Proiezione deterministica del patrimonio dal mese corrente all'orizzonte. */

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer, Tooltip as RechartsTooltip,
@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/tooltip';
 import { Info, ChevronDown, Wrench } from 'lucide-react';
 import {
-  buildProjectionInputs, buildTimeGrid, projectDeterministic,
+  buildProjectionInputs, buildTimeGrid, projectDeterministic, decomposeAtHorizon,
   ResolvedBondOverride, ProjectionScope, INFLATION_TARGET,
 } from '@/lib/portfolioProjection';
 import { parseBondPartial } from '@/lib/bondMath';
@@ -154,6 +154,51 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
   const grid = useMemo(() => buildTimeGrid(inputs.t0, effectiveHorizon, 60), [inputs, effectiveHorizon]);
   const deterministic = useMemo(() => projectDeterministic(inputs, grid, scope), [inputs, grid, scope]);
 
+  // DEBUG diagnostico (stesso flag del netting): confronto gamba per gamba tra intrinseco
+  // realizzato a scadenza nella proiezione e i valori del Netting Intrinseco A, più la
+  // scomposizione per bucket del valore all'orizzonte massimo.
+  // Attivazione: localStorage.setItem('nettingDebug','1') e ricarica.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (localStorage.getItem('nettingDebug') !== '1') return;
+    if (inputs.derivs.length === 0 && inputs.bonds.length === 0) return;
+    const dec = decomposeAtHorizon(inputs);
+    const fmt = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
+    /* eslint-disable no-console */
+    console.log('%c[PROIEZIONE] Evoluzione patrimonio — diagnostica orizzonte', 'font-weight:bold;font-size:13px');
+    console.table(inputs.derivSummary.map(d => ({
+      descr: d.description,
+      sottostante: d.underlying,
+      tipo: d.type.toUpperCase(),
+      qty: d.qty,
+      strike: d.strike,
+      spot: d.spot,
+      fonteSpot: d.spotSource,
+      'MV t0': Math.round(d.mvT0),
+      'INTRINSECO a scadenza': Math.round(d.intrinsicAtExpiryEUR),
+      'Δ (decadimento premio)': Math.round(d.intrinsicAtExpiryEUR - d.mvT0),
+    })));
+    console.log(
+      `Scomposizione valore all'orizzonte massimo (${dec.tYears.toFixed(2)} anni):\n` +
+      `  azioni/ETF (piatte):          €${fmt(dec.equityFlat)}\n` +
+      `  GP azionaria (piatta):        €${fmt(dec.gpEquityFlat)}\n` +
+      `  Σ intrinseci derivati:        €${fmt(dec.derivIntrinsic)}\n` +
+      `  gambe SENZA spot (MV flat):   €${fmt(dec.derivNoSpotFlat)}\n` +
+      `  gambe già scadute (MV flat):  €${fmt(dec.derivStaleFlat)}\n` +
+      `  offset netting−MV locale:     €${fmt(dec.equityDerivOffset)}\n` +
+      `  bond a rimborso/inflazione:   €${fmt(dec.bondValue)} (MV t0: €${fmt(inputs.bonds.reduce((s, b) => s + b.mvT0, 0))})\n` +
+      `  cedole cumulate:              €${fmt(dec.coupons)}\n` +
+      `  bond piatti (no scadenza):    €${fmt(dec.unparsedBondFlat)}\n` +
+      `  materie prime (piatte):       €${fmt(dec.commodityFlat)}\n` +
+      `  cash residuo:                 €${fmt(dec.cashResidual)}\n` +
+      `  ───────────────────────────────\n` +
+      `  TOTALE ORIZZONTE:             €${fmt(dec.total)}\n` +
+      `Confronto: patrimonio Netting Intrinseco A = base + Σ intrinseci (stessi spot). ` +
+      `Il gap vs orizzonte è spiegato da: effetto bond (rimborso − MV t0), cedole, gambe senza spot/scadute e offset.`
+    );
+    /* eslint-enable no-console */
+  }, [inputs]);
+
   const data = useMemo(() => deterministic.map(d => ({
     label: d.label,
     patrimony: Math.round(d.patrimony),
@@ -281,7 +326,7 @@ export function PatrimonyProjectionCard({ positions, baseValue, underlyingPrices
                   {inputs.derivSummary.slice(0, 20).map((d, i) => (
                     <li key={i}>
                       {d.qty > 0 ? '+' : ''}{d.qty} {d.type.toUpperCase()} {d.underlying} @ {d.strike}
-                      {!d.hasUnderlying && <span className="text-amber-500"> (no spot)</span>}
+                      {!d.hasUnderlying && <span className="text-amber-500"> (no spot — MV costante)</span>}
                     </li>
                   ))}
                   {inputs.derivSummary.length > 20 && <li>… e altri {inputs.derivSummary.length - 20}</li>}

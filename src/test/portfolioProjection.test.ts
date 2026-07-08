@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseBondInfo, bondYTM, bondCleanPrice } from '@/lib/bondMath';
 import {
-  buildProjectionInputs, buildTimeGrid, projectDeterministic,
+  buildProjectionInputs, buildTimeGrid, projectDeterministic, decomposeAtHorizon,
 } from '@/lib/portfolioProjection';
 import { Position } from '@/types/portfolio';
 
@@ -102,6 +102,73 @@ describe('portfolioProjection', () => {
     const last = det[det.length - 1].patrimony;
     expect(last).toBeGreaterThan(100000); // par + almeno qualche cedola
     expect(det[det.length - 1].pnlPct).toBeGreaterThan(0);
+  });
+});
+
+describe('portfolioProjection: risoluzione spot e fallback', () => {
+  const expiryISO = new Date(Date.now() + 200 * 86400000).toISOString().slice(0, 10);
+
+  it('risolve lo spot dalla posizione stock in portafoglio quando manca nella mappa prezzi', () => {
+    const positions = [
+      pos({ asset_type: 'stock', ticker: 'BBB', description: 'BETA CORP',
+        snapshot_price: 80, current_price: 85, snapshot_market_value: 40000, market_value: 40000 }),
+      pos({ asset_type: 'derivative', option_type: 'call', quantity: -2, strike_price: 60,
+        expiry_date: expiryISO, underlying: 'BETA CORP', current_price: 22, snapshot_price: 22, exchange_rate: 1 }),
+    ];
+    const inp = buildProjectionInputs(positions, 40000, {} /* mappa vuota */);
+    expect(inp.derivsNoUnderlying.length).toBe(0);
+    expect(inp.derivSummary[0].spotSource).toBe('portafoglio');
+    expect(inp.derivSummary[0].spot).toBe(80); // snapshot_price, non current_price
+    // intrinseco a scadenza: (80-60) * -2 * 100 = -4000
+    expect(inp.derivSummary[0].intrinsicAtExpiryEUR).toBeCloseTo(-4000, 0);
+  });
+
+  it('risolve lo spot dalla mappa per nome normalizzato (punteggiatura/maiuscole)', () => {
+    const prices = { 'ALPHA, INC.': { price: 50, currency: 'USD' } } as any;
+    const positions = [
+      pos({ asset_type: 'derivative', option_type: 'put', quantity: -1, strike_price: 70,
+        expiry_date: expiryISO, underlying: 'ALPHA INC', current_price: 21, snapshot_price: 21, exchange_rate: 1 }),
+    ];
+    const inp = buildProjectionInputs(positions, 0, prices);
+    expect(inp.derivsNoUnderlying.length).toBe(0);
+    expect(inp.derivSummary[0].spotSource).toBe('mappa_norm');
+    expect(inp.derivSummary[0].spot).toBe(50);
+  });
+
+  it('gamba SENZA spot risolvibile: MV costante su tutta la curva, mai decadimento a zero', () => {
+    const positions = [
+      pos({ asset_type: 'derivative', option_type: 'put', quantity: -3, strike_price: 100,
+        expiry_date: expiryISO, underlying: 'SCONOSCIUTO XYZ', current_price: 15, snapshot_price: 15, exchange_rate: 1 }),
+    ];
+    const inp = buildProjectionInputs(positions, 0, {});
+    expect(inp.derivsNoUnderlying.length).toBe(1);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    const mv = 15 * -3 * 100; // -4500
+    for (const row of det) {
+      expect(row.patrimony).toBeCloseTo(mv, -1); // flat ovunque, anche a scadenza
+    }
+  });
+
+  it('decomposeAtHorizon: il totale coincide con l\'ultimo punto della proiezione', () => {
+    const positions = [
+      pos({ asset_type: 'stock', ticker: 'AAA', description: 'AAA',
+        snapshot_price: 120, current_price: 120, snapshot_market_value: 60000, market_value: 60000 }),
+      pos({ asset_type: 'derivative', option_type: 'call', quantity: -5, strike_price: 100,
+        expiry_date: expiryISO, underlying: 'AAA', current_price: 25, snapshot_price: 25, exchange_rate: 1 }),
+      pos({ asset_type: 'bond', description: 'BOND 4% 31/12/2030',
+        snapshot_price: 95, current_price: 95, snapshot_market_value: 95000, market_value: 95000 }),
+    ];
+    const prices = { AAA: { price: 120, currency: 'USD' } } as any;
+    const inp = buildProjectionInputs(positions, 155000, prices);
+    const grid = buildTimeGrid(inp.t0, inp.horizon, 60);
+    const det = projectDeterministic(inp, grid);
+    const dec = decomposeAtHorizon(inp);
+    expect(dec.total).toBeCloseTo(det[det.length - 1].patrimony, 0);
+    // Σ intrinseci = (120-100) * -5 * 100 = -10000; bond a par + cedole positive
+    expect(dec.derivIntrinsic).toBeCloseTo(-10000, 0);
+    expect(dec.bondValue).toBeGreaterThan(95000);
+    expect(dec.coupons).toBeGreaterThan(0);
   });
 });
 

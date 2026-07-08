@@ -3,6 +3,7 @@ import { usePortfolio } from './usePortfolio';
 import { useDerivativeOverrides } from './useDerivativeOverrides';
 import { useStrategyConfigurations, StrategyConfiguration } from './useStrategyConfigurations';
 import { useUnderlyingPrices } from './useUnderlyingPrices';
+import { useFrozenUnderlyingPrices } from './useFrozenUnderlyingPrices';
 import { useUnderlyingMappings } from './useUnderlyingMappings';
 import { categorizeDerivatives } from '@/lib/derivativeStrategies';
 import { analyzePortfolioRisk, RiskAnalysis, SpotResolver, SpotResolution } from '@/lib/riskCalculator';
@@ -24,7 +25,7 @@ function toSnapshotPositions(positions: Position[]): Position[] {
 }
 
 export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
-  const { positions, isLoading } = usePortfolio();
+  const { positions, isLoading, portfolio } = usePortfolio();
   const { overrides, isLoading: isLoadingOverrides } = useDerivativeOverrides();
   const { configurations: strategyConfigs, isLoading: isLoadingConfigs } = useStrategyConfigurations();
   const { selectedPortfolioId } = usePortfolioContext();
@@ -37,7 +38,11 @@ export function useRiskAnalysis(): RiskAnalysis & { isLoading: boolean } {
       .filter((u): u is string => !!u),
     [positions],
   );
-  const { prices: underlyingPrices } = useUnderlyingPrices(derivativeUnderlyings);
+  const { prices: livePrices } = useUnderlyingPrices(derivativeUnderlyings);
+  // Il resolver spot dà già precedenza ai prezzi snapshot delle posizioni in portafoglio;
+  // per i sottostanti NON detenuti (es. naked put) il fallback deve essere la mappa
+  // CONGELATA dello snapshot, non i prezzi live — coerenza con Dashboard/StatsCards.
+  const underlyingPrices = useFrozenUnderlyingPrices(portfolio, livePrices);
 
   // Mappings backend → alias dinamici (CEG, APP, ...)
   const { allMappings } = useUnderlyingMappings();
