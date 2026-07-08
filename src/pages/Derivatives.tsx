@@ -40,6 +40,8 @@ import { Link } from 'react-router-dom';
 import { Position } from '@/types/portfolio';
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { reconcileConfigs } from '@/lib/strategyReconciliation';
+import { autoReconcileStrategies } from '@/lib/strategyAutoReconcile';
+import { toast } from 'sonner';
 import { StrategyReconciliationDialog } from '@/components/derivatives/StrategyReconciliationDialog';
 import { 
   categorizeDerivatives,
@@ -647,17 +649,53 @@ export function Derivatives() {
     }
   }, [searchParams, setSearchParams]);
 
-  // Auto-open reconciliation dialog once per mount when discrepancies found
-  // (only if wizard is NOT already open and we didn't just save)
+  // Riconciliazione AUTOMATICA (once per mount): risolve roll, chiusure e
+  // aggiunte deterministiche senza dialog. Il dialog manuale si apre solo
+  // per gli item genuinamente ambigui rimasti irrisolti.
   const justSavedRef = useRef(false);
+  const autoReconcileRunningRef = useRef(false);
   useEffect(() => {
     if (reconciliationCheckedRef.current) return;
     if (justSavedRef.current) { justSavedRef.current = false; return; }
-    if (reconciliationItems.length > 0 && !isLoading && !wizardOpen) {
-      reconciliationCheckedRef.current = true;
+    if (autoReconcileRunningRef.current) return;
+    if (reconciliationItems.length === 0 || isLoading || wizardOpen) return;
+
+    reconciliationCheckedRef.current = true;
+
+    const result = autoReconcileStrategies(strategyConfigs, reconciliationItems);
+
+    if (!result.hasAutoChanges) {
+      // Nulla di automatizzabile: comportamento precedente (dialog)
       setReconciliationOpen(true);
+      return;
     }
-  }, [reconciliationItems, isLoading, wizardOpen]);
+
+    autoReconcileRunningRef.current = true;
+    console.log('[AutoReconcile] Modifiche automatiche:', result.changes);
+
+    handleSaveConfigs(result.resolvedConfigs!)
+      .then(() => {
+        toast.success('Strategie aggiornate automaticamente', {
+          description: result.changes.slice(0, 5).join('\n') +
+            (result.changes.length > 5 ? `\n… e altre ${result.changes.length - 5} modifiche` : ''),
+          duration: 10000,
+        });
+        // Item irrisolti (es. nuove strategie da classificare) → dialog
+        if (result.unresolvedItems.length > 0) {
+          setReconciliationOpen(true);
+        }
+      })
+      .catch(err => {
+        console.error('[AutoReconcile] Errore nel salvataggio automatico:', err);
+        toast.error('Riconciliazione automatica fallita', {
+          description: 'Apri il dialog per riconciliare manualmente.',
+        });
+        setReconciliationOpen(true);
+      })
+      .finally(() => {
+        autoReconcileRunningRef.current = false;
+      });
+  }, [reconciliationItems, isLoading, wizardOpen, strategyConfigs, handleSaveConfigs]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;
