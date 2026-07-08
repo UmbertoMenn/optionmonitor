@@ -211,7 +211,7 @@ async function remapMultiLegOverride(
 /**
  * Finds a matching stock in the new positions list based on the old stock
  */
-function findMatchingStock(
+export function findMatchingStock(
   oldStockId: string | null,
   oldPositions: Position[],
   newPositions: Position[]
@@ -241,6 +241,108 @@ function findMatchingStock(
   );
   
   return match?.id || null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REMAP linked_stock_id delle strategy_configurations dopo un nuovo upload.
+// Ogni upload Excel CANCELLA e RI-INSERISCE le positions (nuovi UUID): i riferimenti
+// diretti a un position_id — come strategy_configurations.linked_stock_id — restano
+// stale se non rimappati esplicitamente. Le gambe opzione si "auto-guariscono" perché
+// vengono ri-matchate per firma (underlying|strike|expiry|type|quantity) a ogni render,
+// ma il link allo STOCK reale (usato per il prezzo intrinseco delle covered call) è un
+// riferimento diretto e va aggiornato qui, sullo stesso modello di remapOverridesAfterUpload.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface StrategyConfigLinkedStock {
+  id: string;
+  linked_stock_id: string | null;
+  linked_stock_slot_ids: string[] | null;
+}
+
+export interface StrategyConfigRemapResult {
+  matched: number;    // linked_stock_id aggiornato con successo al nuovo ID
+  cleared: number;    // nessun match trovato: azzerato per evitare un riferimento morto
+  unchanged: number;  // nessun link da rimappare, o già corretto
+}
+
+/**
+ * Pura: calcola il nuovo linked_stock_id/linked_stock_slot_ids per UNA config, dati i set
+ * di posizioni prima e dopo l'upload. Nessuna chiamata di rete — testabile in isolamento.
+ */
+export function computeRemappedLinkedStock(
+  config: StrategyConfigLinkedStock,
+  oldPositions: Position[],
+  newPositions: Position[],
+): { linked_stock_id: string | null; linked_stock_slot_ids: string[]; changed: boolean } {
+  const oldSlotIds = config.linked_stock_slot_ids || [];
+  const usingSlots = oldSlotIds.length > 0;
+  // slot id format: `${positionId}__slot_N` — la base è l'id posizione reale da rimappare.
+  const idsToRemap = usingSlots
+    ? oldSlotIds.map(s => s.replace(/__slot_\d+$/, ''))
+    : (config.linked_stock_id ? [config.linked_stock_id] : []);
+
+  if (idsToRemap.length === 0) {
+    return { linked_stock_id: config.linked_stock_id ?? null, linked_stock_slot_ids: oldSlotIds, changed: false };
+  }
+
+  const newIds: string[] = [];
+  for (const oldId of idsToRemap) {
+    const newId = findMatchingStock(oldId, oldPositions, newPositions);
+    if (newId) newIds.push(newId);
+  }
+  const newLinkedStockId = newIds[0] ?? null;
+
+  if (!usingSlots) {
+    // Formato legacy (solo linked_stock_id, nessuno slot): non sintetizzare un array di
+    // slot che prima non c'era, confronta solo il singolo ID.
+    return {
+      linked_stock_id: newLinkedStockId,
+      linked_stock_slot_ids: [],
+      changed: newLinkedStockId !== (config.linked_stock_id ?? null),
+    };
+  }
+
+  const changed = newIds.length !== oldSlotIds.length
+    || newIds.some((id, i) => id !== oldSlotIds[i])
+    || newLinkedStockId !== (config.linked_stock_id ?? null);
+
+  return { linked_stock_id: newLinkedStockId, linked_stock_slot_ids: newIds, changed };
+}
+
+/**
+ * Rimappa linked_stock_id/linked_stock_slot_ids di tutte le strategy_configurations di un
+ * portfolio dopo un nuovo upload Excel. Da chiamare subito dopo remapOverridesAfterUpload,
+ * con lo stesso oldPositions/newPositions.
+ */
+export async function remapStrategyConfigLinkedStocks(
+  oldPositions: Position[],
+  newPositions: Position[],
+  configs: StrategyConfigLinkedStock[],
+): Promise<StrategyConfigRemapResult> {
+  let matched = 0;
+  let cleared = 0;
+  let unchanged = 0;
+
+  for (const config of configs) {
+    const hasLink = !!config.linked_stock_id || (config.linked_stock_slot_ids?.length ?? 0) > 0;
+    if (!hasLink) { unchanged++; continue; }
+
+    const result = computeRemappedLinkedStock(config, oldPositions, newPositions);
+    if (!result.changed) { unchanged++; continue; }
+
+    await supabase
+      .from('strategy_configurations')
+      .update({
+        linked_stock_id: result.linked_stock_id,
+        linked_stock_slot_ids: result.linked_stock_slot_ids as unknown as never,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', config.id);
+
+    if (result.linked_stock_id) matched++; else cleared++;
+  }
+
+  return { matched, cleared, unchanged };
 }
 
 /**

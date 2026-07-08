@@ -5,7 +5,7 @@ import { usePortfolioContext, AGGREGATED_PORTFOLIO_ID, isUserAggregatedId, getUs
 import { useAuth } from '@/contexts/AuthContext';
 import { Portfolio, Position, PortfolioSummary, AssetType } from '@/types/portfolio';
 import { DerivativeOverride } from '@/types/derivativeOverrides';
-import { remapOverridesAfterUpload } from '@/lib/overrideMatching';
+import { remapOverridesAfterUpload, remapStrategyConfigLinkedStocks } from '@/lib/overrideMatching';
 import { useFullSnapshot } from '@/hooks/useFullSnapshot';
 import { toast } from 'sonner';
 
@@ -187,6 +187,8 @@ export function usePortfolio() {
         .from('positions').select('*').eq('portfolio_id', portfolioId);
       const { data: existingOverrides } = await supabase
         .from('derivative_overrides').select('*').eq('portfolio_id', portfolioId);
+      const { data: existingStrategyConfigs } = await supabase
+        .from('strategy_configurations').select('id, linked_stock_id, linked_stock_slot_ids').eq('portfolio_id', portfolioId);
       
       // ========= STEP 1: Delete + Insert =========
       const { error: deleteError } = await supabase
@@ -221,7 +223,21 @@ export function usePortfolio() {
           }
         }
       }
-      
+
+      // ========= STEP 2b: Remap linked_stock_id delle strategy_configurations =========
+      // Stesso problema delle STEP 2: ogni upload rigenera gli ID posizione, quindi il
+      // riferimento allo stock reale di una covered call andrebbe stale senza questo remap.
+      if (existingStrategyConfigs && existingStrategyConfigs.length > 0 && insertedPositions) {
+        const typedOldPositions = (oldPositions || []) as unknown as Position[];
+        const typedNewPositions = insertedPositions as unknown as Position[];
+        const typedConfigs = existingStrategyConfigs as unknown as {
+          id: string; linked_stock_id: string | null; linked_stock_slot_ids: string[] | null;
+        }[];
+
+        const scResult = await remapStrategyConfigLinkedStocks(typedOldPositions, typedNewPositions, typedConfigs);
+        console.log('[StrategyConfigRemap] Result:', scResult);
+      }
+
       // ========= STEP 3: Update portfolio totals =========
       const investedNonDerivatives = positions
         .filter(p => p.asset_type !== 'derivative')
