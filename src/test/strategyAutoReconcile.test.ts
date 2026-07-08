@@ -43,7 +43,7 @@ function makeConfig(partial: Partial<StrategyConfiguration> & { underlying: stri
 /** Helper: reconcile + auto-resolve in un colpo */
 function run(configs: StrategyConfiguration[], positions: Position[]) {
   const items = reconcileConfigs(configs, positions);
-  return autoReconcileStrategies(configs, items);
+  return autoReconcileStrategies(configs, items, positions);
 }
 
 describe('autoReconcileStrategies — roll di una gamba (caso dominante)', () => {
@@ -261,13 +261,9 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
     expect(added.quantity_abs).toBe(2);
   });
 
-  it('nuova gamba su sottostante con PIÙ config → resta irrisolta (dialog)', () => {
+  it('put VENDUTA su sottostante con covered call → nuova config naked_put (mai dentro la CC)', () => {
+    const stock = { id: 'stock_googl', asset_type: 'stock', description: 'ALPHABET INC', ticker: 'GOOGL', quantity: 100 } as unknown as Position;
     const configs = [
-      makeConfig({
-        underlying: 'GOOGL',
-        strategy_type: 'naked_put',
-        position_signatures: [{ option_type: 'put', strike: 150, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
-      }),
       makeConfig({
         underlying: 'GOOGL',
         strategy_type: 'covered_call',
@@ -276,14 +272,102 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
       }),
     ];
     const positions = [
-      makeOption({ underlying: 'GOOGL', option_type: 'put', strike_price: 150, expiry_date: '2026-09-18', quantity: -1 }),
+      stock,
       makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 200, expiry_date: '2026-09-18', quantity: -1 }),
-      // Long call nuova: potrebbe andare in entrambe → ambigua
+      makeOption({ underlying: 'GOOGL', option_type: 'put', strike_price: 150, expiry_date: '2026-10-16', quantity: -1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.hasAutoChanges).toBe(true);
+    expect(res.unresolvedItems).toHaveLength(0);
+    const np = res.resolvedConfigs!.find(c => c.strategy_type === 'naked_put')!;
+    expect(np).toBeDefined();
+    expect(np.position_signatures[0].strike).toBe(150);
+    // La CC resta intatta
+    const cc = res.resolvedConfigs!.find(c => c.strategy_type === 'covered_call')!;
+    expect(cc.position_signatures).toHaveLength(1);
+  });
+
+  it('put COMPRATA su sottostante con covered call → CC trasformata in de-risking', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'AAPL',
+        strategy_type: 'covered_call',
+        linked_stock_id: 'stock_aapl',
+        position_signatures: [{ option_type: 'call', strike: 300, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    const positions = [
+      makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 300, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 220, expiry_date: '2026-09-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.hasAutoChanges).toBe(true);
+    expect(res.unresolvedItems).toHaveLength(0);
+    expect(res.resolvedConfigs).toHaveLength(1);
+    const drcc = res.resolvedConfigs![0];
+    expect(drcc.strategy_type).toBe('derisking_covered_call');
+    expect(drcc.position_signatures).toHaveLength(2);
+    expect(drcc.linked_stock_id).toBe('stock_aapl');
+  });
+
+  it('put COMPRATA su sottostante con naked put stessa scadenza → put_spread', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'MU',
+        strategy_type: 'naked_put',
+        position_signatures: [{ option_type: 'put', strike: 900, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    const positions = [
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 900, expiry_date: '2026-08-21', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 800, expiry_date: '2026-08-21', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.resolvedConfigs![0].strategy_type).toBe('put_spread');
+    expect(res.resolvedConfigs![0].position_signatures).toHaveLength(2);
+  });
+
+  it('put COMPRATA su naked put con scadenza diversa → diagonal_put_spread', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'MU',
+        strategy_type: 'naked_put',
+        position_signatures: [{ option_type: 'put', strike: 900, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    const positions = [
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 900, expiry_date: '2026-08-21', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 800, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.resolvedConfigs![0].strategy_type).toBe('diagonal_put_spread');
+  });
+
+  it('call COMPRATA su sottostante configurato → config leap_call creata', () => {
+    const stock = { id: 'stock_googl', asset_type: 'stock', description: 'ALPHABET INC', ticker: 'GOOGL', quantity: 100 } as unknown as Position;
+    const configs = [
+      makeConfig({
+        underlying: 'GOOGL',
+        strategy_type: 'covered_call',
+        linked_stock_id: 'stock_googl',
+        position_signatures: [{ option_type: 'call', strike: 200, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 200, expiry_date: '2026-09-18', quantity: -1 }),
       makeOption({ underlying: 'GOOGL', option_type: 'call', strike_price: 180, expiry_date: '2027-01-15', quantity: 1 }),
     ];
 
     const res = run(configs, positions);
-    expect(res.unresolvedItems.length).toBeGreaterThan(0);
+    expect(res.unresolvedItems).toHaveLength(0);
+    const leap = res.resolvedConfigs!.find(c => c.strategy_type === 'leap_call')!;
+    expect(leap).toBeDefined();
+    expect(leap.position_signatures[0].strike).toBe(180);
   });
 
   it('sottostante nuovo con sole put vendute → config naked_put creata automaticamente', () => {
@@ -308,7 +392,7 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
     expect(amd.position_signatures[0].quantity_abs).toBe(2);
   });
 
-  it('sottostante nuovo con long call (es. IREN/APLD del file reale) → NON classificato, resta al dialog', () => {
+  it('sottostante nuovo con long call (es. IREN/APLD del file reale) → leap_call automatica', () => {
     const configs: StrategyConfiguration[] = [
       makeConfig({
         underlying: 'MU',
@@ -322,10 +406,79 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
     ];
 
     const res = run(configs, positions);
-    // La long call IREN è una scelta strategica (leap? gamba di spread futuro?): mai indovinare
-    expect(res.unresolvedItems.some(i => i.underlying.includes('IREN'))).toBe(true);
-    // Nessuna config creata per IREN
-    expect(res.resolvedConfigs === null || !res.resolvedConfigs.some(c => c.underlying.includes('IREN'))).toBe(true);
+    expect(res.unresolvedItems).toHaveLength(0);
+    const iren = res.resolvedConfigs!.find(c => c.underlying.includes('IREN'))!;
+    expect(iren.strategy_type).toBe('leap_call');
+    expect(iren.position_signatures[0].quantity_abs).toBe(2);
+  });
+
+  it('sottostante nuovo put spread completo (venduta+comprata stessa scadenza) → put_spread', () => {
+    const configs: StrategyConfiguration[] = [];
+    const positions = [
+      makeOption({ underlying: 'TSLA', option_type: 'put', strike_price: 400, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'TSLA', option_type: 'put', strike_price: 350, expiry_date: '2026-09-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const tsla = res.resolvedConfigs!.find(c => c.underlying.includes('TSLA'))!;
+    expect(tsla.strategy_type).toBe('put_spread');
+    expect(tsla.position_signatures).toHaveLength(2);
+  });
+
+  it('sottostante nuovo con 4 ruoli stessa scadenza → iron_condor', () => {
+    const configs: StrategyConfiguration[] = [];
+    const positions = [
+      makeOption({ underlying: 'META', option_type: 'put', strike_price: 400, expiry_date: '2026-09-18', quantity: 1 }),
+      makeOption({ underlying: 'META', option_type: 'put', strike_price: 450, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'META', option_type: 'call', strike_price: 600, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'META', option_type: 'call', strike_price: 650, expiry_date: '2026-09-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const meta = res.resolvedConfigs!.find(c => c.underlying.includes('META'))!;
+    expect(meta.strategy_type).toBe('iron_condor');
+    expect(meta.position_signatures).toHaveLength(4);
+  });
+
+  it('sottostante nuovo con 4 ruoli su scadenze miste → double_diagonal', () => {
+    const configs: StrategyConfiguration[] = [];
+    const positions = [
+      makeOption({ underlying: 'META', option_type: 'put', strike_price: 400, expiry_date: '2026-12-18', quantity: 1 }),
+      makeOption({ underlying: 'META', option_type: 'put', strike_price: 450, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'META', option_type: 'call', strike_price: 600, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'META', option_type: 'call', strike_price: 650, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const meta = res.resolvedConfigs!.find(c => c.underlying.includes('META'))!;
+    expect(meta.strategy_type).toBe('double_diagonal');
+  });
+
+  it('sottostante nuovo call venduta con azione in portafoglio → covered_call linkata', () => {
+    const stock = { id: 'stock_ceg', asset_type: 'stock', description: 'CONSTELLATION ENERGY', ticker: 'CEG', quantity: 100 } as unknown as Position;
+    const configs: StrategyConfiguration[] = [];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'CEG', option_type: 'call', strike_price: 320, expiry_date: '2026-09-18', quantity: -1 }),
+    ];
+
+    const res = run(configs, positions);
+    const ceg = res.resolvedConfigs!.find(c => c.underlying.includes('CEG'))!;
+    expect(ceg.strategy_type).toBe('covered_call');
+    expect(ceg.linked_stock_id).toBe('stock_ceg');
+  });
+
+  it('combinazione non riconosciuta su sottostante nuovo → config other (mai al dialog)', () => {
+    const configs: StrategyConfiguration[] = [];
+    // Call venduta senza azione in portafoglio: non classificabile con certezza
+    const positions = [
+      makeOption({ underlying: 'XYZ', option_type: 'call', strike_price: 50, expiry_date: '2026-09-18', quantity: -1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.unresolvedItems).toHaveLength(0);
+    const xyz = res.resolvedConfigs!.find(c => c.underlying.includes('XYZ'))!;
+    expect(xyz.strategy_type).toBe('other');
   });
 });
 
