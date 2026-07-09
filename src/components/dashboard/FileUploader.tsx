@@ -6,6 +6,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
 import { parsePortfolioExcel } from '@/lib/excelParser';
 import { parseGPExcel } from '@/lib/gpExcelParser';
+import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
+import { ingestCashMovements, ingestTitoliTrades } from '@/lib/flussiMovementsIngest';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -108,8 +110,58 @@ export function FileUploader() {
 
     try {
       const excludedPatterns = EXCLUDED_CASH_PATTERNS[effectiveUserId || ''] || [];
+
+      // ---- Smistamento: file MOVIMENTI (mov cash / mov titoli) vs SNAPSHOT (saldi/Excel) ----
+      const snapshotFiles: File[] = [];
+      const movementTexts: { type: 'mov_cash' | 'mov_titoli'; text: string }[] = [];
+      for (const f of acceptedFiles) {
+        if (/\.csv$/i.test(f.name)) {
+          const text = await f.text();
+          const t = detectFlussiCsvType(text);
+          if (t === 'mov_cash' || t === 'mov_titoli') {
+            movementTexts.push({ type: t, text });
+            continue;
+          }
+        }
+        snapshotFiles.push(f);
+      }
+
+      // ---- Movimenti: processati PRIMA dei saldi, così i riacquisti call
+      // vengono confrontati con le posizioni PRE-aggiornamento (la call
+      // venduta è ancora presente). Idempotenti: ricaricare lo stesso file
+      // non raddoppia nulla. ----
+      const movementSummary: string[] = [];
+      for (const m of movementTexts) {
+        const parsed = parseFlussiCsvText(m.text, { excludedCashPatterns: excludedPatterns });
+        if (m.type === 'mov_cash') {
+          const res = await ingestCashMovements(targetPortfolioId, parsed.cashMovements);
+          if (res.depositsUpserted > 0) {
+            movementSummary.push(`${res.depositsUpserted} versamenti/prelievi (${res.totalAmount.toLocaleString('it-IT', { maximumFractionDigits: 0 })} €)`);
+          } else {
+            movementSummary.push('nessun bonifico/giroconto nei movimenti cash');
+          }
+        } else {
+          const res = await ingestTitoliTrades(targetPortfolioId, parsed.titoliOptionTrades);
+          const parts: string[] = [];
+          if (res.buybacksUpserted > 0) parts.push(`${res.buybacksUpserted} riacquisti call tracciati`);
+          if (res.resellsApplied > 0) parts.push(`${res.resellsApplied} contratti rivenduti applicati`);
+          movementSummary.push(parts.length > 0 ? parts.join(', ') : 'nessun riacquisto call nei movimenti titoli');
+        }
+      }
+      if (movementSummary.length > 0) {
+        await queryClient.invalidateQueries({ queryKey: ['deposits'] });
+        await queryClient.invalidateQueries({ queryKey: ['call-buybacks'] });
+        toast.success('Movimenti elaborati', { description: movementSummary.join(' • ') });
+      }
+
+      // Solo file movimenti: fine, niente aggiornamento posizioni.
+      if (snapshotFiles.length === 0) {
+        setUploadSuccess(true);
+        return;
+      }
+
       const parsed = await Promise.all(
-        acceptedFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns }))
+        snapshotFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns }))
       );
 
       // Verifica che le snapshot date siano coerenti
@@ -275,7 +327,7 @@ export function FileUploader() {
       refreshStrategyCacheForPortfolio(targetPortfolioId);
 
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
-      const filesInfo = acceptedFiles.length > 1 ? ` da ${acceptedFiles.length} file` : '';
+      const filesInfo = snapshotFiles.length > 1 ? ` da ${snapshotFiles.length} file` : '';
       toast.success('Portfolio caricato!', {
         description: `${positions.length} posizioni importate${filesInfo}${dateInfo}.`,
       });
@@ -376,7 +428,7 @@ export function FileUploader() {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'text/csv': ['.csv'],
     },
-    maxFiles: 2,
+    maxFiles: 4,
     disabled: isProcessing,
   });
 
@@ -411,7 +463,7 @@ export function FileUploader() {
                   isProcessing={isProcessing}
                   uploadSuccess={uploadSuccess}
                   isDragActive={portfolioDropzone.isDragActive}
-                  label="Carica Portfolio (fino a 2 file)"
+                  label="Carica Portfolio (fino a 4 file)"
                 />
               </div>
             </CarouselItem>
