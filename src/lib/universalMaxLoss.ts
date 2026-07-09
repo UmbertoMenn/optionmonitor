@@ -7,6 +7,7 @@ export interface OptionLeg {
   strike: number;
   quantity: number;      // + = comprato (long), - = venduto (short)
   avgCost: number;       // premio per contratto
+  pmcMissing?: boolean;  // true se avgCost non disponibile nel file caricato (fallback a 0)
 }
 
 export interface MaxLossResult {
@@ -14,6 +15,7 @@ export interface MaxLossResult {
   worstPrice: number;
   calculation: string;
   isUnlimited: boolean;
+  anyPmcMissing?: boolean; // true se almeno una gamba ha PMC mancante -> premio netto non affidabile
 }
 
 // ============= CORE FUNCTIONS =============
@@ -114,7 +116,8 @@ function calculateShortStrangleMaxLoss(legs: OptionLeg[]): MaxLossResult {
     maxLoss,
     worstPrice: 0,
     calculation: `Short Strangle P${putStrike}/C${callStrike} | GP: ${netPremium.toFixed(0)} | ML PUT side @ $0 = ${maxLoss.toFixed(0)}`,
-    isUnlimited: true
+    isUnlimited: true,
+    anyPmcMissing: legs.some(l => l.pmcMissing)
   };
 }
 
@@ -178,7 +181,8 @@ export function calculateUniversalMaxLoss(legs: OptionLeg[]): MaxLossResult {
       maxLoss: 0,
       worstPrice: 0,
       calculation: 'Nessuna gamba',
-      isUnlimited: false
+      isUnlimited: false,
+      anyPmcMissing: false
     };
   }
   
@@ -236,7 +240,8 @@ export function calculateUniversalMaxLoss(legs: OptionLeg[]): MaxLossResult {
     maxLoss,
     worstPrice,
     calculation,
-    isUnlimited: unlimited
+    isUnlimited: unlimited,
+    anyPmcMissing: legs.some(l => l.pmcMissing)
   };
 }
 
@@ -290,7 +295,8 @@ export function positionsToLegs(positions: Position[]): OptionLeg[] {
       type: p.option_type as 'call' | 'put',
       strike: p.strike_price!,
       quantity: p.quantity,
-      avgCost: p.avg_cost || 0
+      avgCost: p.avg_cost || 0,
+      pmcMissing: p.avg_cost == null
     }));
 }
 

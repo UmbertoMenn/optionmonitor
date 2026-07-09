@@ -7,7 +7,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2, CheckCircle2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
-import { DerivativeCategories } from '@/lib/derivativeStrategies';
+import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
+import { useCallBuybacks, effectiveMarketPrice, CallBuybackRow } from '@/hooks/useCallBuybacks';
 import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
@@ -100,6 +101,129 @@ function CompactSection({
       {isExpanded && (
         <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-6">
           {items.map((item, idx) => renderItem(item, idx))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sezione "Covered Call da rivendere" con tabella espandibile dei riacquisti:
+ * per ogni call ricomprata (e non ancora rivenduta) mostra prezzo di
+ * riacquisto e prezzo di mercato corrente (0 se scaduta). Il premio di
+ * mercato complessivo è il patrimonio netting intrinseco mancante.
+ */
+function AvailableCallsSection({
+  items,
+  portfolioId,
+}: {
+  items: { ticker: string; availableContracts: number }[];
+  portfolioId: string | null | undefined;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const { buybacks } = useCallBuybacks(portfolioId);
+
+  // Mostra solo i riacquisti dei ticker presenti nella card (esclusi archiviati a monte)
+  const visibleBuybacks = useMemo(() => {
+    if (items.length === 0 || buybacks.length === 0) return [] as CallBuybackRow[];
+    const tickerKeys = items.map(i => getCanonicalKey(i.ticker) || normalizeForMatching(i.ticker));
+    return buybacks.filter(b => {
+      const bKey = getCanonicalKey(b.underlying) || normalizeForMatching(b.underlying);
+      return tickerKeys.some(tk => tk === bKey || tk.includes(bKey) || bKey.includes(tk));
+    });
+  }, [items, buybacks]);
+
+  if (items.length === 0) return null;
+
+  const today = new Date().toISOString().split('T')[0];
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso);
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
+  };
+  const fmt2 = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const totalMarketPremium = visibleBuybacks.reduce(
+    (s, b) => s + effectiveMarketPrice(b, today) * 100 * b.quantity, 0,
+  );
+
+  return (
+    <div className="py-2 border-b border-border/50 last:border-b-0">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsExpanded(!isExpanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setIsExpanded(!isExpanded); }}
+        className="flex items-center gap-2 w-full text-left hover:bg-muted/30 rounded px-1 -mx-1 transition-colors cursor-pointer"
+      >
+        <TrendingUp className="w-4 h-4 text-green-500 shrink-0" />
+        <span className="text-sm font-bold text-foreground">Covered Call da rivendere</span>
+        <span className="text-xs text-muted-foreground">
+          ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
+        </span>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {isExpanded ? '▲' : '▼'}
+        </span>
+      </div>
+
+      {isExpanded && (
+        <div className="mt-2 pl-6 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {items.map((item, idx) => (
+              <Badge
+                key={idx}
+                variant="outline"
+                className="text-xs bg-green-500/10 border-green-500/30"
+              >
+                {item.ticker} ×{item.availableContracts}
+              </Badge>
+            ))}
+          </div>
+
+          {visibleBuybacks.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-muted-foreground border-b border-border/50">
+                    <th className="text-left py-1 pr-2 font-medium">Call riacquistata</th>
+                    <th className="text-right py-1 px-2 font-medium">Qtà</th>
+                    <th className="text-right py-1 px-2 font-medium">Prezzo riacquisto</th>
+                    <th className="text-right py-1 px-2 font-medium">Prezzo mercato</th>
+                    <th className="text-right py-1 pl-2 font-medium">Premio tot. mercato</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleBuybacks.map(b => {
+                    const expired = b.expiry_date < today;
+                    const mkt = effectiveMarketPrice(b, today);
+                    return (
+                      <tr key={b.id} className="border-b border-border/30 last:border-b-0">
+                        <td className="py-1 pr-2">
+                          {b.underlying} C {b.strike} {fmtDate(b.expiry_date)}
+                          {expired && (
+                            <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 h-4 bg-muted text-muted-foreground">
+                              scaduta
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="text-right py-1 px-2">{b.quantity}</td>
+                        <td className="text-right py-1 px-2">{fmt2(b.buyback_price)} {b.currency}</td>
+                        <td className="text-right py-1 px-2">
+                          {expired ? `0,00 ${b.currency}` : (b.market_price != null ? `${fmt2(mkt)} ${b.currency}` : '—')}
+                        </td>
+                        <td className="text-right py-1 pl-2">
+                          {fmt2(mkt * 100 * b.quantity)} {b.currency}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="font-semibold">
+                    <td className="py-1 pr-2" colSpan={4}>Premio complessivo da rivendita (netting intrinseco mancante)</td>
+                    <td className="text-right py-1 pl-2">{fmt2(totalMarketPremium)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -347,20 +471,9 @@ export function DerivativesSummaryCard({
           />
 
           {/* 9. Covered Call / D-R CC da rivendere - LAST */}
-          <CompactSection
-            title="Covered Call da rivendere"
-            icon={TrendingUp}
-            iconColor="text-green-500"
+          <AvailableCallsSection
             items={monitoring.availableCallsToSell}
-            renderItem={(item, idx) => (
-              <Badge 
-                key={idx}
-                variant="outline" 
-                className="text-xs bg-green-500/10 border-green-500/30"
-              >
-                {item.ticker} ×{item.availableContracts}
-              </Badge>
-            )}
+            portfolioId={selectedPortfolioId}
           />
         </CardContent>
       </Card>

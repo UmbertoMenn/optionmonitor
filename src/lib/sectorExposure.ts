@@ -922,6 +922,7 @@ export interface ConsolidatedHoldingWithDetails extends ConsolidatedHolding {
     strategyName: string;
     maxLossEUR: number;
     hasUnlimitedRisk: boolean;
+    pmcMissing: boolean;
   }>;
   syntheticDetails: Array<{
     syntheticType: string;
@@ -1133,6 +1134,7 @@ export function calculateConsolidatedTopHoldings(
       strategyName: strat.strategyName,
       maxLossEUR: strat.maxLossEUR,
       hasUnlimitedRisk: strat.hasUnlimitedRisk,
+      pmcMissing: strat.pmcMissing === true,
     });
   }
 

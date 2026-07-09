@@ -6,6 +6,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileSpreadsheet, Loader2, CheckCircle2 } from 'lucide-react';
 import { parsePortfolioExcel } from '@/lib/excelParser';
 import { parseGPExcel } from '@/lib/gpExcelParser';
+import { detectFlussiCsvType, parseFlussiCsvText } from '@/lib/flussiCsvParser';
+import { ingestCashMovements, ingestTitoliTrades } from '@/lib/flussiMovementsIngest';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -108,8 +110,58 @@ export function FileUploader() {
 
     try {
       const excludedPatterns = EXCLUDED_CASH_PATTERNS[effectiveUserId || ''] || [];
+
+      // ---- Smistamento: file MOVIMENTI (mov cash / mov titoli) vs SNAPSHOT (saldi/Excel) ----
+      const snapshotFiles: File[] = [];
+      const movementTexts: { type: 'mov_cash' | 'mov_titoli'; text: string }[] = [];
+      for (const f of acceptedFiles) {
+        if (/\.csv$/i.test(f.name)) {
+          const text = await f.text();
+          const t = detectFlussiCsvType(text);
+          if (t === 'mov_cash' || t === 'mov_titoli') {
+            movementTexts.push({ type: t, text });
+            continue;
+          }
+        }
+        snapshotFiles.push(f);
+      }
+
+      // ---- Movimenti: processati PRIMA dei saldi, così i riacquisti call
+      // vengono confrontati con le posizioni PRE-aggiornamento (la call
+      // venduta è ancora presente). Idempotenti: ricaricare lo stesso file
+      // non raddoppia nulla. ----
+      const movementSummary: string[] = [];
+      for (const m of movementTexts) {
+        const parsed = parseFlussiCsvText(m.text, { excludedCashPatterns: excludedPatterns });
+        if (m.type === 'mov_cash') {
+          const res = await ingestCashMovements(targetPortfolioId, parsed.cashMovements);
+          if (res.depositsUpserted > 0) {
+            movementSummary.push(`${res.depositsUpserted} versamenti/prelievi (${res.totalAmount.toLocaleString('it-IT', { maximumFractionDigits: 0 })} €)`);
+          } else {
+            movementSummary.push('nessun bonifico/giroconto nei movimenti cash');
+          }
+        } else {
+          const res = await ingestTitoliTrades(targetPortfolioId, parsed.titoliOptionTrades);
+          const parts: string[] = [];
+          if (res.buybacksUpserted > 0) parts.push(`${res.buybacksUpserted} riacquisti call tracciati`);
+          if (res.resellsApplied > 0) parts.push(`${res.resellsApplied} contratti rivenduti applicati`);
+          movementSummary.push(parts.length > 0 ? parts.join(', ') : 'nessun riacquisto call nei movimenti titoli');
+        }
+      }
+      if (movementSummary.length > 0) {
+        await queryClient.invalidateQueries({ queryKey: ['deposits'] });
+        await queryClient.invalidateQueries({ queryKey: ['call-buybacks'] });
+        toast.success('Movimenti elaborati', { description: movementSummary.join(' • ') });
+      }
+
+      // Solo file movimenti: fine, niente aggiornamento posizioni.
+      if (snapshotFiles.length === 0) {
+        setUploadSuccess(true);
+        return;
+      }
+
       const parsed = await Promise.all(
-        acceptedFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns }))
+        snapshotFiles.map(f => parsePortfolioExcel(f, { excludedCashPatterns: excludedPatterns }))
       );
 
       // Verifica che le snapshot date siano coerenti
@@ -128,7 +180,7 @@ export function FileUploader() {
 
       // Deduplica liquidità per accountId (prima occorrenza vince).
       // Conti senza ID riconoscibile vengono trattati come distinti.
-      const seenAccounts = new Map<string, number>();
+      const seenAccounts = new Map<string, { value: number; restricted: boolean }>();
       let anonCash = 0;
       let anonCount = 0;
       let dedupCount = 0;
@@ -141,7 +193,7 @@ export function FileUploader() {
             continue;
           }
           if (!seenAccounts.has(id)) {
-            seenAccounts.set(id, acc.value);
+            seenAccounts.set(id, { value: acc.value, restricted: !!acc.restricted });
           } else {
             dedupCount += 1;
           }
@@ -151,7 +203,24 @@ export function FileUploader() {
       console.log(
         `[FileUploader] liquidità: ${seenAccounts.size} conti, ${anonCount} senza ID, ${dedupCount} duplicati rimossi`,
       );
-      const cashValue = Array.from(seenAccounts.values()).reduce((s, v) => s + v, 0) + anonCash;
+      const cashValue = Array.from(seenAccounts.values()).reduce((s, v) => s + v.value, 0) + anonCash;
+      // Liquidità vincolata (conti "A9...", garanzia derivati): inclusa in cashValue,
+      // salvata separatamente per la visualizzazione in dashboard.
+      const restrictedCashValue = Array.from(seenAccounts.values())
+        .filter(v => v.restricted)
+        .reduce((s, v) => s + v.value, 0);
+
+      // GP dai flussi CSV: depositi "08..." (titoli) + conti "B0..." (liquidità)
+      const gpHoldingsFromCsv = parsed.flatMap(p => p.gpHoldings || []);
+      const seenGpCash = new Map<string, number>();
+      for (const p of parsed) {
+        for (const acc of (p.gpCashAccounts || [])) {
+          const id = (acc.accountId || '').trim();
+          if (id && !seenGpCash.has(id)) seenGpCash.set(id, acc.value);
+        }
+      }
+      const gpCashFromCsv = Array.from(seenGpCash.values()).reduce((s, v) => s + v, 0);
+      const hasGpFromCsv = gpHoldingsFromCsv.length > 0 || gpCashFromCsv !== 0;
 
       if (positions.length === 0) {
         toast.error('Nessuna posizione trovata');
@@ -167,6 +236,66 @@ export function FileUploader() {
         .update(updateData)
         .eq('id', targetPortfolioId);
 
+      // Liquidità vincolata: update separato e non bloccante — se la colonna
+      // restricted_cash_value non è ancora stata migrata, l'upload principale
+      // non deve fallire.
+      try {
+        const { error: restrictedErr } = await supabase
+          .from('portfolios')
+          .update({ restricted_cash_value: restrictedCashValue })
+          .eq('id', targetPortfolioId);
+        if (restrictedErr) console.error('[FileUploader] restricted_cash_value non salvata:', restrictedErr.message);
+      } catch (restrictedErr) {
+        console.error('[FileUploader] restricted_cash_value non salvata:', restrictedErr);
+      }
+
+      // GP dai flussi CSV: sostituisce le holdings e aggiorna i totali PRIMA
+      // dello snapshot, così saveFullSnapshot congela la GP aggiornata.
+      if (hasGpFromCsv) {
+        const gpCashHoldings = gpCashFromCsv !== 0
+          ? [{
+              asset_type: 'cash' as const,
+              description: 'Liquidità GP',
+              quantity: 0,
+              market_value: gpCashFromCsv,
+              price: null,
+              currency: 'EUR',
+              exchange_rate: 1,
+              weight_pct: null,
+              ticker_code: null,
+              price_date: snapshotDate,
+            }]
+          : [];
+        const allGpHoldings = [...gpHoldingsFromCsv, ...gpCashHoldings];
+        const gpTotalValue = allGpHoldings.reduce((s, h) => s + (h.market_value || 0), 0);
+
+        await supabase.from('gp_holdings').delete().eq('portfolio_id', targetPortfolioId);
+        const { error: gpInsertError } = await supabase.from('gp_holdings').insert(
+          allGpHoldings.map(h => ({
+            portfolio_id: targetPortfolioId,
+            asset_type: h.asset_type,
+            description: h.description,
+            quantity: h.quantity,
+            market_value: h.market_value,
+            price: h.price,
+            currency: h.currency,
+            exchange_rate: h.exchange_rate,
+            weight_pct: h.weight_pct,
+            ticker_code: h.ticker_code,
+            price_date: h.price_date,
+          }))
+        );
+        if (gpInsertError) {
+          console.error('[FileUploader] Errore inserimento GP da CSV:', gpInsertError.message);
+        } else {
+          await supabase.from('portfolios').update({
+            gp_total_value: gpTotalValue,
+            gp_cash_value: gpCashFromCsv,
+          }).eq('id', targetPortfolioId);
+          console.log(`[FileUploader] GP da CSV: ${allGpHoldings.length} holdings aggiornate`);
+        }
+      }
+
       if (!error) {
         await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
         await queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] });
@@ -181,6 +310,7 @@ export function FileUploader() {
             portfolioId: targetPortfolioId,
             snapshotDate,
             cashValue: cashValue > 0 ? cashValue : (portfolio?.cash_value || 0),
+            gpRefreshedInThisUpload: hasGpFromCsv,
           });
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['historical-data'] }),
@@ -197,7 +327,7 @@ export function FileUploader() {
       refreshStrategyCacheForPortfolio(targetPortfolioId);
 
       const dateInfo = snapshotDate ? ` (data: ${new Date(snapshotDate).toLocaleDateString('it-IT')})` : '';
-      const filesInfo = acceptedFiles.length > 1 ? ` da ${acceptedFiles.length} file` : '';
+      const filesInfo = snapshotFiles.length > 1 ? ` da ${snapshotFiles.length} file` : '';
       toast.success('Portfolio caricato!', {
         description: `${positions.length} posizioni importate${filesInfo}${dateInfo}.`,
       });
@@ -296,8 +426,9 @@ export function FileUploader() {
     accept: {
       'application/vnd.ms-excel': ['.xls'],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'text/csv': ['.csv'],
     },
-    maxFiles: 2,
+    maxFiles: 4,
     disabled: isProcessing,
   });
 
@@ -332,7 +463,7 @@ export function FileUploader() {
                   isProcessing={isProcessing}
                   uploadSuccess={uploadSuccess}
                   isDragActive={portfolioDropzone.isDragActive}
-                  label="Carica Portfolio (fino a 2 file)"
+                  label="Carica Portfolio (fino a 4 file)"
                 />
               </div>
             </CarouselItem>
