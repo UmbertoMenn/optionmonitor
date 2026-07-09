@@ -662,7 +662,7 @@ export function Derivatives() {
 
     reconciliationCheckedRef.current = true;
 
-    const result = autoReconcileStrategies(strategyConfigs, reconciliationItems, positions);
+    const result = autoReconcileStrategies(strategyConfigs, reconciliationItems, positions, underlyingPrices);
 
     if (!result.hasAutoChanges) {
       // Nulla di automatizzabile: comportamento precedente (dialog)
@@ -695,7 +695,7 @@ export function Derivatives() {
       .finally(() => {
         autoReconcileRunningRef.current = false;
       });
-  }, [reconciliationItems, isLoading, wizardOpen, strategyConfigs, positions, handleSaveConfigs]);
+  }, [reconciliationItems, isLoading, wizardOpen, strategyConfigs, positions, underlyingPrices, handleSaveConfigs]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;

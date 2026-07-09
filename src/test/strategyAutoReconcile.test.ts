@@ -239,7 +239,7 @@ describe('autoReconcileStrategies — riduzioni e chiusure', () => {
 });
 
 describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
-  it('nuova gamba su sottostante con UNA sola config → accodata automaticamente', () => {
+  it('put venduta NON-roll su sottostante con una naked_put → NUOVA config separata (mai accodata)', () => {
     const configs = [
       makeConfig({
         underlying: 'MRVL',
@@ -255,10 +255,13 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
     const res = run(configs, positions);
     expect(res.hasAutoChanges).toBe(true);
     expect(res.unresolvedItems).toHaveLength(0);
-    const sigs = res.resolvedConfigs![0].position_signatures;
-    expect(sigs).toHaveLength(2);
-    const added = sigs.find(s => s.strike === 220)!;
-    expect(added.quantity_abs).toBe(2);
+    // Due config naked_put separate: quella originale intatta + la nuova
+    const nps = res.resolvedConfigs!.filter(c => c.strategy_type === 'naked_put');
+    expect(nps).toHaveLength(2);
+    const original = nps.find(c => c.position_signatures.some(s => s.strike === 240))!;
+    expect(original.position_signatures).toHaveLength(1);
+    const created = nps.find(c => c.position_signatures.some(s => s.strike === 220))!;
+    expect(created.position_signatures[0].quantity_abs).toBe(2);
   });
 
   it('put VENDUTA su sottostante con covered call → nuova config naked_put (mai dentro la CC)', () => {
@@ -479,6 +482,212 @@ describe('autoReconcileStrategies — aggiunte e nuovi sottostanti', () => {
     expect(res.unresolvedItems).toHaveLength(0);
     const xyz = res.resolvedConfigs!.find(c => c.underlying.includes('XYZ'))!;
     expect(xyz.strategy_type).toBe('other');
+  });
+});
+
+describe('autoReconcileStrategies — regole concordate (rounds interattivi)', () => {
+  it('R2: retype sempre — IC che degrada a una sola put venduta → naked_put', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'META',
+        strategy_type: 'iron_condor',
+        position_signatures: [
+          { option_type: 'put', strike: 400, expiry: '2026-08-21', quantity_sign: 1, quantity_abs: 1 },
+          { option_type: 'put', strike: 450, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 },
+          { option_type: 'call', strike: 600, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 },
+          { option_type: 'call', strike: 650, expiry: '2026-08-21', quantity_sign: 1, quantity_abs: 1 },
+        ],
+      }),
+    ];
+    // Restano solo la put venduta (rollata su nuovo strike): le altre 3 gambe chiuse
+    const positions = [
+      makeOption({ underlying: 'META', option_type: 'put', strike_price: 430, expiry_date: '2026-10-16', quantity: -1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.resolvedConfigs).toHaveLength(1);
+    expect(res.resolvedConfigs![0].strategy_type).toBe('naked_put');
+    expect(res.resolvedConfigs![0].position_signatures[0].strike).toBe(430);
+  });
+
+  it('R2: retype — naked put + put comprata → put_spread via riclassificazione', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'MU',
+        strategy_type: 'naked_put',
+        position_signatures: [{ option_type: 'put', strike: 900, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    const positions = [
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 900, expiry_date: '2026-08-21', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 800, expiry_date: '2026-08-21', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.resolvedConfigs![0].strategy_type).toBe('put_spread');
+    expect(res.resolvedConfigs![0].position_signatures).toHaveLength(2);
+  });
+
+  it('R4: roll con aumento di quantità — contratti extra nella STESSA strategia', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'MU',
+        strategy_type: 'naked_put',
+        position_signatures: [{ option_type: 'put', strike: 900, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    // Chiudo 1 P900, apro 2 P960: roll 1 + aumento 1
+    const positions = [
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 960, expiry_date: '2026-08-21', quantity: -2 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.resolvedConfigs).toHaveLength(1);
+    const sigs = res.resolvedConfigs![0].position_signatures;
+    expect(sigs).toHaveLength(1);
+    expect(sigs[0].strike).toBe(960);
+    expect(sigs[0].quantity_abs).toBe(2); // roll + aumento, stessa strategia
+  });
+
+  it('R5: put comprata standalone senza strategie sul sottostante → config protection', () => {
+    const configs: StrategyConfiguration[] = [];
+    const positions = [
+      makeOption({ underlying: 'NKE', option_type: 'put', strike_price: 90, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const nke = res.resolvedConfigs!.find(c => c.underlying.includes('NKE'))!;
+    expect(nke.strategy_type).toBe('protection');
+  });
+
+  it('R7: seconda put comprata su de-risking con copertura PARZIALE → accorpata', () => {
+    const stock = { id: 'stock_aapl', asset_type: 'stock', description: 'APPLE INC', ticker: 'AAPL', quantity: 300 } as unknown as Position;
+    const configs = [
+      makeConfig({
+        underlying: 'AAPL',
+        strategy_type: 'derisking_covered_call',
+        linked_stock_id: 'stock_aapl',
+        position_signatures: [
+          { option_type: 'call', strike: 300, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 3 },
+          { option_type: 'put', strike: 220, expiry: '2026-09-18', quantity_sign: 1, quantity_abs: 1 }, // copre 1/3
+        ],
+      }),
+    ];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 300, expiry_date: '2026-09-18', quantity: -3 }),
+      makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 220, expiry_date: '2026-09-18', quantity: 1 }),
+      // Seconda put comprata: la copertura era parziale (1 su 3) → accorpa
+      makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 215, expiry_date: '2026-10-16', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    expect(res.resolvedConfigs).toHaveLength(1);
+    const drcc = res.resolvedConfigs![0];
+    expect(drcc.strategy_type).toBe('derisking_covered_call');
+    expect(drcc.position_signatures.filter(s => s.option_type === 'put' && s.quantity_sign === 1)).toHaveLength(2);
+  });
+
+  it('R7: put comprata su de-risking con copertura COMPLETA → config protection separata', () => {
+    const stock = { id: 'stock_aapl', asset_type: 'stock', description: 'APPLE INC', ticker: 'AAPL', quantity: 100 } as unknown as Position;
+    const configs = [
+      makeConfig({
+        underlying: 'AAPL',
+        strategy_type: 'derisking_covered_call',
+        linked_stock_id: 'stock_aapl',
+        position_signatures: [
+          { option_type: 'call', strike: 300, expiry: '2026-09-18', quantity_sign: -1, quantity_abs: 1 },
+          { option_type: 'put', strike: 220, expiry: '2026-09-18', quantity_sign: 1, quantity_abs: 1 }, // copre 100/100 azioni
+        ],
+      }),
+    ];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'AAPL', option_type: 'call', strike_price: 300, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 220, expiry_date: '2026-09-18', quantity: 1 }),
+      makeOption({ underlying: 'AAPL', option_type: 'put', strike_price: 200, expiry_date: '2026-12-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const protection = res.resolvedConfigs!.find(c => c.strategy_type === 'protection')!;
+    expect(protection).toBeDefined();
+    expect(protection.position_signatures[0].strike).toBe(200);
+    // La de-risking resta con la sua unica protezione
+    const drcc = res.resolvedConfigs!.find(c => c.strategy_type === 'derisking_covered_call')!;
+    expect(drcc.position_signatures.filter(s => s.option_type === 'put')).toHaveLength(1);
+  });
+
+  it('R9: coppia call venduta + call comprata insieme → config call_spread unica', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'MU',
+        strategy_type: 'naked_put',
+        position_signatures: [{ option_type: 'put', strike: 900, expiry: '2026-08-21', quantity_sign: -1, quantity_abs: 1 }],
+      }),
+    ];
+    const positions = [
+      makeOption({ underlying: 'MU', option_type: 'put', strike_price: 900, expiry_date: '2026-08-21', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'call', strike_price: 1100, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'MU', option_type: 'call', strike_price: 1200, expiry_date: '2026-09-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const cs = res.resolvedConfigs!.find(c => c.strategy_type === 'call_spread')!;
+    expect(cs).toBeDefined();
+    expect(cs.position_signatures).toHaveLength(2);
+    // La naked put originale resta intatta
+    const np = res.resolvedConfigs!.find(c => c.strategy_type === 'naked_put')!;
+    expect(np.position_signatures).toHaveLength(1);
+  });
+
+  it('R13: coppia spread con quantità diverse (2V+1C) → spread 1+1, il resto naked put', () => {
+    const configs: StrategyConfiguration[] = [];
+    const positions = [
+      makeOption({ underlying: 'TSLA', option_type: 'put', strike_price: 400, expiry_date: '2026-09-18', quantity: -2 }),
+      makeOption({ underlying: 'TSLA', option_type: 'put', strike_price: 350, expiry_date: '2026-09-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const spread = res.resolvedConfigs!.find(c => c.strategy_type === 'put_spread')!;
+    expect(spread.position_signatures.find(s => s.quantity_sign === -1)?.quantity_abs).toBe(1);
+    expect(spread.position_signatures.find(s => s.quantity_sign === 1)?.quantity_abs).toBe(1);
+    const np = res.resolvedConfigs!.find(c => c.strategy_type === 'naked_put')!;
+    expect(np.position_signatures[0].quantity_abs).toBe(1);
+    expect(np.position_signatures[0].strike).toBe(400);
+  });
+
+  it('R14: call comprata non-roll con leap_call esistente → nuova config leap_call separata', () => {
+    const configs = [
+      makeConfig({
+        underlying: 'IREN',
+        strategy_type: 'leap_call',
+        position_signatures: [{ option_type: 'call', strike: 80, expiry: '2028-01-21', quantity_sign: 1, quantity_abs: 2 }],
+      }),
+    ];
+    const positions = [
+      makeOption({ underlying: 'IREN', option_type: 'call', strike_price: 80, expiry_date: '2028-01-21', quantity: 2 }),
+      makeOption({ underlying: 'IREN', option_type: 'call', strike_price: 100, expiry_date: '2028-06-16', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const leaps = res.resolvedConfigs!.filter(c => c.strategy_type === 'leap_call');
+    expect(leaps).toHaveLength(2);
+  });
+
+  it('call venduta + put comprata su sottostante nuovo con azione → covered call che diventa de-risking', () => {
+    const stock = { id: 'stock_ceg', asset_type: 'stock', description: 'CONSTELLATION ENERGY', ticker: 'CEG', quantity: 100 } as unknown as Position;
+    const configs: StrategyConfiguration[] = [];
+    const positions = [
+      stock,
+      makeOption({ underlying: 'CEG', option_type: 'call', strike_price: 320, expiry_date: '2026-09-18', quantity: -1 }),
+      makeOption({ underlying: 'CEG', option_type: 'put', strike_price: 250, expiry_date: '2026-09-18', quantity: 1 }),
+    ];
+
+    const res = run(configs, positions);
+    const ceg = res.resolvedConfigs!.find(c => c.underlying.includes('CEG'))!;
+    expect(ceg.strategy_type).toBe('derisking_covered_call');
+    expect(ceg.linked_stock_id).toBe('stock_ceg');
+    expect(ceg.position_signatures).toHaveLength(2);
   });
 });
 

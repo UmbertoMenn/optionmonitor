@@ -1,52 +1,52 @@
 /**
  * Riconciliazione AUTOMATICA delle configurazioni strategia dopo un upload.
+ * Il dialog manuale resta solo come paracadute per errori di salvataggio.
  *
- * Prende il diff prodotto da reconcileConfigs (gambe present/missing/new) e
- * lo risolve SENZA intervento manuale. Il dialog resta solo come paracadute
- * in caso di errore di salvataggio.
+ * DECISION TABLE DEFINITIVA (concordata con l'utente, luglio 2026):
  *
- *  1. ROLL — una gamba "missing" viene sostituita dalla gamba "new" più
- *     vicina con stesso underlying, stesso option_type e stesso segno
- *     (short→short, long→long). L'accoppiamento avviene per bucket
- *     (underlying, type, sign) ordinando entrambe le liste per strike e
- *     scadenza e appaiandole in sequenza: deterministico e ottimo per il
- *     caso 1-D. Copre anche la "ristrutturazione completa" (es. Iron Condor
- *     richiuso su 4 strike nuovi = 4 roll simultanei).
+ *  1. ROLL — gamba "missing" sostituita dalla gamba "new" più vicina con
+ *     stesso underlying/tipo/segno (appaiamento monotono per strike e
+ *     scadenza, per bucket). I roll con AUMENTO di quantità tengono i
+ *     contratti extra nella STESSA strategia. Copre anche ristrutturazioni
+ *     complete (IC richiuso su 4 strike nuovi = 4 roll).
  *
- *  2. RIDUZIONE/CHIUSURA — una gamba "missing" senza alcuna candidata viene
- *     rimossa dalla config (la strategia si è ridotta). Se TUTTE le gambe
- *     spariscono e la config non ha azioni collegate, la config viene
- *     eliminata (strategia chiusa). Le config con linked_stock (covered
- *     call / de-risking) sopravvivono anche senza gambe opzionarie.
+ *  2. RIDUZIONE/CHIUSURA — gamba senza rimpiazzo rimossa; config senza
+ *     firme e senza azioni collegate eliminata. Le config con linked_stock
+ *     sopravvivono anche senza gambe (stock-only covered call).
  *
- *  3. GAMBE NUOVE su sottostante già configurato — decision table per
- *     (tipo, segno), sempre risolta:
- *       - put VENDUTA  → append alla config naked_put esistente, oppure
- *                        NUOVA config naked_put (es. sopra una covered call).
- *       - put COMPRATA → covered_call esistente → append + retype a
- *                        derisking_covered_call; derisking esistente →
- *                        append; naked_put esistente → append + retype a
- *                        put_spread (stessa scadenza) o diagonal_put_spread;
- *                        put_spread/diagonal esistente → append;
- *                        altrimenti config 'other'.
- *       - call VENDUTA → append a covered_call/derisking esistente; oppure
- *                        crea covered_call linkata all'azione se presente in
- *                        portafoglio; altrimenti config 'other'.
- *       - call COMPRATA→ append a leap_call esistente o crea leap_call.
+ *  3. GAMBE NUOVE (non-roll) — pipeline per sottostante:
+ *     a. Tutti e 4 i ruoli (put V+C, call V+C) → UN'unica iron_condor
+ *        (stessa scadenza) o double_diagonal.
+ *     b. COPPIE contestuali venduta+comprata dello stesso tipo → config
+ *        spread 1:1 per quantità (put_spread/call_spread, varianti
+ *        diagonal se scadenze diverse). Residui alle regole per-gamba
+ *        (es. 2V+1C → spread 1+1, la V residua diventa naked put).
+ *     c. Put VENDUTA residua → SEMPRE nuova config naked_put separata
+ *        (mai accodata a naked put/spread esistenti; le put vendute
+ *        residue dello stesso run confluiscono in una sola nuova config).
+ *     d. Put COMPRATA residua → covered_call esistente → append + la
+ *        config diventa de-risking; de-risking esistente → check
+ *        copertura: se la protezione attuale è PARZIALE rispetto
+ *        all'esposizione (azioni/100 + long call + short put ITM, ITM
+ *        assunto se prezzo sconosciuto) → append, se COMPLETA → nuova
+ *        config 'protection'; naked_put esistente → append (il retype la
+ *        trasforma in spread); spread esistente → append; nessuna → nuova
+ *        config 'protection'.
+ *     e. Call VENDUTA residua → covered_call/de-risking esistente →
+ *        append; azione in portafoglio → nuova covered_call linkata;
+ *        altrimenti nuova config 'other' separata.
+ *     f. Call COMPRATA residua → SEMPRE nuova config leap_call separata
+ *        (mai accodata a leap esistenti).
  *
- *  4. NUOVO SOTTOSTANTE — le strategie vengono aperte complete di tutte le
- *     gambe, quindi la struttura È classificabile dal pattern:
- *       - solo put vendute                        → naked_put
- *       - put vendute + comprate (no call)        → put_spread se stessa
- *         scadenza, diagonal_put_spread altrimenti
- *       - put V+C e call V+C                      → iron_condor se stessa
- *         scadenza, double_diagonal altrimenti
- *       - solo call comprate                      → leap_call
- *       - call vendute (+ ev. put comprate) con
- *         azione in portafoglio                   → covered_call /
- *                                                   derisking_covered_call
- *       - qualsiasi altra combinazione            → 'other' (comunque
- *         creata: gambe tracciate, etichetta correggibile dal wizard)
+ *  4. RETYPE SEMPRE — ogni config toccata viene riclassificata in base
+ *     alla struttura risultante delle gambe (es. IC che degrada a una put
+ *     venduta → naked_put; naked put + put comprata → put_spread).
+ *     Con azioni collegate: call venduta (+put comprata) → covered_call /
+ *     derisking_covered_call; sola put comprata → derisking; senza gambe
+ *     → tipo invariato (stock-only).
+ *
+ *  5. Più config dello stesso tipo POSSONO coesistere sullo stesso
+ *     sottostante.
  */
 import { StrategyConfiguration, PositionSignature, UpsertConfigParams } from '@/hooks/useStrategyConfigurations';
 import { ReconciliationItem } from '@/lib/strategyReconciliation';
@@ -58,9 +58,16 @@ export interface AutoReconcileResult {
   resolvedConfigs: UpsertConfigParams[] | null;
   /** Log leggibile (italiano) delle modifiche applicate, per toast/console */
   changes: string[];
-  /** Item non risolvibili automaticamente: unico caso in cui serve il dialog */
+  /** Item non risolvibili automaticamente (in pratica: mai, salvo item senza gambe) */
   unresolvedItems: ReconciliationItem[];
   hasAutoChanges: boolean;
+}
+
+export interface AutoReconcileContext {
+  /** Tutte le posizioni del portafoglio (per matching azioni e coperture) */
+  allPositions?: Position[];
+  /** Prezzi correnti dei sottostanti, per il check ITM delle short put */
+  underlyingPrices?: Record<string, { price?: number | null }>;
 }
 
 function normalizeUnderlying(text: string): string {
@@ -79,35 +86,31 @@ function sigLabel(sig: PositionSignature): string {
   return `${side} ${type} ${sig.strike} ${sig.expiry}${qty}`;
 }
 
-interface MissingEntry {
-  configId: string;
-  sigIndex: number; // indice nella lista firme della config
-  sig: PositionSignature; // quantity_abs = contratti mancanti
-}
-
-interface NewEntry {
-  positionId: string;
-  optionType: string;
-  strike: number;
-  expiry: string;
-  quantitySign: number;
-  availableQty: number; // contratti non ancora consumati
-}
-
-/** Chiave bucket per l'accoppiamento roll */
 function bucketKey(optionType: string, quantitySign: number): string {
   return `${optionType.toLowerCase()}::${quantitySign}`;
 }
 
-/** Trova l'azione/ETF in portafoglio corrispondente a un sottostante (id base, senza slot). */
+/** Trova l'azione/ETF in portafoglio corrispondente a un sottostante (posizione base, senza slot). */
 function findStockForUnderlying(underlying: string, allPositions: Position[]): Position | undefined {
   const key = normalizeUnderlying(underlying);
   return allPositions.find(p => {
     if (p.asset_type !== 'stock' && p.asset_type !== 'etf') return false;
-    if (/__slot_\d+$/.test(p.id)) return false; // solo posizioni base
+    if (/__slot_\d+$/.test(p.id)) return false;
     const stockKey = normalizeUnderlying(p.ticker || p.description || '');
     return stockKey.length > 0 && (stockKey === key || stockKey.includes(key) || key.includes(stockKey));
   });
+}
+
+/** Prezzo spot del sottostante, con fallback su matching normalizzato. */
+function spotPriceFor(underlying: string, prices?: Record<string, { price?: number | null }>): number | null {
+  if (!prices) return null;
+  const direct = prices[underlying]?.price;
+  if (typeof direct === 'number' && direct > 0) return direct;
+  const key = normalizeUnderlying(underlying);
+  for (const [k, v] of Object.entries(prices)) {
+    if (normalizeUnderlying(k) === key && typeof v?.price === 'number' && v.price > 0) return v.price;
+  }
+  return null;
 }
 
 interface LegCounts {
@@ -131,51 +134,77 @@ function allSameExpiry(sigs: PositionSignature[]): boolean {
   return new Set(sigs.map(s => s.expiry)).size <= 1;
 }
 
-/**
- * Classifica la struttura completa di un sottostante nuovo.
- * Le strategie vengono aperte con tutte le gambe insieme, quindi il pattern
- * delle gambe identifica la strategia. Ritorna anche l'eventuale azione da
- * collegare (covered call / de-risking).
- */
-function classifyNewStructure(
-  sigs: PositionSignature[],
-  underlying: string,
-  allPositions: Position[],
-): { strategyType: string; linkedStockId: string | null } {
-  const { soldPuts, boughtPuts, soldCalls, boughtCalls } = countLegs(sigs);
-  const stock = findStockForUnderlying(underlying, allPositions);
+function sumQty(sigs: PositionSignature[]): number {
+  return sigs.reduce((s, x) => s + (x.quantity_abs || 1), 0);
+}
 
-  // Solo put vendute → naked put
-  if (soldPuts.length > 0 && boughtPuts.length === 0 && soldCalls.length === 0 && boughtCalls.length === 0) {
-    return { strategyType: 'naked_put', linkedStockId: null };
+/**
+ * REGOLA 4 — Riclassificazione del tipo dalla struttura risultante.
+ * `currentType` viene mantenuto quando la struttura non è discriminante
+ * (config vuota / stock-only).
+ */
+export function classifyConfigType(
+  sigs: PositionSignature[],
+  hasLinkedStock: boolean,
+  currentType: string,
+): string {
+  const { soldPuts, boughtPuts, soldCalls, boughtCalls } = countLegs(sigs);
+
+  if (hasLinkedStock) {
+    if (soldCalls.length > 0 && boughtPuts.length > 0) return 'derisking_covered_call';
+    if (soldCalls.length > 0) return 'covered_call';
+    if (boughtPuts.length > 0) return 'derisking_covered_call';
+    return currentType; // stock-only: mantieni l'etichetta scelta
   }
-  // Put vendute + comprate, nessuna call → put spread (verticale o diagonale)
-  if (soldPuts.length > 0 && boughtPuts.length > 0 && soldCalls.length === 0 && boughtCalls.length === 0) {
-    return { strategyType: allSameExpiry(sigs) ? 'put_spread' : 'diagonal_put_spread', linkedStockId: null };
+
+  const has = (n: PositionSignature[]) => n.length > 0;
+  if (has(soldPuts) && has(boughtPuts) && has(soldCalls) && has(boughtCalls)) {
+    return allSameExpiry(sigs) ? 'iron_condor' : 'double_diagonal';
   }
-  // Quattro ruoli presenti → iron condor / double diagonal
-  if (soldPuts.length > 0 && boughtPuts.length > 0 && soldCalls.length > 0 && boughtCalls.length > 0) {
-    return { strategyType: allSameExpiry(sigs) ? 'iron_condor' : 'double_diagonal', linkedStockId: null };
+  if (has(soldPuts) && has(boughtPuts) && !has(soldCalls) && !has(boughtCalls)) {
+    return allSameExpiry(sigs) ? 'put_spread' : 'diagonal_put_spread';
   }
-  // Solo call comprate → LEAP call
-  if (boughtCalls.length > 0 && soldCalls.length === 0 && soldPuts.length === 0 && boughtPuts.length === 0) {
-    return { strategyType: 'leap_call', linkedStockId: null };
+  if (has(soldCalls) && has(boughtCalls) && !has(soldPuts) && !has(boughtPuts)) {
+    return allSameExpiry(sigs) ? 'call_spread' : 'diagonal_call_spread';
   }
-  // Call vendute con azione in portafoglio → covered call (o de-risking se c'è put comprata)
-  if (soldCalls.length > 0 && boughtCalls.length === 0 && soldPuts.length === 0 && stock) {
-    return {
-      strategyType: boughtPuts.length > 0 ? 'derisking_covered_call' : 'covered_call',
-      linkedStockId: stock.id,
-    };
-  }
-  // Combinazione non riconosciuta → 'other' (gambe comunque tracciate)
-  return { strategyType: 'other', linkedStockId: null };
+  if (has(soldPuts) && !has(boughtPuts) && !has(soldCalls) && !has(boughtCalls)) return 'naked_put';
+  if (has(boughtPuts) && !has(soldPuts) && !has(soldCalls) && !has(boughtCalls)) return 'protection';
+  if (has(boughtCalls) && !has(soldCalls) && !has(soldPuts) && !has(boughtPuts)) return 'leap_call';
+  if (sigs.length === 0) return currentType;
+  return 'other';
+}
+
+/** Gamba nuova nel pipeline dei residui (quantità mutabile durante il consumo). */
+interface NewLeg {
+  positionId: string;
+  optionType: string; // 'put' | 'call' (lowercase)
+  quantitySign: number; // -1 venduta, +1 comprata
+  strike: number;
+  expiry: string;
+  qty: number;
+}
+
+function legToSig(l: NewLeg, qty?: number): PositionSignature {
+  return {
+    option_type: l.optionType,
+    strike: l.strike,
+    expiry: l.expiry,
+    quantity_sign: l.quantitySign,
+    quantity_abs: qty ?? l.qty,
+  };
+}
+
+interface MissingEntry {
+  configId: string;
+  sigIndex: number;
+  sig: PositionSignature; // quantity_abs = contratti mancanti
 }
 
 export function autoReconcileStrategies(
   configs: StrategyConfiguration[],
   items: ReconciliationItem[],
   allPositions: Position[] = [],
+  underlyingPrices?: Record<string, { price?: number | null }>,
 ): AutoReconcileResult {
   const changes: string[] = [];
   const unresolvedItems: ReconciliationItem[] = [];
@@ -191,9 +220,19 @@ export function autoReconcileStrategies(
     );
   }
   const deletedConfigIds = new Set<string>();
-  const appendedSigs = new Map<string, PositionSignature[]>(); // configId -> firme aggiunte
-  const retypedConfigs = new Map<string, string>(); // configId -> nuovo strategy_type
-  const newConfigs: UpsertConfigParams[] = []; // config create ex novo
+  const appendedSigs = new Map<string, PositionSignature[]>();
+  const touchedConfigIds = new Set<string>();
+  const newConfigs: UpsertConfigParams[] = [];
+  /** Config create in questo run, indicizzate per (underlyingKey, tipo iniziale) per il chaining */
+  const runCreated: { underlyingKey: string; params: UpsertConfigParams }[] = [];
+
+  let anyChange = false;
+
+  /** Firme correnti di una config esistente (originali sopravvissute + accodate) */
+  const liveSigsOf = (configId: string): PositionSignature[] => [
+    ...(workingSigs.get(configId) || []).filter((s): s is PositionSignature => s !== null),
+    ...(appendedSigs.get(configId) || []),
+  ];
 
   // ------------------------------------------------------------------
   // Raggruppa gli item per sottostante normalizzato
@@ -205,46 +244,16 @@ export function autoReconcileStrategies(
     itemsByUnderlying.get(key)!.push(item);
   }
 
-  let anyChange = false;
-
-  for (const [, underlyingItems] of itemsByUnderlying) {
+  for (const [underlyingKey, underlyingItems] of itemsByUnderlying) {
     const realItems = underlyingItems.filter(i => !i.config.id.startsWith('__new__'));
-    const syntheticItems = underlyingItems.filter(i => i.config.id.startsWith('__new__'));
     const underlyingLabel = underlyingItems[0].underlying;
 
-    // ---- Caso 4: sottostante completamente nuovo (nessuna config) ----
-    // Le strategie vengono aperte complete di tutte le gambe: la struttura
-    // identifica il tipo. Sempre risolto, mai al dialog.
-    if (realItems.length === 0) {
-      for (const item of syntheticItems) {
-        const newLegs = item.legs.filter(l => l.status === 'new' && l.position);
-        if (newLegs.length === 0) continue;
-        const sigs = newLegs.map(l => ({
-          ...l.signature,
-          quantity_abs: Math.abs(l.position!.quantity) || 1,
-        }));
-        const { strategyType, linkedStockId } = classifyNewStructure(sigs, item.underlying, allPositions);
-        newConfigs.push({
-          underlying: item.underlying,
-          strategy_type: strategyType,
-          position_signatures: sigs,
-          is_synthetic: false,
-          linked_stock_id: linkedStockId,
-          linked_stock_slot_ids: [],
-        });
-        changes.push(`${item.underlying}: nuova strategia ${strategyType} configurata automaticamente (${sigs.map(sigLabel).join(', ')})`);
-        anyChange = true;
-      }
-      continue;
-    }
-
-    // ---- Raccolta gambe missing e new per il sottostante ----
+    // ---- Raccolta gambe missing (solo config reali) ----
     const missing: MissingEntry[] = [];
     for (const item of realItems) {
       const sigs = workingSigs.get(item.config.id) || [];
       for (const leg of item.legs) {
         if (leg.status !== 'missing') continue;
-        // Trova l'indice della firma originale corrispondente
         const idx = sigs.findIndex(
           s => s !== null &&
             (s.option_type || '').toLowerCase() === (leg.signature.option_type || '').toLowerCase() &&
@@ -252,14 +261,12 @@ export function autoReconcileStrategies(
             s.expiry === leg.signature.expiry &&
             s.quantity_sign === leg.signature.quantity_sign,
         );
-        if (idx >= 0) {
-          missing.push({ configId: item.config.id, sigIndex: idx, sig: { ...leg.signature } });
-        }
+        if (idx >= 0) missing.push({ configId: item.config.id, sigIndex: idx, sig: { ...leg.signature } });
       }
     }
 
-    // Gambe new dedupe per position id (compaiono in più item dello stesso sottostante)
-    const newByPosId = new Map<string, NewEntry>();
+    // ---- Gambe new dedupe per position id ----
+    const newByPosId = new Map<string, NewLeg>();
     for (const item of underlyingItems) {
       for (const leg of item.legs) {
         if (leg.status !== 'new' || !leg.position) continue;
@@ -267,61 +274,55 @@ export function autoReconcileStrategies(
         newByPosId.set(leg.position.id, {
           positionId: leg.position.id,
           optionType: (leg.position.option_type || '').toLowerCase(),
+          quantitySign: leg.position.quantity >= 0 ? 1 : -1,
           strike: leg.position.strike_price || 0,
           expiry: leg.position.expiry_date || '',
-          quantitySign: leg.position.quantity >= 0 ? 1 : -1,
-          availableQty: Math.abs(leg.position.quantity),
+          qty: Math.abs(leg.position.quantity),
         });
       }
     }
 
-    // ---- Caso 1: ROLL — accoppiamento per bucket (type, sign) ----
+    // ------------------------------------------------------------------
+    // REGOLA 1: ROLL — appaiamento per bucket (type, sign)
+    // ------------------------------------------------------------------
     const missingByBucket = new Map<string, MissingEntry[]>();
     for (const m of missing) {
       const k = bucketKey(m.sig.option_type, m.sig.quantity_sign);
       if (!missingByBucket.has(k)) missingByBucket.set(k, []);
       missingByBucket.get(k)!.push(m);
     }
-    const newByBucket = new Map<string, NewEntry[]>();
+    const newByBucket = new Map<string, NewLeg[]>();
     for (const n of newByPosId.values()) {
       const k = bucketKey(n.optionType, n.quantitySign);
       if (!newByBucket.has(k)) newByBucket.set(k, []);
       newByBucket.get(k)!.push(n);
     }
 
-    const consumedNewIds = new Set<string>();
+    /** posizione (parzialmente) consumata da un roll → config di destinazione */
+    const rollTargetByPosId = new Map<string, { configId: string; rolledSig: PositionSignature }>();
 
     for (const [bucket, missingList] of missingByBucket) {
       const candidates = (newByBucket.get(bucket) || []);
-      // Ordinamento monotono su (strike, expiry): appaiamento 1-D ottimo e deterministico
       missingList.sort((a, b) => a.sig.strike - b.sig.strike || expiryToTime(a.sig.expiry) - expiryToTime(b.sig.expiry));
       candidates.sort((a, b) => a.strike - b.strike || expiryToTime(a.expiry) - expiryToTime(b.expiry));
 
       let ci = 0;
       for (const m of missingList) {
         const needed = m.sig.quantity_abs || 1;
-        // Avanza al primo candidato con quantità residua
-        while (ci < candidates.length && candidates[ci].availableQty <= 0) ci++;
+        while (ci < candidates.length && candidates[ci].qty <= 0) ci++;
         const cand = ci < candidates.length ? candidates[ci] : undefined;
 
         const sigs = workingSigs.get(m.configId)!;
         const cfg = configById.get(m.configId)!;
+        touchedConfigIds.add(m.configId);
 
         if (cand) {
-          const take = Math.min(needed, cand.availableQty);
-          cand.availableQty -= take;
-          consumedNewIds.add(cand.positionId);
+          const take = Math.min(needed, cand.qty);
+          cand.qty -= take;
           const oldLabel = sigLabel(m.sig);
-          const newSig: PositionSignature = {
-            option_type: m.sig.option_type,
-            strike: cand.strike,
-            expiry: cand.expiry,
-            quantity_sign: m.sig.quantity_sign,
-            quantity_abs: take,
-          };
-          // La firma originale copre anche eventuali contratti ancora presenti?
-          // reconcileConfigs splitta già present/missing, quindi qui la quota
-          // "missing" va interamente sostituita (o ridotta se take < needed).
+          const newSig: PositionSignature = legToSig(cand, take);
+          rollTargetByPosId.set(cand.positionId, { configId: m.configId, rolledSig: newSig });
+
           const original = sigs[m.sigIndex];
           if (original && (original.quantity_abs || 1) > needed) {
             // Parte della firma è ancora presente: riduci l'originale e aggiungi la nuova
@@ -333,11 +334,10 @@ export function autoReconcileStrategies(
           changes.push(`${cfg.underlying} (${cfg.strategy_type}): roll ${oldLabel} → ${sigLabel(newSig)}`);
           anyChange = true;
           if (take < needed) {
-            // Contratti mancanti senza rimpiazzo: la strategia si è ridotta
             changes.push(`${cfg.underlying} (${cfg.strategy_type}): ridotta di ${needed - take} contratti su ${oldLabel}`);
           }
         } else {
-          // ---- Caso 2: nessuna candidata → gamba rimossa ----
+          // REGOLA 2: nessuna candidata → gamba rimossa
           const original = sigs[m.sigIndex];
           if (original) {
             if ((original.quantity_abs || 1) > needed) {
@@ -352,123 +352,178 @@ export function autoReconcileStrategies(
       }
     }
 
-    // ---- Caso 3: gambe nuove residue — decision table per (tipo, segno) ----
-    // Sempre risolto. Le regole seguono l'operatività reale: una put venduta
-    // sopra una covered call È una nuova naked put; una put comprata sopra
-    // una covered call la trasforma in de-risking; ecc.
-    const leftovers = [...newByPosId.values()].filter(n => n.availableQty > 0);
-    if (leftovers.length > 0) {
-      const activeConfigsForUnderlying = configs.filter(
-        c => normalizeUnderlying(c.underlying) === normalizeUnderlying(underlyingLabel) && !deletedConfigIds.has(c.id),
-      );
-      const currentType = (c: StrategyConfiguration) => retypedConfigs.get(c.id) || c.strategy_type;
-      const findConfigOfType = (...types: string[]) =>
-        activeConfigsForUnderlying.find(c => types.includes(currentType(c)));
+    // ------------------------------------------------------------------
+    // REGOLA 1 (coda): quantità residua su posizioni GIÀ toccate da un roll
+    // → resta nella stessa strategia (aumento di quantità del roll)
+    // ------------------------------------------------------------------
+    for (const n of newByPosId.values()) {
+      if (n.qty <= 0) continue;
+      const rollTarget = rollTargetByPosId.get(n.positionId);
+      if (!rollTarget) continue;
+      const cfg = configById.get(rollTarget.configId)!;
+      // Accorpa direttamente nella firma rollata (stesso strike/scadenza)
+      rollTarget.rolledSig.quantity_abs = (rollTarget.rolledSig.quantity_abs || 1) + n.qty;
+      changes.push(`${cfg.underlying} (${cfg.strategy_type}): quantità aumentata di ${n.qty} su ${sigLabel(rollTarget.rolledSig)}`);
+      touchedConfigIds.add(rollTarget.configId);
+      n.qty = 0;
+      anyChange = true;
+    }
 
-      const appendTo = (target: StrategyConfiguration, sig: PositionSignature, extra?: string) => {
+    // ------------------------------------------------------------------
+    // REGOLA 3: pipeline dei residui (gambe nuove non-roll)
+    // ------------------------------------------------------------------
+    const leftovers = [...newByPosId.values()].filter(n => n.qty > 0);
+    if (leftovers.length > 0) {
+      const configsForUnderlying = configs.filter(
+        c => normalizeUnderlying(c.underlying) === underlyingKey && !deletedConfigIds.has(c.id),
+      );
+
+      const createConfig = (strategyType: string, sigs: PositionSignature[], linkedStockId: string | null = null): UpsertConfigParams => {
+        const params: UpsertConfigParams = {
+          underlying: underlyingLabel,
+          strategy_type: strategyType,
+          position_signatures: sigs,
+          is_synthetic: false,
+          linked_stock_id: linkedStockId,
+          linked_stock_slot_ids: [],
+        };
+        newConfigs.push(params);
+        runCreated.push({ underlyingKey, params });
+        changes.push(`${underlyingLabel}: nuova strategia ${strategyType} creata automaticamente (${sigs.map(sigLabel).join(', ')})`);
+        anyChange = true;
+        return params;
+      };
+      const appendToExisting = (target: StrategyConfiguration, sig: PositionSignature, extra?: string) => {
         if (!appendedSigs.has(target.id)) appendedSigs.set(target.id, []);
         appendedSigs.get(target.id)!.push(sig);
-        changes.push(`${target.underlying} (${currentType(target)}): aggiunta gamba ${sigLabel(sig)}${extra ? ` — ${extra}` : ''}`);
+        touchedConfigIds.add(target.id);
+        changes.push(`${target.underlying} (${target.strategy_type}): aggiunta gamba ${sigLabel(sig)}${extra ? ` — ${extra}` : ''}`);
         anyChange = true;
       };
-      const createConfig = (strategyType: string, sig: PositionSignature, linkedStockId: string | null = null) => {
-        // Se abbiamo già creato una config dello stesso tipo per questo
-        // sottostante in questo run, accoda lì invece di duplicare.
-        const existing = newConfigs.find(
-          nc => normalizeUnderlying(nc.underlying) === normalizeUnderlying(underlyingLabel) && nc.strategy_type === strategyType,
-        );
-        if (existing) {
-          existing.position_signatures.push(sig);
-        } else {
-          newConfigs.push({
-            underlying: underlyingLabel,
-            strategy_type: strategyType,
-            position_signatures: [sig],
-            is_synthetic: false,
-            linked_stock_id: linkedStockId,
-            linked_stock_slot_ids: [],
-          });
+      const findExistingOfType = (...types: string[]) =>
+        configsForUnderlying.find(c => types.includes(c.strategy_type));
+      const findRunCreatedOfType = (...types: string[]) =>
+        runCreated.find(rc => rc.underlyingKey === underlyingKey && types.includes(rc.params.strategy_type))?.params;
+
+      // -- 3a: tutti e 4 i ruoli presenti → un'unica IC/DD --
+      const lc = { sp: leftovers.filter(l => l.optionType === 'put' && l.quantitySign === -1),
+                   bp: leftovers.filter(l => l.optionType === 'put' && l.quantitySign === 1),
+                   sc: leftovers.filter(l => l.optionType === 'call' && l.quantitySign === -1),
+                   bc: leftovers.filter(l => l.optionType === 'call' && l.quantitySign === 1) };
+      if (lc.sp.length > 0 && lc.bp.length > 0 && lc.sc.length > 0 && lc.bc.length > 0) {
+        const sigs = leftovers.map(l => legToSig(l));
+        const type = allSameExpiry(sigs) ? 'iron_condor' : 'double_diagonal';
+        createConfig(type, sigs);
+        leftovers.forEach(l => { l.qty = 0; });
+      } else {
+        // -- 3b: coppie venduta+comprata dello stesso tipo → spread --
+        for (const optType of ['put', 'call'] as const) {
+          const sold = leftovers.filter(l => l.optionType === optType && l.quantitySign === -1 && l.qty > 0)
+            .sort((a, b) => a.strike - b.strike || expiryToTime(a.expiry) - expiryToTime(b.expiry));
+          const bought = leftovers.filter(l => l.optionType === optType && l.quantitySign === 1 && l.qty > 0)
+            .sort((a, b) => a.strike - b.strike || expiryToTime(a.expiry) - expiryToTime(b.expiry));
+          let si = 0, bi = 0;
+          while (si < sold.length && bi < bought.length) {
+            const s = sold[si], b = bought[bi];
+            const q = Math.min(s.qty, b.qty);
+            const pairSigs = [legToSig(s, q), legToSig(b, q)];
+            const sameExp = s.expiry === b.expiry;
+            const type = optType === 'put'
+              ? (sameExp ? 'put_spread' : 'diagonal_put_spread')
+              : (sameExp ? 'call_spread' : 'diagonal_call_spread');
+            createConfig(type, pairSigs);
+            s.qty -= q; b.qty -= q;
+            if (s.qty <= 0) si++;
+            if (b.qty <= 0) bi++;
+          }
         }
-        changes.push(`${underlyingLabel}: nuova strategia ${strategyType} creata automaticamente (${sigLabel(sig)})`);
-        anyChange = true;
-      };
-      const retype = (target: StrategyConfiguration, newType: string) => {
-        if (currentType(target) === newType) return;
-        changes.push(`${target.underlying}: strategia riclassificata ${currentType(target)} → ${newType}`);
-        retypedConfigs.set(target.id, newType);
-        anyChange = true;
-      };
-      /** Firme correnti (originali sopravvissute + accodate) di una config */
-      const liveSigsOf = (c: StrategyConfiguration): PositionSignature[] => [
-        ...(workingSigs.get(c.id) || []).filter((s): s is PositionSignature => s !== null),
-        ...(appendedSigs.get(c.id) || []),
-      ];
 
-      for (const n of leftovers) {
-        const sig: PositionSignature = {
-          option_type: n.optionType,
-          strike: n.strike,
-          expiry: n.expiry,
-          quantity_sign: n.quantitySign,
-          quantity_abs: n.availableQty,
-        };
-        const isPut = n.optionType === 'put';
-        const isSold = n.quantitySign === -1;
+        // -- 3c..3f: regole per-gamba sui residui, in ordine deterministico --
+        // Ordine: put vendute, call vendute, put comprate, call comprate —
+        // così una call venduta può creare la CC su cui poi si appoggia la
+        // put comprata (→ de-risking) nello stesso run.
+        const remaining = leftovers.filter(l => l.qty > 0);
 
-        if (isPut && isSold) {
-          // Put venduta → naked put (esistente o nuova). Mai dentro una CC.
-          const np = findConfigOfType('naked_put');
-          if (np) appendTo(np, sig);
-          else createConfig('naked_put', sig);
-        } else if (isPut && !isSold) {
-          // Put comprata → protezione o gamba lunga di spread
-          const cc = findConfigOfType('covered_call');
-          const drcc = findConfigOfType('derisking_covered_call');
-          const np = findConfigOfType('naked_put');
-          const spread = findConfigOfType('put_spread', 'diagonal_put_spread');
-          if (cc) {
-            appendTo(cc, sig, 'covered call trasformata in de-risking');
-            retype(cc, 'derisking_covered_call');
-          } else if (drcc) {
-            appendTo(drcc, sig);
-          } else if (np) {
-            const sameExpiry = liveSigsOf(np).some(s => s.quantity_sign === -1 && s.expiry === sig.expiry);
-            appendTo(np, sig, 'naked put trasformata in spread');
-            retype(np, sameExpiry ? 'put_spread' : 'diagonal_put_spread');
-          } else if (spread) {
-            appendTo(spread, sig);
-          } else {
-            createConfig('other', sig);
-          }
-        } else if (!isPut && isSold) {
-          // Call venduta → covered call se c'è dove appoggiarla
-          const ccLike = findConfigOfType('covered_call', 'derisking_covered_call');
+        // 3c: put vendute residue → UNA nuova naked_put per run
+        const soldPuts = remaining.filter(l => l.optionType === 'put' && l.quantitySign === -1);
+        if (soldPuts.length > 0) {
+          createConfig('naked_put', soldPuts.map(l => legToSig(l)));
+          soldPuts.forEach(l => { l.qty = 0; });
+        }
+
+        // 3e: call vendute residue
+        const soldCalls = remaining.filter(l => l.optionType === 'call' && l.quantitySign === -1 && l.qty > 0);
+        for (const l of soldCalls) {
+          const sig = legToSig(l);
+          const ccLike = findExistingOfType('covered_call', 'derisking_covered_call');
           if (ccLike) {
-            appendTo(ccLike, sig);
+            appendToExisting(ccLike, sig);
           } else {
-            const stock = findStockForUnderlying(underlyingLabel, allPositions);
-            if (stock) createConfig('covered_call', sig, stock.id);
-            else createConfig('other', sig);
+            const runCc = findRunCreatedOfType('covered_call', 'derisking_covered_call');
+            if (runCc) {
+              runCc.position_signatures.push(sig);
+              changes.push(`${underlyingLabel}: aggiunta gamba ${sigLabel(sig)} alla covered call appena creata`);
+            } else {
+              const stock = findStockForUnderlying(underlyingLabel, allPositions);
+              if (stock) createConfig('covered_call', [sig], stock.id);
+              else createConfig('other', [sig]);
+            }
           }
-        } else {
-          // Call comprata → LEAP call
-          const leap = findConfigOfType('leap_call');
-          if (leap) appendTo(leap, sig);
-          else createConfig('leap_call', sig);
+          l.qty = 0;
+        }
+
+        // 3d: put comprate residue
+        const boughtPuts = remaining.filter(l => l.optionType === 'put' && l.quantitySign === 1 && l.qty > 0);
+        for (const l of boughtPuts) {
+          const sig = legToSig(l);
+          const cc = findExistingOfType('covered_call');
+          const drcc = findExistingOfType('derisking_covered_call');
+          const np = findExistingOfType('naked_put');
+          const spread = findExistingOfType('put_spread', 'diagonal_put_spread');
+          const runCc = findRunCreatedOfType('covered_call');
+
+          if (cc) {
+            appendToExisting(cc, sig, 'covered call trasformata in de-risking');
+          } else if (runCc) {
+            runCc.position_signatures.push(sig);
+            runCc.strategy_type = 'derisking_covered_call';
+            changes.push(`${underlyingLabel}: la covered call appena creata diventa de-risking (${sigLabel(sig)})`);
+          } else if (drcc) {
+            // Check copertura: parziale → accorpa, completa → protection separata
+            if (isDeRiskingProtectionPartial(drcc, liveSigsOf(drcc.id), allPositions, underlyingPrices)) {
+              appendToExisting(drcc, sig, 'protezione integrata (copertura parziale)');
+            } else {
+              createConfig('protection', [sig]);
+            }
+          } else if (np) {
+            appendToExisting(np, sig, 'naked put trasformata in spread');
+          } else if (spread) {
+            appendToExisting(spread, sig);
+          } else {
+            createConfig('protection', [sig]);
+          }
+          l.qty = 0;
+        }
+
+        // 3f: call comprate residue → UNA nuova leap_call per run
+        const boughtCalls = remaining.filter(l => l.optionType === 'call' && l.quantitySign === 1 && l.qty > 0);
+        if (boughtCalls.length > 0) {
+          createConfig('leap_call', boughtCalls.map(l => legToSig(l)));
+          boughtCalls.forEach(l => { l.qty = 0; });
         }
       }
     }
   }
 
   // ------------------------------------------------------------------
-  // Chiusura strategie: config rimaste senza firme e senza azioni collegate
+  // REGOLA 2 (coda): chiusura strategie rimaste senza firme
   // ------------------------------------------------------------------
   for (const [configId, sigs] of workingSigs) {
     const cfg = configById.get(configId)!;
     const remaining = sigs.filter((s): s is PositionSignature => s !== null);
     const appended = appendedSigs.get(configId) || [];
     const hasLinkedStock = !!cfg.linked_stock_id || (cfg.linked_stock_slot_ids || []).length > 0;
-    if (remaining.length + appended.length === 0 && !hasLinkedStock) {
+    if (remaining.length + appended.length === 0 && !hasLinkedStock && touchedConfigIds.has(configId)) {
       deletedConfigIds.add(configId);
       changes.push(`${cfg.underlying} (${cfg.strategy_type}): strategia chiusa, configurazione eliminata`);
       anyChange = true;
@@ -476,21 +531,33 @@ export function autoReconcileStrategies(
   }
 
   if (!anyChange) {
-    return { resolvedConfigs: null, changes: [], unresolvedItems: items.slice(), hasAutoChanges: false };
+    return { resolvedConfigs: null, changes: [], unresolvedItems, hasAutoChanges: false };
   }
 
   // ------------------------------------------------------------------
   // Ricostruzione del set completo (upsertBatch = full replace)
+  // + REGOLA 4: retype dalla struttura risultante per le config toccate
   // ------------------------------------------------------------------
   const resolvedConfigs: UpsertConfigParams[] = [];
   for (const c of configs) {
     if (deletedConfigIds.has(c.id)) continue;
-    const sigs = (workingSigs.get(c.id) || []).filter((s): s is PositionSignature => s !== null);
-    const appended = appendedSigs.get(c.id) || [];
+    const finalSigs = [
+      ...(workingSigs.get(c.id) || []).filter((s): s is PositionSignature => s !== null),
+      ...(appendedSigs.get(c.id) || []),
+    ];
+    const hasLinkedStock = !!c.linked_stock_id || (c.linked_stock_slot_ids || []).length > 0;
+    let strategyType = c.strategy_type;
+    if (touchedConfigIds.has(c.id)) {
+      const newType = classifyConfigType(finalSigs, hasLinkedStock, c.strategy_type);
+      if (newType !== c.strategy_type) {
+        changes.push(`${c.underlying}: strategia riclassificata ${c.strategy_type} → ${newType}`);
+        strategyType = newType;
+      }
+    }
     resolvedConfigs.push({
       underlying: c.underlying,
-      strategy_type: retypedConfigs.get(c.id) || c.strategy_type,
-      position_signatures: [...sigs, ...appended],
+      strategy_type: strategyType,
+      position_signatures: finalSigs,
       is_synthetic: c.is_synthetic,
       linked_stock_id: c.linked_stock_id,
       linked_stock_slot_ids: c.linked_stock_slot_ids || [],
@@ -503,4 +570,46 @@ export function autoReconcileStrategies(
   });
 
   return { resolvedConfigs, changes, unresolvedItems, hasAutoChanges: true };
+}
+
+/**
+ * REGOLA 3d — Copertura della protezione di una de-risking covered call.
+ * Esposizione da coprire = azioni/100 + contratti long call + contratti
+ * short put ITM (ITM assunto quando il prezzo del sottostante non è noto).
+ * La protezione è PARZIALE quando i contratti di put comprata sono inferiori
+ * all'esposizione: in quel caso la nuova put comprata si accorpa.
+ */
+export function isDeRiskingProtectionPartial(
+  config: StrategyConfiguration,
+  currentSigs: PositionSignature[],
+  allPositions: Position[],
+  underlyingPrices?: Record<string, { price?: number | null }>,
+): boolean {
+  const { soldPuts, boughtPuts, boughtCalls } = countLegs(currentSigs);
+
+  // Azioni collegate (posizione base + eventuali slot)
+  let shares = 0;
+  const stockIds = new Set<string>();
+  if (config.linked_stock_id) stockIds.add(config.linked_stock_id);
+  for (const sid of config.linked_stock_slot_ids || []) stockIds.add(sid);
+  if (stockIds.size > 0) {
+    for (const p of allPositions) {
+      const matches = [...stockIds].some(sid => p.id === sid || p.id.startsWith(sid + '__slot_'));
+      if (matches) shares += Math.abs(p.quantity || 0);
+    }
+  }
+  if (shares === 0) {
+    const stock = findStockForUnderlying(config.underlying, allPositions);
+    if (stock) shares = Math.abs(stock.quantity || 0);
+  }
+
+  const spot = spotPriceFor(config.underlying, underlyingPrices);
+  const itmShortPutContracts = soldPuts.reduce((s, sig) => {
+    const itm = spot === null ? true : sig.strike > spot; // prezzo ignoto → conta come ITM
+    return s + (itm ? (sig.quantity_abs || 1) : 0);
+  }, 0);
+
+  const exposure = Math.round(shares / 100) + sumQty(boughtCalls) + itmShortPutContracts;
+  const protection = sumQty(boughtPuts);
+  return protection < exposure;
 }
