@@ -413,7 +413,25 @@ function categorizeDerivativesImpl(
   // can share the same aggregated position row (e.g., CALL -2 → 1 for each config).
   const configUsedQty = new Map<string, number>();
 
-  for (const config of strategyConfigs) {
+  // PRIORITÀ COVERED-CALL-FIRST (regola utente): se esistono azioni
+  // sottostanti, una call venduta deve essere associata PRIMA di tutto ai
+  // titoli (covered call), non a spread/other. Le config con azione
+  // collegata vengono quindi elaborate per prime, così adottano la loro
+  // short call prima che qualunque altra config (es. diagonal_call_spread)
+  // possa consumarla. L'ordinamento è stabile: a parità di priorità resta
+  // l'ordine originale (sort_order).
+  const configHasStock = (c: StrategyConfiguration): boolean =>
+    !!c.linked_stock_id || ((c.linked_stock_slot_ids as unknown as string[]) || []).length > 0;
+  const orderedConfigs = strategyConfigs
+    .map((c, idx) => ({ c, idx }))
+    .sort((a, b) => {
+      const pa = configHasStock(a.c) ? 0 : 1;
+      const pb = configHasStock(b.c) ? 0 : 1;
+      return pa - pb || a.idx - b.idx;
+    })
+    .map(x => x.c);
+
+  for (const config of orderedConfigs) {
     const linkedStockForKey = config.linked_stock_id
       ? (allPositions.find(p => p.id === config.linked_stock_id)
          || allPositions.find(p => p.id.startsWith(config.linked_stock_id + '__slot_')) || null)

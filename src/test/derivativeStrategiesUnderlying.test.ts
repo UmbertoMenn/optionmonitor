@@ -131,4 +131,34 @@ describe('categorizeDerivatives — bug produzione: covered call col nome esteso
     expect(cats.incompleteStrategies.some(s => s.missingLegs.includes('Short Call'))).toBe(true);
     expect(cats.coveredCalls.some(c => c.option.id === otherPut.id)).toBe(false);
   });
+
+  it('priorità covered-call-first: la call venduta va alla CC anche se una config diagonal_call_spread la rivendica (ordine config: spread PRIMA)', () => {
+    // Scenario CEG reale: azioni + call venduta 300 + call comprata 580.
+    // Una config diagonal_call_spread errata (300 venduta + 580 comprata)
+    // arriva PRIMA della covered call stock-only nell'ordine. La priorità
+    // deve comunque assegnare la call 300 alla covered call.
+    const cegStock = stock('stk_ceg', 'CONSTELLATION ENERGY', 'CEG', 100);
+    const soldCall300 = opt({ underlying: 'CEG', option_type: 'call', strike_price: 300, expiry_date: '2026-07-17', quantity: -1 });
+    const boughtCall580 = opt({ underlying: 'CEG', option_type: 'call', strike_price: 580, expiry_date: '2027-01-15', quantity: 2 });
+
+    const configs = [
+      // Spread PRIMA (ordine avverso), covered call stock-only DOPO
+      cfg({ underlying: 'CEG', strategy_type: 'diagonal_call_spread',
+        position_signatures: [
+          { option_type: 'call', strike: 300, expiry: '2026-07-17', quantity_sign: -1, quantity_abs: 1 },
+          { option_type: 'call', strike: 580, expiry: '2027-01-15', quantity_sign: 1, quantity_abs: 1 },
+        ] as never, sort_order: 0 }),
+      cfg({ underlying: 'CONSTELLATION ENERGY', strategy_type: 'covered_call', linked_stock_id: 'stk_ceg', sort_order: 1 }),
+    ];
+    const derivs = [soldCall300, boughtCall580];
+    const cats = categorizeDerivatives(derivs, [cegStock, ...derivs], [], configs, { dynamicAliases });
+
+    // La call 300 deve stare nella covered call (priorità covered-call-first)
+    expect(cats.coveredCalls.some(c => c.option.strike_price === 300 && !c.incomplete)).toBe(true);
+    // La CC specifica (CONSTELLATION ENERGY) NON è tra le incomplete
+    expect(cats.incompleteStrategies.some(
+      s => s.strategyType === 'covered_call' &&
+        (s.linkedStock?.id === 'stk_ceg' || s.underlying === 'CONSTELLATION ENERGY'),
+    )).toBe(false);
+  });
 });
