@@ -42,6 +42,8 @@ interface PositionToUpdate {
   optionType: string;
   strikePrice: number;
   underlying: string;
+  /** Tabella di destinazione: posizioni detenute o riacquisti call (call_buybacks) */
+  table?: 'positions' | 'call_buybacks';
 }
 
 interface GroupKey {
@@ -235,7 +237,17 @@ serve(async (req) => {
 
     if (derivError) throw new Error(`Error fetching derivatives: ${derivError.message}`);
 
-    if (!allDerivatives || allDerivatives.length === 0) {
+    // Riacquisti call CC/DR-CC ancora aperti e non scaduti: il loro prezzo di
+    // mercato serve al calcolo del "patrimonio netting intrinseco mancante".
+    const { data: buybacksRaw, error: buybackError } = await supabase
+      .from('call_buybacks')
+      .select('id, underlying, strike, expiry_date')
+      .gt('quantity', 0)
+      .gte('expiry_date', today);
+    if (buybackError) console.error("Error fetching call_buybacks:", buybackError.message);
+    const buybacks = buybacksRaw || [];
+
+    if ((!allDerivatives || allDerivatives.length === 0) && buybacks.length === 0) {
       console.log("No active derivatives found");
       return new Response(
         JSON.stringify({ success: true, message: "No active derivatives", updated: 0, failed: 0, duration_ms: Date.now() - startTime }),
@@ -244,21 +256,21 @@ serve(async (req) => {
     }
 
     // Filter out EUREX/IDEM options — Yahoo doesn't support European option chains
-    const eurexIdemSkipped = allDerivatives.filter(d => {
+    const eurexIdemSkipped = (allDerivatives || []).filter(d => {
       const desc = (d.description || '').toUpperCase();
       return desc.startsWith('EUREX,') || desc.startsWith('IDEM,');
     });
-    const derivatives = allDerivatives.filter(d => {
+    const derivatives = (allDerivatives || []).filter(d => {
       const desc = (d.description || '').toUpperCase();
       return !desc.startsWith('EUREX,') && !desc.startsWith('IDEM,');
     });
 
-    console.log(`Found ${allDerivatives.length} active derivatives: ${derivatives.length} US (will update), ${eurexIdemSkipped.length} EUREX/IDEM (skipped)`);
+    console.log(`Found ${(allDerivatives || []).length} active derivatives: ${derivatives.length} US (will update), ${eurexIdemSkipped.length} EUREX/IDEM (skipped)`);
     if (eurexIdemSkipped.length > 0) {
       console.log(`Skipped EUREX/IDEM examples: ${eurexIdemSkipped.slice(0, 3).map(d => d.description).join('; ')}`);
     }
 
-    if (derivatives.length === 0) {
+    if (derivatives.length === 0 && buybacks.length === 0) {
       return new Response(
         JSON.stringify({ success: true, message: "All derivatives are EUREX/IDEM, skipped", updated: 0, failed: 0, eurex_idem_skipped: eurexIdemSkipped.length, duration_ms: Date.now() - startTime }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -337,6 +349,32 @@ serve(async (req) => {
       console.log(`Skipped ${skipped.length} positions without ticker mapping: ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '...' : ''}`);
     }
 
+    // Aggiunge i riacquisti call ai gruppi: il campo underlying dei buybacks
+    // è GIÀ il ticker US (decodificato dal descrittore banca), nessun mapping.
+    for (const b of buybacks) {
+      const ticker = (b.underlying || '').toUpperCase().trim();
+      if (!ticker) continue;
+      const expDate = new Date(b.expiry_date);
+      const thirdFri = getThirdFriday(expDate.getFullYear(), expDate.getMonth());
+      const thirdFridayUnix = Math.floor(thirdFri.getTime() / 1000);
+      const groupKey = `${ticker}_${expDate.getFullYear()}-${(expDate.getMonth() + 1).toString().padStart(2, '0')}`;
+      const occSymbol = buildOCCSymbol(ticker, b.expiry_date, 'call', b.strike);
+      if (!groups[groupKey]) {
+        groups[groupKey] = { ticker, expiryDate: b.expiry_date, thirdFridayUnix, positions: [] };
+      }
+      groups[groupKey].positions.push({
+        positionId: b.id,
+        occSymbol,
+        optionType: 'call',
+        strikePrice: b.strike,
+        underlying: ticker,
+        table: 'call_buybacks',
+      });
+    }
+    if (buybacks.length > 0) {
+      console.log(`Added ${buybacks.length} call buybacks to price groups`);
+    }
+
     const groupEntries = Object.entries(groups);
     console.log(`Grouped into ${groupEntries.length} ticker+expiry groups (covering ${derivatives.length - skipped.length} positions)`);
 
@@ -386,10 +424,16 @@ serve(async (req) => {
             }
 
             if (price !== null) {
-              const { error: updateError } = await supabase
-                .from('positions')
-                .update({ current_price: price, updated_at: new Date().toISOString() })
-                .eq('id', pos.positionId);
+              const isBuyback = pos.table === 'call_buybacks';
+              const { error: updateError } = isBuyback
+                ? await supabase
+                    .from('call_buybacks')
+                    .update({ market_price: price, market_price_updated_at: new Date().toISOString() })
+                    .eq('id', pos.positionId)
+                : await supabase
+                    .from('positions')
+                    .update({ current_price: price, updated_at: new Date().toISOString() })
+                    .eq('id', pos.positionId);
 
               if (updateError) {
                 console.error(`Failed to update ${pos.positionId}:`, updateError.message);

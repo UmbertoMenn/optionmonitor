@@ -256,3 +256,96 @@ describe('buildDepositCandidates', () => {
     expect(dates).toEqual([...dates].sort());
   });
 });
+
+// ============================================================================
+// File Movimenti Titoli (FlussoMovContiTitoli) — operazioni in derivati
+// ============================================================================
+import { decodeOptionDescriptor } from '@/lib/flussiCsvParser';
+
+describe('decodeOptionDescriptor', () => {
+  it("decodifica l'esempio dato: NVDAV7P200 = put NVDA strike 200 scadenza ottobre 2027", () => {
+    const d = decodeOptionDescriptor('NVDAV7P200', '2026-07-02')!;
+    expect(d.underlyingTicker).toBe('NVDA');
+    expect(d.optionType).toBe('put');
+    expect(d.strike).toBe(200);
+    expect(d.month).toBe(10);
+    expect(d.year).toBe(2027);
+    expect(d.expiryDate).toBe('2027-10-15'); // terzo venerdì ottobre 2027
+  });
+
+  it('decodifica tutti i codici mese', () => {
+    const months: Record<string, number> = { F: 1, G: 2, H: 3, J: 4, K: 5, M: 6, N: 7, Q: 8, U: 9, V: 10, X: 11, Z: 12 };
+    for (const [code, month] of Object.entries(months)) {
+      const d = decodeOptionDescriptor(`AAPL${code}7C300`, '2026-07-02')!;
+      expect(d.month).toBe(month);
+      expect(d.year).toBe(2027);
+    }
+  });
+
+  it('gestisce ticker che terminano con lettere-mese (parsing ancorato da destra)', () => {
+    // IREN termina con N (=luglio): il parse corretto è IREN + F8 + C + 80
+    const d = decodeOptionDescriptor('IRENF8C80', '2026-07-02')!;
+    expect(d.underlyingTicker).toBe('IREN');
+    expect(d.month).toBe(1);
+    expect(d.year).toBe(2028);
+    expect(d.optionType).toBe('call');
+    expect(d.strike).toBe(80);
+  });
+
+  it('risolve la cifra anno rispetto alla data operazione (decennio successivo se già scaduta)', () => {
+    // Operazione a dicembre 2026, opzione F6 (gennaio, cifra 6): gen 2026 è passato → 2036
+    const d = decodeOptionDescriptor('AAPLF6C300', '2026-12-01')!;
+    expect(d.year).toBe(2036);
+    // Stessa opzione negoziata a gennaio 2026 → 2026
+    const d2 = decodeOptionDescriptor('AAPLF6C300', '2026-01-05')!;
+    expect(d2.year).toBe(2026);
+  });
+
+  it('supporta strike decimali', () => {
+    const d = decodeOptionDescriptor('FQ6P12,5', '2026-07-02')!;
+    expect(d.underlyingTicker).toBe('F');
+    expect(d.strike).toBe(12.5);
+  });
+
+  it('ritorna null per descrittori non-opzione', () => {
+    expect(decodeOptionDescriptor('NVIDIA CORP', '2026-07-02')).toBeNull();
+    expect(decodeOptionDescriptor('', '2026-07-02')).toBeNull();
+  });
+});
+
+describe('parseFlussiCsvText — file Movimenti Titoli', () => {
+  it('riconosce il tipo e parsa il file reale: 10 operazioni opzioni, dividendo escluso', () => {
+    const realCsv = readFileSync(
+      join(__dirname, 'fixtures/FlussoMovContiTitoli_sample.csv'),
+      'utf-8'
+    );
+    expect(detectFlussiCsvType(realCsv)).toBe('mov_titoli');
+    const res = parseFlussiCsvText(realCsv);
+    expect(res.titoliOptionTrades).toHaveLength(10); // 11 righe − 1 DIV NVIDIA
+
+    const mu900 = res.titoliOptionTrades.find(t => t.descriptor === 'MUQ6P900')!;
+    expect(mu900.side).toBe('ACQ');
+    expect(mu900.underlyingTicker).toBe('MU');
+    expect(mu900.optionType).toBe('put');
+    expect(mu900.strike).toBe(900);
+    expect(mu900.expiryDate).toBe('2026-08-21'); // terzo venerdì agosto 2026
+    expect(mu900.contracts).toBe(1);
+    expect(mu900.pricePerShare).toBe(94);
+    expect(mu900.currency).toBe('USD');
+    expect(mu900.tradeDate).toBe('2026-07-02'); // DATA OPERAZIONE
+
+    const iren = res.titoliOptionTrades.find(t => t.descriptor === 'IRENF8C80')!;
+    expect(iren.side).toBe('ACQ');
+    expect(iren.contracts).toBe(2);
+    expect(iren.expiryDate).toBe('2028-01-21'); // terzo venerdì gennaio 2028
+  });
+
+  it('applica le eccezioni conto cliente anche ai movimenti titoli', () => {
+    const realCsv = readFileSync(
+      join(__dirname, 'fixtures/FlussoMovContiTitoli_sample.csv'),
+      'utf-8'
+    );
+    const res = parseFlussiCsvText(realCsv, { excludedCashAccounts: ['02278918441'] });
+    expect(res.titoliOptionTrades).toHaveLength(0);
+  });
+});

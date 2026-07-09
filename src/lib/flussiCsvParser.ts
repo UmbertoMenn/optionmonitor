@@ -74,6 +74,32 @@ export interface DepositCandidate {
   sourceMovements: FlussiCashMovement[];
 }
 
+/** Operazione su opzione dal file Movimenti Titoli (descrittore es. NVDAV7P200). */
+export interface FlussiTitoliOptionTrade {
+  accountId: string;
+  /** Descrittore grezzo (DESC TITOLO), es. 'MUQ6P900' */
+  descriptor: string;
+  /** Ticker del sottostante decodificato, es. 'MU' */
+  underlyingTicker: string;
+  optionType: 'call' | 'put';
+  strike: number;
+  /** Scadenza reale (terzo venerdì, con gestione festività), ISO */
+  expiryDate: string;
+  /** 'ACQ' = acquisto, 'VEN' = vendita */
+  side: 'ACQ' | 'VEN';
+  /** Numero contratti (positivo) */
+  contracts: number;
+  /** Premio per azione (PREZZO SECCO), nella divisa del titolo */
+  pricePerShare: number;
+  currency: string;
+  exchangeRate: number;
+  /** Controvalore lordo in EUR */
+  grossEUR: number;
+  commission: number;
+  /** DATA OPERAZIONE, ISO */
+  tradeDate: string;
+}
+
 export interface FlussiParseResult {
   positions: ParsedPosition[];
   /** Conti di liquidità del portafoglio (ordinari + vincolati, GP esclusa) */
@@ -88,6 +114,8 @@ export interface FlussiParseResult {
   snapshotDate: string | null;
   /** Movimenti di capitale (bonifici/giroconti) individuati nel file Movimenti Cash */
   cashMovements: FlussiCashMovement[];
+  /** Operazioni su opzioni individuate nel file Movimenti Titoli */
+  titoliOptionTrades: FlussiTitoliOptionTrade[];
 }
 
 export interface FlussiParseOptions {
@@ -115,18 +143,20 @@ function splitCsvLine(line: string): string[] {
   return line.replace(/\r$/, '').split(';').map(c => c.trim());
 }
 
-export type FlussiCsvType = 'cash' | 'titoli' | 'mov_cash';
+export type FlussiCsvType = 'cash' | 'titoli' | 'mov_cash' | 'mov_titoli';
 
 /** Riconosce dal testo di quale dei flussi CSV si tratta. */
 export function detectFlussiCsvType(text: string): FlussiCsvType | null {
-  const firstLine = text.slice(0, 400).split(/\r?\n/)[0]?.toUpperCase() ?? '';
+  const firstLine = text.slice(0, 600).split(/\r?\n/)[0]?.toUpperCase() ?? '';
   if (firstLine.startsWith('DATA RIFERIMENTO;')) {
     if (firstLine.includes('SALDO EURO')) return 'cash';
     if (firstLine.includes('CODICE TITOLO')) return 'titoli';
     return null;
   }
-  if (firstLine.startsWith('DATA INIZIO PERIODO;') && firstLine.includes('DESCRIZIONE OPERAZIONE')) {
-    return 'mov_cash';
+  if (firstLine.startsWith('DATA INIZIO PERIODO;')) {
+    if (firstLine.includes('DESCRIZIONE OPERAZIONE')) return 'mov_cash';
+    if (firstLine.includes('DESC TITOLO') && firstLine.includes('CAUSALE')) return 'mov_titoli';
+    return null;
   }
   return null;
 }
@@ -164,6 +194,7 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
     gpCashAccounts: [],
     snapshotDate: null,
     cashMovements: [],
+    titoliOptionTrades: [],
   };
   if (!type) return result;
 
@@ -181,8 +212,10 @@ export function parseFlussiCsvText(text: string, options?: FlussiParseOptions): 
       parseCashRow(cells, result, options);
     } else if (type === 'titoli') {
       parseTitoliRow(cells, result);
-    } else {
+    } else if (type === 'mov_cash') {
       parseMovCashRow(cells, result, options);
+    } else {
+      parseMovTitoliRow(cells, result, options);
     }
   }
 
@@ -438,4 +471,114 @@ export function buildDepositCandidates(movements: FlussiCashMovement[]): Deposit
   }
 
   return candidates.sort((a, b) => a.deposit_date.localeCompare(b.deposit_date));
+}
+
+// ============================================================================
+// File Movimenti Titoli: DATA INIZIO PERIODO;DATA FINE PERIODO;COD ABI;
+//   NUMERO CONTO;CODICE ISIN;DESC TITOLO;DATA CONTABILE;DATA VALUTA;
+//   DATA OPERAZIONE;DATA REGISTRAZIONE;CAUSALE;QUANTITA;PREZZO SECCO;
+//   DIVISA DEL TITOLO;LORDO EMITTENTE;...;CAMBIO;...;COMMISSIONI;...;
+//   CTV LORDO DIVISA;CTV LORDO EUR;CTV NETTO DIVISA CONTO;...
+//
+// Le operazioni in derivati hanno ISIN vuoto e il descrittore in DESC TITOLO:
+//   [TICKER][CODICE MESE][CIFRA ANNO][C|P][STRIKE]   es. NVDAV7P200
+// Codici mese (standard futures): F=gen G=feb H=mar J=apr K=mag M=giu
+//                                  N=lug Q=ago U=set V=ott X=nov Z=dic
+// ============================================================================
+
+const MONTH_CODES: Record<string, number> = {
+  F: 1, G: 2, H: 3, J: 4, K: 5, M: 6, N: 7, Q: 8, U: 9, V: 10, X: 11, Z: 12,
+};
+
+const MOV_TITOLI_DESCRIPTOR_RE = /^([A-Z0-9.]+?)([FGHJKMNQUVXZ])(\d)([CP])(\d+(?:[.,]\d+)?)$/;
+
+export interface DecodedOptionDescriptor {
+  underlyingTicker: string;
+  optionType: 'call' | 'put';
+  strike: number;
+  /** Scadenza reale (terzo venerdì con festività), ISO */
+  expiryDate: string;
+  month: number;
+  year: number;
+}
+
+/**
+ * Decodifica il descrittore opzione dei movimenti titoli (es. 'NVDAV7P200'
+ * = put NVDA strike 200 scadenza ottobre 2027). La cifra singola dell'anno
+ * viene risolta rispetto alla data operazione: il primo anno >= anno
+ * operazione con quell'ultima cifra; se la scadenza risultante è già
+ * passata alla data operazione, si salta al decennio successivo.
+ */
+export function decodeOptionDescriptor(descriptor: string, tradeDateISO: string): DecodedOptionDescriptor | null {
+  const desc = (descriptor || '').trim().toUpperCase();
+  const m = desc.match(MOV_TITOLI_DESCRIPTOR_RE);
+  if (!m) return null;
+
+  const [, ticker, monthCode, yearDigitStr, cpFlag, strikeStr] = m;
+  const month = MONTH_CODES[monthCode];
+  if (!month) return null;
+
+  const tradeDate = new Date(tradeDateISO);
+  if (isNaN(tradeDate.getTime())) return null;
+  const tradeYear = tradeDate.getFullYear();
+  const yearDigit = parseInt(yearDigitStr, 10);
+
+  // Primo anno >= anno operazione con ultima cifra combaciante
+  let year = tradeYear + ((yearDigit - (tradeYear % 10)) + 10) % 10;
+  let expiryISO = getOptionExpirationDateISO(year, month - 1); // mese 0-based (convenzione JS)
+  // Un'opzione non può essere negoziata dopo la propria scadenza
+  if (new Date(expiryISO).getTime() < tradeDate.getTime() - 24 * 3600 * 1000) {
+    year += 10;
+    expiryISO = getOptionExpirationDateISO(year, month - 1);
+  }
+
+  return {
+    underlyingTicker: ticker,
+    optionType: cpFlag === 'C' ? 'call' : 'put',
+    strike: parseFloat(strikeStr.replace(',', '.')),
+    expiryDate: expiryISO,
+    month,
+    year,
+  };
+}
+
+function parseMovTitoliRow(cells: string[], result: FlussiParseResult, options?: FlussiParseOptions): void {
+  const accountId = stripQuote(cells[3] || '');
+  if (!accountId) return;
+
+  // Stesse eccezioni cliente già usate per liquidità e movimenti cash.
+  if (isExcludedAccount(accountId, options)) return;
+
+  const causale = (cells[10] || '').trim().toUpperCase();
+  if (causale !== 'ACQ' && causale !== 'VEN') return; // DIV, cedole, ecc. esclusi
+
+  const isin = stripQuote(cells[4] || '').trim();
+  if (isin) return; // le opzioni USA hanno ISIN vuoto
+
+  const tradeDate = parseItalianDate(cells[8]) || parseItalianDate(cells[6]);
+  if (!tradeDate) return;
+
+  const decoded = decodeOptionDescriptor(cells[5] || '', tradeDate);
+  if (!decoded) return; // non è un descrittore opzione riconoscibile
+
+  const contracts = Math.abs(parseExcelNumber(cells[11]));
+  const pricePerShare = parseExcelNumber(cells[12]);
+  if (!contracts || !pricePerShare) return;
+
+  result.titoliOptionTrades.push({
+    accountId,
+    descriptor: (cells[5] || '').trim().toUpperCase(),
+    underlyingTicker: decoded.underlyingTicker,
+    optionType: decoded.optionType,
+    strike: decoded.strike,
+    expiryDate: decoded.expiryDate,
+    side: causale as 'ACQ' | 'VEN',
+    contracts,
+    pricePerShare,
+    currency: (cells[13] || 'USD').trim() || 'USD',
+    exchangeRate: parseExcelNumber(cells[16]) || 1,
+    grossEUR: parseExcelNumber(cells[23]),
+    commission: parseExcelNumber(cells[19]),
+    tradeDate,
+  });
 }
