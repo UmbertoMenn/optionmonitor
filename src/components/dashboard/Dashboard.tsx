@@ -12,6 +12,7 @@ import { useCurrencyExposure } from '@/hooks/useCurrencyExposure';
 import { useClearPortfolio, ClearMode } from '@/hooks/useClearPortfolio';
 import { useStrategyConfigurations } from '@/hooks/useStrategyConfigurations';
 import { useGPHoldings } from '@/hooks/useGPHoldings';
+import { useCallBuybacks, openCallBuybacksValueEUR } from '@/hooks/useCallBuybacks';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -113,6 +114,17 @@ export function Dashboard() {
   // Centralized state for unified carousel
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('netting_total');
+  const [includeCallBuybacks, setIncludeCallBuybacks] = useState(false);
+  const portfolioIds = useMemo(
+    () => [...new Set(positions.map(position => position.portfolio_id))],
+    [positions],
+  );
+  const { buybacks } = useCallBuybacks(portfolioIds);
+  const callBuybacksValueEUR = useMemo(
+    () => openCallBuybacksValueEUR(buybacks),
+    [buybacks],
+  );
+  const nettingIntrinsicB = netting.nettingIntrinsicB + (includeCallBuybacks ? callBuybacksValueEUR : 0);
   
   // Historical data hook now receives viewMode for synthetic deposits calculation
   const { 
@@ -341,7 +353,12 @@ export function Dashboard() {
               </Tooltip>
             </TooltipProvider>
           </div>
-          <ViewModeSelector viewMode={viewMode} onViewModeChange={setViewMode} />
+          <ViewModeSelector
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            includeCallBuybacks={includeCallBuybacks}
+            onIncludeCallBuybacksChange={setIncludeCallBuybacks}
+          />
         </div>
 
         {/* Stats */}
@@ -351,7 +368,7 @@ export function Dashboard() {
             portfolio={portfolio}
             nettingTotal={netting.nettingTotal}
             nettingIntrinsicA={netting.nettingIntrinsicA}
-            nettingIntrinsicB={netting.nettingIntrinsicB}
+            nettingIntrinsicB={nettingIntrinsicB}
             viewMode={viewMode}
             historicalData={historicalData}
             selectedHistoricalDate={selectedHistoricalDate}
@@ -396,7 +413,7 @@ export function Dashboard() {
                     currentTotalValue={summary?.totalValue ?? 0}
                     currentNettingTotal={netting.nettingTotal}
                     currentNettingIntrinsicA={netting.nettingIntrinsicA}
-                    currentNettingIntrinsicB={netting.nettingIntrinsicB}
+                    currentNettingIntrinsicB={nettingIntrinsicB}
                     currentEquityExposurePct={equityExposurePct}
                     currentUsdExposurePct={usdExposurePct}
                   />
@@ -448,7 +465,7 @@ export function Dashboard() {
             currentValue={
               viewMode === 'netting_total' ? netting.nettingTotal
               : viewMode === 'netting_intrinsic_a' ? netting.nettingIntrinsicA
-              : netting.nettingIntrinsicB
+              : nettingIntrinsicB
             }
             currentDate={portfolio?.snapshot_date ?? null}
             deposits={allDepositsForCharts}

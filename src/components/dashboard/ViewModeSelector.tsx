@@ -1,11 +1,14 @@
 import { cn } from '@/lib/utils';
 import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTooltip';
+import { Switch } from '@/components/ui/switch';
 
 export type ViewMode = 'netting_total' | 'netting_intrinsic_a' | 'netting_intrinsic_b';
 
 interface ViewModeSelectorProps {
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  includeCallBuybacks: boolean;
+  onIncludeCallBuybacksChange: (include: boolean) => void;
 }
 
 const VIEW_LABELS: Record<ViewMode, string> = {
@@ -16,7 +19,12 @@ const VIEW_LABELS: Record<ViewMode, string> = {
 
 const VIEWS: ViewMode[] = ['netting_total', 'netting_intrinsic_a', 'netting_intrinsic_b'];
 
-export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelectorProps) {
+export function ViewModeSelector({
+  viewMode,
+  onViewModeChange,
+  includeCallBuybacks,
+  onIncludeCallBuybacksChange,
+}: ViewModeSelectorProps) {
   return (
     <div className="mb-4 border border-border rounded-xl bg-card p-1">
       <div className="flex flex-wrap items-center justify-center gap-1">
@@ -40,6 +48,14 @@ export function ViewModeSelector({ viewMode, onViewModeChange }: ViewModeSelecto
         })}
         <NettingViewInfoTooltip className="w-4 h-4 text-muted-foreground cursor-pointer shrink-0 ml-1" />
       </div>
+      <label className="mt-2 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+        <Switch
+          checked={includeCallBuybacks}
+          onCheckedChange={onIncludeCallBuybacksChange}
+          aria-label="Includi call riacquistate nel Netting Intrinseco B"
+        />
+        Includi call riacquistate nel Netting Intrinseco B
+      </label>
     </div>
   );
 }
