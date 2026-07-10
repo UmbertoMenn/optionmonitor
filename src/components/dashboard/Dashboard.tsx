@@ -124,8 +124,7 @@ export function Dashboard() {
     () => openCallBuybacksValueEUR(buybacks),
     [buybacks],
   );
-  const nettingIntrinsicB = netting.nettingIntrinsicB + (includeCallBuybacks ? callBuybacksValueEUR : 0);
-  
+
   // Historical data hook now receives viewMode for synthetic deposits calculation
   const { 
     historicalData, 
@@ -157,6 +156,7 @@ export function Dashboard() {
   }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
 
   const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
+  const nettingIntrinsicB = netting.nettingIntrinsicB + (includeCallBuybacks ? callBuybacksValueEUR : 0);
 
   // DEBUG diagnostico: confronto market value vs Netting Intrinseco (A) vs Netting Intrinseco (B).
   // Attivazione: in console -> localStorage.setItem('nettingDebug','1'); poi seleziona il portfolio e ricarica.
