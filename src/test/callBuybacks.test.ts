@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractCallBuybacks } from '@/lib/callBuybacks';
+import { CallBuybackRow, openCallBuybacksValueEUR } from '@/hooks/useCallBuybacks';
 import { FlussiTitoliOptionTrade } from '@/lib/flussiCsvParser';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { Position } from '@/types/portfolio';
@@ -64,6 +65,54 @@ describe('extractCallBuybacks', () => {
     expect(buybacks[0].quantity).toBe(2);
     expect(buybacks[0].expiry_date).toBe('2026-08-21');
     expect(resells).toHaveLength(0);
+  });
+
+  describe('openCallBuybacksValueEUR', () => {
+    it('converte il valore di mercato delle call aperte in EUR', () => {
+      const rows: CallBuybackRow[] = [{
+        id: 'buyback-1',
+        portfolio_id: 'pf1',
+        underlying: 'MU',
+        descriptor: 'MUQ6C1100',
+        strike: 1100,
+        expiry_date: '2026-08-21',
+        quantity: 2,
+        buyback_price: 45.5,
+        currency: 'USD',
+        exchange_rate: 1.25,
+        buyback_date: '2026-07-02',
+        market_price: 50,
+        market_price_updated_at: null,
+        resold_quantity: 0,
+        resell_price: null,
+        resell_date: null,
+      }];
+
+      expect(openCallBuybacksValueEUR(rows, '2026-07-10')).toBe(8000);
+    });
+
+    it('esclude le call scadute', () => {
+      const row = {
+        id: 'buyback-1',
+        portfolio_id: 'pf1',
+        underlying: 'MU',
+        descriptor: 'MUQ6C1100',
+        strike: 1100,
+        expiry_date: '2026-07-01',
+        quantity: 1,
+        buyback_price: 45.5,
+        currency: 'USD',
+        exchange_rate: 1,
+        buyback_date: '2026-06-02',
+        market_price: 50,
+        market_price_updated_at: null,
+        resold_quantity: 0,
+        resell_price: null,
+        resell_date: null,
+      } satisfies CallBuybackRow;
+
+      expect(openCallBuybacksValueEUR([row], '2026-07-10')).toBe(0);
+    });
   });
 
   it('ACQ che combacia solo con la firma di una config CC (posizione già sparita) → tracciato', () => {

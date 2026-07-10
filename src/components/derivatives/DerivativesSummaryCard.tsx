@@ -121,7 +121,7 @@ function AvailableCallsSection({
   portfolioId: string | null | undefined;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { buybacks } = useCallBuybacks(portfolioId);
+  const { buybacks } = useCallBuybacks([portfolioId]);
 
   // Mostra solo i riacquisti dei ticker presenti nella card (esclusi archiviati a monte)
   const visibleBuybacks = useMemo(() => {
@@ -144,6 +144,9 @@ function AvailableCallsSection({
 
   const totalMarketPremium = visibleBuybacks.reduce(
     (s, b) => s + effectiveMarketPrice(b, today) * 100 * b.quantity, 0,
+  );
+  const totalPotentialGainLoss = visibleBuybacks.reduce(
+    (s, b) => s + (effectiveMarketPrice(b, today) - b.buyback_price) * 100 * b.quantity, 0,
   );
 
   return (
@@ -189,12 +192,14 @@ function AvailableCallsSection({
                     <th className="text-right py-1 px-2 font-medium">Prezzo riacquisto</th>
                     <th className="text-right py-1 px-2 font-medium">Prezzo mercato</th>
                     <th className="text-right py-1 pl-2 font-medium">Premio tot. mercato</th>
+                    <th className="text-right py-1 pl-2 font-medium">G/P potenziale</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleBuybacks.map(b => {
                     const expired = b.expiry_date < today;
                     const mkt = effectiveMarketPrice(b, today);
+                    const potentialGainLoss = (mkt - b.buyback_price) * 100 * b.quantity;
                     return (
                       <tr key={b.id} className="border-b border-border/30 last:border-b-0">
                         <td className="py-1 pr-2">
@@ -213,12 +218,18 @@ function AvailableCallsSection({
                         <td className="text-right py-1 pl-2">
                           {fmt2(mkt * 100 * b.quantity)} {b.currency}
                         </td>
+                        <td className={`text-right py-1 pl-2 ${potentialGainLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {potentialGainLoss >= 0 ? '+' : ''}{fmt2(potentialGainLoss)} {b.currency}
+                        </td>
                       </tr>
                     );
                   })}
                   <tr className="font-semibold">
-                    <td className="py-1 pr-2" colSpan={4}>Premio complessivo da rivendita (netting intrinseco mancante)</td>
+                    <td className="py-1 pr-2" colSpan={4}>Premio complessivo da rivendita</td>
                     <td className="text-right py-1 pl-2">{fmt2(totalMarketPremium)}</td>
+                    <td className={`text-right py-1 pl-2 ${totalPotentialGainLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {totalPotentialGainLoss >= 0 ? '+' : ''}{fmt2(totalPotentialGainLoss)}
+                    </td>
                   </tr>
                 </tbody>
               </table>

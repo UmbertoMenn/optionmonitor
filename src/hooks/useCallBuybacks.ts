@@ -24,15 +24,16 @@ export interface CallBuybackRow {
  * Riacquisti di call CC/DR-CC ancora aperti (quantità > 0).
  * Il valore di mercato mostrato a video è 0 per le call scadute.
  */
-export function useCallBuybacks(portfolioId: string | null | undefined) {
+export function useCallBuybacks(portfolioIds: Array<string | null | undefined>) {
+  const validPortfolioIds = portfolioIds.filter((id): id is string => !!id);
   const { data: buybacks = [], isLoading } = useQuery({
-    queryKey: ['call-buybacks', portfolioId],
+    queryKey: ['call-buybacks', validPortfolioIds],
     queryFn: async (): Promise<CallBuybackRow[]> => {
-      if (!portfolioId) return [];
+      if (validPortfolioIds.length === 0) return [];
       const { data, error } = await supabase
         .from('call_buybacks' as never)
         .select('*')
-        .eq('portfolio_id', portfolioId)
+        .in('portfolio_id', validPortfolioIds)
         .gt('quantity', 0)
         .order('buyback_date', { ascending: false });
       if (error) {
@@ -41,7 +42,7 @@ export function useCallBuybacks(portfolioId: string | null | undefined) {
       }
       return (data || []) as unknown as CallBuybackRow[];
     },
-    enabled: !!portfolioId,
+    enabled: validPortfolioIds.length > 0,
     staleTime: 60_000,
   });
 
@@ -53,4 +54,12 @@ export function effectiveMarketPrice(row: CallBuybackRow, todayISO?: string): nu
   const today = todayISO || new Date().toISOString().split('T')[0];
   if (row.expiry_date < today) return 0;
   return row.market_price ?? 0;
+}
+
+/** Valore di mercato complessivo dei riacquisti aperti, convertito in EUR. */
+export function openCallBuybacksValueEUR(rows: CallBuybackRow[], todayISO?: string): number {
+  return rows.reduce((total, row) => {
+    const exchangeRate = row.exchange_rate > 0 ? row.exchange_rate : 1;
+    return total + (effectiveMarketPrice(row, todayISO) * 100 * row.quantity) / exchangeRate;
+  }, 0);
 }
