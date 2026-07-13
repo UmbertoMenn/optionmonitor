@@ -52,9 +52,9 @@ export function ViewModeSelector({
         <Switch
           checked={includeCallBuybacks}
           onCheckedChange={onIncludeCallBuybacksChange}
-          aria-label="Includi call riacquistate nel Netting Intrinseco B"
+          aria-label="Includi call riacquistate nel Netting Intrinseco (A e B)"
         />
-        Includi call riacquistate nel Netting Intrinseco B
+        Includi call riacquistate nel Netting Intrinseco (A e B)
       </label>
     </div>
   );

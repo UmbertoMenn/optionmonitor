@@ -234,7 +234,7 @@ function BuybackRow({
   }
 
   return (
-    <tr className={`border-b border-border/30 last:border-b-0 group ${!included ? 'opacity-40' : ''}`}>
+    <tr className={`border-b border-border/30 last:border-b-0 ${!included ? 'opacity-40' : ''}`}>
       <td className="py-1 pr-2">
         <Checkbox
           checked={included}
@@ -269,7 +269,7 @@ function BuybackRow({
           <button
             type="button"
             onClick={beginEdit}
-            className="p-0.5 rounded hover:bg-muted text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            className="p-0.5 rounded hover:bg-muted text-muted-foreground transition-colors"
             aria-label="Modifica riga"
           >
             <Pencil className="w-3 h-3" />
