@@ -18,7 +18,7 @@ import { Loader2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { parsePortfolioExcel } from '@/lib/excelParser';
-import { syncCostBasisStoreFromPositions, fetchCostBasisStore, positionBasisKey } from '@/lib/costBasisStore';
+import { syncCostBasisStoreFromPositions, fetchCostBasisStore, positionBasisKey, derivativeBasisKey } from '@/lib/costBasisStore';
 import { supabase } from '@/integrations/supabase/client';
 import { Position } from '@/types/portfolio';
 
@@ -41,11 +41,12 @@ export function PmcUploadDialog({
     try {
       const parsed = await parsePortfolioExcel(file);
       const withPmc = parsed.positions.filter(
-        p => (p.asset_type === 'stock' || p.asset_type === 'etf') && p.avg_cost != null && p.avg_cost > 0,
+        p => (p.asset_type === 'stock' || p.asset_type === 'etf' || p.asset_type === 'derivative')
+          && p.avg_cost != null && p.avg_cost > 0,
       );
       if (withPmc.length === 0) {
         toast.error('Nessun PMC trovato nel file', {
-          description: 'Il file non contiene prezzi medi di carico per azioni/ETF. Serve il vecchio file Excel del portafoglio.',
+          description: 'Il file non contiene prezzi medi di carico. Serve il vecchio file Excel del portafoglio.',
         });
         return;
       }
@@ -54,22 +55,34 @@ export function PmcUploadDialog({
       const { synced } = await syncCostBasisStoreFromPositions(portfolioId, parsed.positions);
 
       // 2. Applica subito alle posizioni correnti in DB (stessa chiave: ISIN
-      //    o chiave canonica del ticker)
+      //    /ticker canonico per azioni-ETF, sottostante+tipo+strike+scadenza
+      //    per le opzioni)
       const store = await fetchCostBasisStore(portfolioId);
       const { data: current } = await supabase
         .from('positions')
-        .select('id, isin, ticker, description, asset_type, quantity, current_price')
+        .select('id, isin, ticker, description, asset_type, quantity, current_price, underlying, option_type, strike_price, expiry_date')
         .eq('portfolio_id', portfolioId)
-        .in('asset_type', ['stock', 'etf']);
+        .in('asset_type', ['stock', 'etf', 'derivative']);
 
       let updated = 0;
-      for (const pos of (current || []) as unknown as Pick<Position, 'id' | 'isin' | 'ticker' | 'description' | 'asset_type' | 'quantity' | 'current_price'>[]) {
-        const row = store.get(positionBasisKey(pos));
+      for (const pos of (current || []) as unknown as Pick<Position, 'id' | 'isin' | 'ticker' | 'description' | 'asset_type' | 'quantity' | 'current_price' | 'underlying' | 'option_type' | 'strike_price' | 'expiry_date'>[]) {
+        const key = pos.asset_type === 'derivative' ? derivativeBasisKey(pos) : positionBasisKey(pos);
+        if (!key) continue;
+        const row = store.get(key);
         if (!row || !(row.pmc > 0)) continue;
         const patch: Record<string, unknown> = { avg_cost: row.pmc };
         if (pos.current_price != null && pos.quantity) {
-          patch.profit_loss = (pos.current_price - row.pmc) * pos.quantity;
-          patch.profit_loss_pct = row.pmc !== 0 ? ((pos.current_price - row.pmc) / row.pmc) * 100 : null;
+          if (pos.asset_type === 'derivative') {
+            // Quantità firmata (short negative): (prezzo − premio medio) × qtà × 100
+            const pl = (pos.current_price - row.pmc) * pos.quantity * 100;
+            patch.profit_loss = pl;
+            patch.profit_loss_pct = row.pmc !== 0
+              ? (pl / (Math.abs(pos.quantity) * 100 * row.pmc)) * 100
+              : null;
+          } else {
+            patch.profit_loss = (pos.current_price - row.pmc) * pos.quantity;
+            patch.profit_loss_pct = row.pmc !== 0 ? ((pos.current_price - row.pmc) / row.pmc) * 100 : null;
+          }
         }
         const { error } = await supabase.from('positions').update(patch).eq('id', pos.id);
         if (!error) updated += 1;
@@ -101,7 +114,7 @@ export function PmcUploadDialog({
           <DialogDescription>
             I flussi CSV della banca non includono più il prezzo medio di carico.
             Carica il vecchio file Excel del portafoglio per impostare (o riallineare)
-            i PMC di azioni ed ETF. Dai successivi upload dei movimenti titoli il PMC
+            i PMC di azioni, ETF e opzioni aperte. Dai successivi upload dei movimenti titoli il PMC
             viene mantenuto aggiornato automaticamente: gli acquisti ricalcolano la
             media ponderata, le vendite riducono solo la quantità.
           </DialogDescription>
