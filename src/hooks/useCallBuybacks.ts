@@ -63,3 +63,12 @@ export function openCallBuybacksValueEUR(rows: CallBuybackRow[], todayISO?: stri
     return total + (effectiveMarketPrice(row, todayISO) * 100 * row.quantity) / exchangeRate;
   }, 0);
 }
+
+/** G/P potenziale complessivo (mercato − riacquisto) dei riacquisti aperti, convertito in EUR. */
+export function openCallBuybacksGainLossEUR(rows: CallBuybackRow[], todayISO?: string): number {
+  return rows.reduce((total, row) => {
+    const exchangeRate = row.exchange_rate > 0 ? row.exchange_rate : 1;
+    const gainLossPerShare = effectiveMarketPrice(row, todayISO) - row.buyback_price;
+    return total + (gainLossPerShare * 100 * row.quantity) / exchangeRate;
+  }, 0);
+}

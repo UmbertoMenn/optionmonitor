@@ -156,6 +156,11 @@ export function Dashboard() {
   }, [portfolio?.snapshot_date, historicalData, underlyingPrices]);
 
   const netting = useDerivativeNetting(positions, summary, overrides, frozenUnderlyingPrices, isAggregatedView, strategyConfigs);
+  // Il premio di mercato dei riacquisti aperti (call da rivendere) è patrimonio
+  // netting intrinseco mancante sia in vista A che in vista B: entrambe valutano
+  // le call vendute a intrinseco, quindi entrambe "perdono" il valore della call
+  // già ricomprata e non ancora rivenduta. Vanno corrette allo stesso modo.
+  const nettingIntrinsicA = netting.nettingIntrinsicA + (includeCallBuybacks ? callBuybacksValueEUR : 0);
   const nettingIntrinsicB = netting.nettingIntrinsicB + (includeCallBuybacks ? callBuybacksValueEUR : 0);
 
   // DEBUG diagnostico: confronto market value vs Netting Intrinseco (A) vs Netting Intrinseco (B).
@@ -367,7 +372,7 @@ export function Dashboard() {
             summary={summary} 
             portfolio={portfolio}
             nettingTotal={netting.nettingTotal}
-            nettingIntrinsicA={netting.nettingIntrinsicA}
+            nettingIntrinsicA={nettingIntrinsicA}
             nettingIntrinsicB={nettingIntrinsicB}
             viewMode={viewMode}
             historicalData={historicalData}
@@ -412,7 +417,7 @@ export function Dashboard() {
                     isLoading={isUpserting}
                     currentTotalValue={summary?.totalValue ?? 0}
                     currentNettingTotal={netting.nettingTotal}
-                    currentNettingIntrinsicA={netting.nettingIntrinsicA}
+                    currentNettingIntrinsicA={nettingIntrinsicA}
                     currentNettingIntrinsicB={nettingIntrinsicB}
                     currentEquityExposurePct={equityExposurePct}
                     currentUsdExposurePct={usdExposurePct}
@@ -464,7 +469,7 @@ export function Dashboard() {
             onViewModeChange={setViewMode}
             currentValue={
               viewMode === 'netting_total' ? netting.nettingTotal
-              : viewMode === 'netting_intrinsic_a' ? netting.nettingIntrinsicA
+              : viewMode === 'netting_intrinsic_a' ? nettingIntrinsicA
               : nettingIntrinsicB
             }
             currentDate={portfolio?.snapshot_date ?? null}

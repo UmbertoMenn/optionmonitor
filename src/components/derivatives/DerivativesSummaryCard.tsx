@@ -3,12 +3,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2, CheckCircle2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
-import { useCallBuybacks, effectiveMarketPrice, CallBuybackRow } from '@/hooks/useCallBuybacks';
+import { useCallBuybacks, effectiveMarketPrice, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow } from '@/hooks/useCallBuybacks';
 import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
@@ -122,6 +123,9 @@ function AvailableCallsSection({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { buybacks } = useCallBuybacks([portfolioId]);
+  // Riacquisti deselezionati dal totale mostrato in questa card (per id).
+  // Default: tutti inclusi, come nel comportamento precedente.
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
 
   // Mostra solo i riacquisti dei ticker presenti nella card (esclusi archiviati a monte)
   const visibleBuybacks = useMemo(() => {
@@ -133,6 +137,14 @@ function AvailableCallsSection({
     });
   }, [items, buybacks]);
 
+  const toggleExcluded = (id: string) => {
+    setExcludedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   if (items.length === 0) return null;
 
   const today = new Date().toISOString().split('T')[0];
@@ -142,12 +154,11 @@ function AvailableCallsSection({
   };
   const fmt2 = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const totalMarketPremium = visibleBuybacks.reduce(
-    (s, b) => s + effectiveMarketPrice(b, today) * 100 * b.quantity, 0,
-  );
-  const totalPotentialGainLoss = visibleBuybacks.reduce(
-    (s, b) => s + (effectiveMarketPrice(b, today) - b.buyback_price) * 100 * b.quantity, 0,
-  );
+  // Le call riacquistate possono essere in valute diverse tra loro: il totale
+  // va sempre convertito in EUR (mai sommato "a valuta mista" come prima).
+  const includedBuybacks = visibleBuybacks.filter(b => !excludedIds.has(b.id));
+  const totalMarketPremiumEUR = openCallBuybacksValueEUR(includedBuybacks, today);
+  const totalPotentialGainLossEUR = openCallBuybacksGainLossEUR(includedBuybacks, today);
 
   return (
     <div className="py-2 border-b border-border/50 last:border-b-0">
@@ -163,6 +174,11 @@ function AvailableCallsSection({
         <span className="text-xs text-muted-foreground">
           ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
         </span>
+        {includedBuybacks.length > 0 && (
+          <span className="text-xs font-semibold text-green-500">
+            € {fmt2(totalMarketPremiumEUR)}
+          </span>
+        )}
         <span className="text-xs text-muted-foreground ml-auto">
           {isExpanded ? '▲' : '▼'}
         </span>
@@ -187,6 +203,7 @@ function AvailableCallsSection({
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-muted-foreground border-b border-border/50">
+                    <th className="text-left py-1 pr-2 font-medium w-6"></th>
                     <th className="text-left py-1 pr-2 font-medium">Call riacquistata</th>
                     <th className="text-right py-1 px-2 font-medium">Qtà</th>
                     <th className="text-right py-1 px-2 font-medium">Prezzo riacquisto</th>
@@ -200,8 +217,19 @@ function AvailableCallsSection({
                     const expired = b.expiry_date < today;
                     const mkt = effectiveMarketPrice(b, today);
                     const potentialGainLoss = (mkt - b.buyback_price) * 100 * b.quantity;
+                    const excluded = excludedIds.has(b.id);
                     return (
-                      <tr key={b.id} className="border-b border-border/30 last:border-b-0">
+                      <tr
+                        key={b.id}
+                        className={`border-b border-border/30 last:border-b-0 ${excluded ? 'opacity-40' : ''}`}
+                      >
+                        <td className="py-1 pr-2">
+                          <Checkbox
+                            checked={!excluded}
+                            onCheckedChange={() => toggleExcluded(b.id)}
+                            aria-label={`Includi ${b.underlying} C ${b.strike} nel totale`}
+                          />
+                        </td>
                         <td className="py-1 pr-2">
                           {b.underlying} C {b.strike} {fmtDate(b.expiry_date)}
                           {expired && (
@@ -225,10 +253,10 @@ function AvailableCallsSection({
                     );
                   })}
                   <tr className="font-semibold">
-                    <td className="py-1 pr-2" colSpan={4}>Premio complessivo da rivendita</td>
-                    <td className="text-right py-1 pl-2">{fmt2(totalMarketPremium)}</td>
-                    <td className={`text-right py-1 pl-2 ${totalPotentialGainLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {totalPotentialGainLoss >= 0 ? '+' : ''}{fmt2(totalPotentialGainLoss)}
+                    <td className="py-1 pr-2" colSpan={5}>Premio complessivo da rivendita (selezionate, EUR)</td>
+                    <td className="text-right py-1 pl-2">€ {fmt2(totalMarketPremiumEUR)}</td>
+                    <td className={`text-right py-1 pl-2 ${totalPotentialGainLossEUR >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {totalPotentialGainLossEUR >= 0 ? '+' : ''}€ {fmt2(totalPotentialGainLossEUR)}
                     </td>
                   </tr>
                 </tbody>

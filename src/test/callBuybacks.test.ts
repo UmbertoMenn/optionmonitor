@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractCallBuybacks } from '@/lib/callBuybacks';
-import { CallBuybackRow, openCallBuybacksValueEUR } from '@/hooks/useCallBuybacks';
+import { CallBuybackRow, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR } from '@/hooks/useCallBuybacks';
 import { FlussiTitoliOptionTrade } from '@/lib/flussiCsvParser';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
 import { Position } from '@/types/portfolio';
@@ -112,6 +112,100 @@ describe('extractCallBuybacks', () => {
       } satisfies CallBuybackRow;
 
       expect(openCallBuybacksValueEUR([row], '2026-07-10')).toBe(0);
+    });
+  });
+
+  describe('openCallBuybacksGainLossEUR', () => {
+    it('converte il G/P potenziale (mercato - riacquisto) in EUR', () => {
+      const rows: CallBuybackRow[] = [{
+        id: 'buyback-1',
+        portfolio_id: 'pf1',
+        underlying: 'MU',
+        descriptor: 'MUQ6C1100',
+        strike: 1100,
+        expiry_date: '2026-08-21',
+        quantity: 2,
+        buyback_price: 45.5,
+        currency: 'USD',
+        exchange_rate: 1.25,
+        buyback_date: '2026-07-02',
+        market_price: 50,
+        market_price_updated_at: null,
+        resold_quantity: 0,
+        resell_price: null,
+        resell_date: null,
+      }];
+
+      // (50 - 45.5) * 100 * 2 / 1.25 = 720
+      expect(openCallBuybacksGainLossEUR(rows, '2026-07-10')).toBeCloseTo(720);
+    });
+
+    it('somma correttamente più riacquisti in valute diverse (nessun mix senza conversione)', () => {
+      const rows: CallBuybackRow[] = [
+        {
+          id: 'buyback-usd',
+          portfolio_id: 'pf1',
+          underlying: 'MU',
+          descriptor: 'MUQ6C1100',
+          strike: 1100,
+          expiry_date: '2026-08-21',
+          quantity: 1,
+          buyback_price: 40,
+          currency: 'USD',
+          exchange_rate: 1.25,
+          buyback_date: '2026-07-02',
+          market_price: 50,
+          market_price_updated_at: null,
+          resold_quantity: 0,
+          resell_price: null,
+          resell_date: null,
+        },
+        {
+          id: 'buyback-eur',
+          portfolio_id: 'pf1',
+          underlying: 'SAP',
+          descriptor: 'SAPQ6C200',
+          strike: 200,
+          expiry_date: '2026-08-21',
+          quantity: 1,
+          buyback_price: 10,
+          currency: 'EUR',
+          exchange_rate: 1,
+          buyback_date: '2026-07-02',
+          market_price: 15,
+          market_price_updated_at: null,
+          resold_quantity: 0,
+          resell_price: null,
+          resell_date: null,
+        },
+      ];
+
+      // USD: (50-40)*100*1/1.25 = 800; EUR: (15-10)*100*1/1 = 500 → 1300
+      expect(openCallBuybacksGainLossEUR(rows, '2026-07-10')).toBeCloseTo(1300);
+    });
+
+    it('esclude le call scadute dal G/P (valore di mercato effettivo 0)', () => {
+      const row = {
+        id: 'buyback-1',
+        portfolio_id: 'pf1',
+        underlying: 'MU',
+        descriptor: 'MUQ6C1100',
+        strike: 1100,
+        expiry_date: '2026-07-01',
+        quantity: 1,
+        buyback_price: 45.5,
+        currency: 'USD',
+        exchange_rate: 1,
+        buyback_date: '2026-06-02',
+        market_price: 50,
+        market_price_updated_at: null,
+        resold_quantity: 0,
+        resell_price: null,
+        resell_date: null,
+      } satisfies CallBuybackRow;
+
+      // scaduta → mercato effettivo 0 → G/P = (0 - 45.5) * 100 * 1 = -4550
+      expect(openCallBuybacksGainLossEUR([row], '2026-07-10')).toBeCloseTo(-4550);
     });
   });
 
