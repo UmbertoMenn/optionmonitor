@@ -59,6 +59,18 @@ export interface CallBuybackEditableFields {
   expiry_date?: string;
 }
 
+/** Dati per l'inserimento manuale di un riacquisto call (call da rivendere). */
+export interface ManualCallBuybackInput {
+  underlying: string;
+  strike: number;
+  expiry_date: string;
+  quantity: number;
+  buyback_price: number;
+  currency: string;
+  exchange_rate: number;
+  buyback_date: string;
+}
+
 /**
  * Mutazioni sui riacquisti call: toggle inclusione nel netting e modifica manuale
  * dei campi (prezzo di riacquisto, quantità, strike, scadenza). Ogni modifica ai
@@ -99,7 +111,34 @@ export function useCallBuybackMutations(portfolioIds: Array<string | null | unde
     onSuccess: invalidate,
   });
 
-  return { setIncluded, editFields };
+  const insertManual = useMutation({
+    mutationFn: async ({ portfolioId, row }: { portfolioId: string; row: ManualCallBuybackInput }) => {
+      // Descrittore sintetico stabile: evita collisioni con i descrittori banca
+      // e mantiene idempotenza sull'unica chiave (portfolio, descriptor, data).
+      const descriptor = `MAN-${row.underlying}-${row.strike}-${row.expiry_date}`.toUpperCase().replace(/\s+/g, '');
+      const insert = {
+        portfolio_id: portfolioId,
+        underlying: row.underlying,
+        descriptor,
+        strike: row.strike,
+        expiry_date: row.expiry_date,
+        quantity: row.quantity,
+        buyback_price: row.buyback_price,
+        currency: row.currency,
+        exchange_rate: row.exchange_rate > 0 ? row.exchange_rate : 1,
+        buyback_date: row.buyback_date,
+        manually_edited: true,
+        included_in_netting: true,
+      };
+      const { error } = await supabase
+        .from('call_buybacks' as never)
+        .insert(insert as never);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: invalidate,
+  });
+
+  return { setIncluded, editFields, insertManual };
 }
 
 /** Valore di mercato effettivo: 0 se la call è scaduta. */

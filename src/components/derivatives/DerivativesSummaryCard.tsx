@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Check, Pencil, Loader2, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Check, Pencil, Plus, Loader2, CheckCircle2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
-import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow, CallBuybackEditableFields } from '@/hooks/useCallBuybacks';
+import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow, CallBuybackEditableFields, ManualCallBuybackInput } from '@/hooks/useCallBuybacks';
+import { toast } from 'sonner';
 import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
@@ -281,6 +282,119 @@ function BuybackRow({
 }
 
 /**
+ * Form inline per inserire manualmente una call da rivendere (riacquisto).
+ * Il prezzo di mercato NON si inserisce qui: lo popola il cron opzioni
+ * (chiave OCC underlying+strike+scadenza). Il cambio è prefillato dalle
+ * posizioni della stessa valuta, editabile.
+ */
+function AddBuybackForm({
+  tickerOptions,
+  currencyRates,
+  onSubmit,
+  onCancel,
+}: {
+  tickerOptions: string[];
+  currencyRates: Record<string, number>;
+  onSubmit: (row: ManualCallBuybackInput) => void;
+  onCancel: () => void;
+}) {
+  const today = new Date().toISOString().split('T')[0];
+  const [underlying, setUnderlying] = useState(tickerOptions[0] ?? '');
+  const [strike, setStrike] = useState('');
+  const [expiry, setExpiry] = useState('');
+  const [quantity, setQuantity] = useState('1');
+  const [buybackPrice, setBuybackPrice] = useState('');
+  const [currency, setCurrency] = useState('USD');
+  const [exchangeRate, setExchangeRate] = useState(String(currencyRates['USD'] ?? 1));
+  const [buybackDate, setBuybackDate] = useState(today);
+
+  const onCurrencyChange = (c: string) => {
+    setCurrency(c);
+    if (currencyRates[c]) setExchangeRate(String(currencyRates[c]));
+  };
+
+  const submit = () => {
+    const stk = parseFloat(strike.replace(',', '.'));
+    const qty = parseInt(quantity, 10);
+    const bp = parseFloat(buybackPrice.replace(',', '.'));
+    const fx = parseFloat(exchangeRate.replace(',', '.'));
+    if (!underlying.trim()) return toast.error('Sottostante mancante');
+    if (!Number.isFinite(stk) || stk <= 0) return toast.error('Strike non valido');
+    if (!expiry) return toast.error('Scadenza mancante');
+    if (!Number.isFinite(qty) || qty <= 0) return toast.error('Quantità non valida');
+    if (!Number.isFinite(bp) || bp < 0) return toast.error('Prezzo di riacquisto non valido');
+    onSubmit({
+      underlying: underlying.trim().toUpperCase(),
+      strike: stk,
+      expiry_date: expiry,
+      quantity: qty,
+      buyback_price: bp,
+      currency: currency.trim().toUpperCase() || 'USD',
+      exchange_rate: Number.isFinite(fx) && fx > 0 ? fx : 1,
+      buyback_date: buybackDate,
+    });
+  };
+
+  return (
+    <div className="rounded border border-green-500/30 bg-green-500/5 p-2 space-y-2">
+      <div className="text-xs font-semibold text-foreground">Nuova call da rivendere</div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Sottostante
+          <Input
+            list="buyback-ticker-list"
+            value={underlying}
+            onChange={e => setUnderlying(e.target.value)}
+            className="h-7 text-xs px-1.5"
+            placeholder="Es. BABA"
+          />
+          <datalist id="buyback-ticker-list">
+            {tickerOptions.map(t => <option key={t} value={t} />)}
+          </datalist>
+        </label>
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Strike
+          <Input value={strike} onChange={e => setStrike(e.target.value)} className="h-7 text-xs px-1.5" inputMode="decimal" placeholder="140" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Scadenza
+          <Input type="date" value={expiry} onChange={e => setExpiry(e.target.value)} className="h-7 text-xs px-1.5" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Quantità (contratti)
+          <Input value={quantity} onChange={e => setQuantity(e.target.value)} className="h-7 text-xs px-1.5" inputMode="numeric" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Prezzo riacquisto
+          <Input value={buybackPrice} onChange={e => setBuybackPrice(e.target.value)} className="h-7 text-xs px-1.5" inputMode="decimal" placeholder="4,55" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Valuta
+          <Input value={currency} onChange={e => onCurrencyChange(e.target.value.toUpperCase())} className="h-7 text-xs px-1.5" placeholder="USD" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Cambio (→EUR)
+          <Input value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="h-7 text-xs px-1.5" inputMode="decimal" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
+          Data riacquisto
+          <Input type="date" value={buybackDate} onChange={e => setBuybackDate(e.target.value)} className="h-7 text-xs px-1.5" />
+        </label>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onCancel}>Annulla</Button>
+        <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={submit}>
+          <Check className="w-3.5 h-3.5 mr-1" /> Salva
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        Il prezzo di mercato viene aggiornato automaticamente dal cron opzioni (chiave sottostante + strike + scadenza).
+      </p>
+    </div>
+  );
+}
+
+/**
  * Sezione "Covered Call da rivendere" con tabella espandibile dei riacquisti:
  * per ogni call ricomprata (e non ancora rivenduta) mostra prezzo di
  * riacquisto e prezzo di mercato corrente (0 se scaduta). Il premio di
@@ -291,13 +405,28 @@ function BuybackRow({
 function AvailableCallsSection({
   items,
   portfolioId,
+  allPositions,
 }: {
   items: { ticker: string; availableContracts: number }[];
   portfolioId: string | null | undefined;
+  allPositions: Position[];
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
   const { buybacks } = useCallBuybacks([portfolioId]);
-  const { setIncluded, editFields } = useCallBuybackMutations([portfolioId]);
+  const { setIncluded, editFields, insertManual } = useCallBuybackMutations([portfolioId]);
+
+  // Cambio (→EUR) per valuta, ricavato dalle posizioni correnti: serve a
+  // prefillare il form di inserimento manuale in modo coerente col netting.
+  const currencyRates = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const p of allPositions) {
+      if (p.currency && p.exchange_rate && p.exchange_rate > 0) {
+        map[p.currency.toUpperCase()] = p.exchange_rate;
+      }
+    }
+    return map;
+  }, [allPositions]);
 
   // Mostra solo i riacquisti dei ticker presenti nella card (esclusi archiviati a monte)
   const visibleBuybacks = useMemo(() => {
@@ -317,6 +446,27 @@ function AvailableCallsSection({
     return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
   };
   const fmt2 = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const handleInsert = (row: ManualCallBuybackInput) => {
+    if (!portfolioId) return;
+    insertManual.mutate(
+      { portfolioId, row },
+      {
+        onSuccess: () => {
+          toast.success('Call da rivendere aggiunta', { description: `${row.underlying} C ${row.strike}` });
+          setShowAddForm(false);
+        },
+        onError: (e: unknown) => {
+          const msg = e instanceof Error ? e.message : 'errore sconosciuto';
+          toast.error('Inserimento non riuscito', {
+            description: /duplicate key|unique/i.test(msg)
+              ? 'Esiste già un riacquisto per questo sottostante/strike/scadenza nella stessa data.'
+              : msg,
+          });
+        },
+      },
+    );
+  };
 
   // Totali: solo righe con included_in_netting != false, sempre in EUR (le
   // funzioni pure filtrano già per inclusione).
@@ -361,6 +511,34 @@ function AvailableCallsSection({
               </Badge>
             ))}
           </div>
+
+          {/* Pulsante sempre visibile per inserire una call da rivendere a mano */}
+          {!showAddForm && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs border-green-500/40 text-green-600 hover:bg-green-500/10"
+              onClick={() => setShowAddForm(true)}
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" /> Aggiungi call da rivendere
+            </Button>
+          )}
+
+          {showAddForm && (
+            <AddBuybackForm
+              tickerOptions={items.map(i => i.ticker)}
+              currencyRates={currencyRates}
+              onSubmit={handleInsert}
+              onCancel={() => setShowAddForm(false)}
+            />
+          )}
+
+          {visibleBuybacks.length === 0 && !showAddForm && (
+            <p className="text-xs text-muted-foreground">
+              Nessuna call riacquistata registrata. Usa "Aggiungi call da rivendere" per inserirne una,
+              oppure carica un file Movimenti Titoli.
+            </p>
+          )}
 
           {visibleBuybacks.length > 0 && (
             <div className="overflow-x-auto">
@@ -650,6 +828,7 @@ export function DerivativesSummaryCard({
           <AvailableCallsSection
             items={monitoring.availableCallsToSell}
             portfolioId={selectedPortfolioId}
+            allPositions={allPositions}
           />
         </CardContent>
       </Card>
