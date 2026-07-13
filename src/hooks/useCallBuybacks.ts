@@ -138,7 +138,18 @@ export function useCallBuybackMutations(portfolioIds: Array<string | null | unde
     onSuccess: invalidate,
   });
 
-  return { setIncluded, editFields, insertManual };
+  const remove = useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const { error } = await supabase
+        .from('call_buybacks' as never)
+        .delete()
+        .eq('id', id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: invalidate,
+  });
+
+  return { setIncluded, editFields, insertManual, remove };
 }
 
 /** Valore di mercato effettivo: 0 se la call è scaduta. */

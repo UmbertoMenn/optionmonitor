@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Check, Pencil, Plus, Loader2, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Check, Pencil, Plus, Trash2, Loader2, CheckCircle2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
@@ -124,6 +124,7 @@ function BuybackRow({
   included,
   onToggleIncluded,
   onSaveFields,
+  onDelete,
   fmt2,
   fmtDate,
 }: {
@@ -132,6 +133,7 @@ function BuybackRow({
   included: boolean;
   onToggleIncluded: (included: boolean) => void;
   onSaveFields: (fields: CallBuybackEditableFields) => void;
+  onDelete: () => void;
   fmt2: (n: number) => string;
   fmtDate: (iso: string) => string;
 }) {
@@ -301,6 +303,14 @@ function BuybackRow({
             aria-label="Modifica riga"
           >
             <Pencil className="w-3 h-3" />
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-0.5 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
+            aria-label="Elimina call da rivendere"
+          >
+            <Trash2 className="w-3 h-3" />
           </button>
         </div>
       </td>
@@ -484,7 +494,7 @@ function AvailableCallsSection({
   const [isExpanded, setIsExpanded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const { buybacks } = useCallBuybacks([portfolioId]);
-  const { setIncluded, editFields, insertManual } = useCallBuybackMutations([portfolioId]);
+  const { setIncluded, editFields, insertManual, remove } = useCallBuybackMutations([portfolioId]);
 
   // Meta per sottostante (valuta + cambio→EUR) ricavata dalle posizioni:
   // serve a derivare automaticamente valuta e cambio nel form, senza digitarli.
@@ -544,6 +554,20 @@ function AvailableCallsSection({
               : msg,
           });
         },
+      },
+    );
+  };
+
+  const handleDelete = (b: CallBuybackRow) => {
+    if (typeof window !== 'undefined' &&
+        !window.confirm(`Eliminare la call da rivendere ${b.underlying} C ${b.strike}?`)) return;
+    remove.mutate(
+      { id: b.id },
+      {
+        onSuccess: () => toast.success('Call da rivendere eliminata', { description: `${b.underlying} C ${b.strike}` }),
+        onError: (e: unknown) => toast.error('Eliminazione non riuscita', {
+          description: e instanceof Error ? e.message : 'errore sconosciuto',
+        }),
       },
     );
   };
@@ -643,6 +667,7 @@ function AvailableCallsSection({
                       included={b.included_in_netting !== false}
                       onToggleIncluded={(included) => setIncluded.mutate({ id: b.id, included })}
                       onSaveFields={(fields) => editFields.mutate({ id: b.id, fields })}
+                      onDelete={() => handleDelete(b)}
                       fmt2={fmt2}
                       fmtDate={fmtDate}
                     />
