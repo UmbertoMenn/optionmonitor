@@ -86,6 +86,8 @@ describe('extractCallBuybacks', () => {
         resold_quantity: 0,
         resell_price: null,
         resell_date: null,
+        included_in_netting: true,
+        manually_edited: false,
       }];
 
       expect(openCallBuybacksValueEUR(rows, '2026-07-10')).toBe(8000);
@@ -109,6 +111,8 @@ describe('extractCallBuybacks', () => {
         resold_quantity: 0,
         resell_price: null,
         resell_date: null,
+        included_in_netting: true,
+        manually_edited: false,
       } satisfies CallBuybackRow;
 
       expect(openCallBuybacksValueEUR([row], '2026-07-10')).toBe(0);
@@ -134,6 +138,8 @@ describe('extractCallBuybacks', () => {
         resold_quantity: 0,
         resell_price: null,
         resell_date: null,
+        included_in_netting: true,
+        manually_edited: false,
       }];
 
       // (50 - 45.5) * 100 * 2 / 1.25 = 720
@@ -159,6 +165,8 @@ describe('extractCallBuybacks', () => {
           resold_quantity: 0,
           resell_price: null,
           resell_date: null,
+          included_in_netting: true,
+          manually_edited: false,
         },
         {
           id: 'buyback-eur',
@@ -177,6 +185,8 @@ describe('extractCallBuybacks', () => {
           resold_quantity: 0,
           resell_price: null,
           resell_date: null,
+          included_in_netting: true,
+          manually_edited: false,
         },
       ];
 
@@ -202,10 +212,49 @@ describe('extractCallBuybacks', () => {
         resold_quantity: 0,
         resell_price: null,
         resell_date: null,
+        included_in_netting: true,
+        manually_edited: false,
       } satisfies CallBuybackRow;
 
       // scaduta → mercato effettivo 0 → G/P = (0 - 45.5) * 100 * 1 = -4550
       expect(openCallBuybacksGainLossEUR([row], '2026-07-10')).toBeCloseTo(-4550);
+    });
+  });
+
+  describe('included_in_netting: la deselezione esclude la riga dai totali', () => {
+    const base = {
+      id: 'b1',
+      portfolio_id: 'pf1',
+      underlying: 'MU',
+      descriptor: 'MUQ6C1100',
+      strike: 1100,
+      expiry_date: '2026-08-21',
+      quantity: 1,
+      buyback_price: 40,
+      currency: 'USD',
+      exchange_rate: 1,
+      buyback_date: '2026-07-02',
+      market_price: 50,
+      market_price_updated_at: null,
+      resold_quantity: 0,
+      resell_price: null,
+      resell_date: null,
+      manually_edited: false,
+    };
+
+    it('una riga esclusa non contribuisce né al premio né al G/P', () => {
+      const included = { ...base, id: 'in', included_in_netting: true } satisfies CallBuybackRow;
+      const excluded = { ...base, id: 'out', included_in_netting: false } satisfies CallBuybackRow;
+
+      // Solo la riga inclusa conta: valore mercato 50*100*1/1 = 5000; G/P (50-40)*100 = 1000
+      expect(openCallBuybacksValueEUR([included, excluded], '2026-07-10')).toBeCloseTo(5000);
+      expect(openCallBuybacksGainLossEUR([included, excluded], '2026-07-10')).toBeCloseTo(1000);
+    });
+
+    it('tutte escluse → totali a zero', () => {
+      const excluded = { ...base, included_in_netting: false } satisfies CallBuybackRow;
+      expect(openCallBuybacksValueEUR([excluded], '2026-07-10')).toBe(0);
+      expect(openCallBuybacksGainLossEUR([excluded], '2026-07-10')).toBe(0);
     });
   });
 

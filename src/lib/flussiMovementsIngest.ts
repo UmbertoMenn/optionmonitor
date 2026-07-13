@@ -90,7 +90,7 @@ export interface TitoliIngestResult {
 async function applyResell(portfolioId: string, resell: CallResell): Promise<number> {
   const { data: open, error } = await supabase
     .from('call_buybacks' as never)
-    .select('id, quantity, resold_quantity')
+    .select('id, quantity, resold_quantity, manually_edited')
     .eq('portfolio_id', portfolioId)
     .eq('descriptor', resell.descriptor)
     .gt('quantity', 0)
@@ -102,8 +102,11 @@ async function applyResell(portfolioId: string, resell: CallResell): Promise<num
 
   let remaining = resell.quantity;
   let applied = 0;
-  for (const row of (open || []) as unknown as { id: string; quantity: number; resold_quantity: number }[]) {
+  for (const row of (open || []) as unknown as { id: string; quantity: number; resold_quantity: number; manually_edited?: boolean }[]) {
     if (remaining <= 0) break;
+    // Le righe corrette a mano non vengono toccate dal CSV: il titolare le
+    // gestisce manualmente (incluso ridurre la quantità dopo una rivendita).
+    if (row.manually_edited) continue;
     const take = Math.min(row.quantity, remaining);
     const { error: updErr } = await supabase
       .from('call_buybacks' as never)
@@ -146,23 +149,44 @@ export async function ingestTitoliTrades(
 
   let buybacksUpserted = 0;
   if (buybacks.length > 0) {
-    const rows = buybacks.map(b => ({
-      portfolio_id: portfolioId,
-      underlying: b.underlying,
-      descriptor: b.descriptor,
-      strike: b.strike,
-      expiry_date: b.expiry_date,
-      quantity: b.quantity,
-      buyback_price: b.buyback_price,
-      currency: b.currency,
-      exchange_rate: b.exchange_rate,
-      buyback_date: b.buyback_date,
-    }));
-    const { error } = await supabase
+    // Le righe già corrette a mano dal titolare (manually_edited = true) sono
+    // canoniche: strike/scadenza/quantità/prezzo di riacquisto non vengono più
+    // toccati dal CSV. Vengono sovrascritte solo le righe ancora "automatiche".
+    // Chiave di conflitto: (portfolio_id, descriptor, buyback_date).
+    const { data: existingManual, error: manualErr } = await supabase
       .from('call_buybacks' as never)
-      .upsert(rows as never[], { onConflict: 'portfolio_id,descriptor,buyback_date' });
-    if (error) throw new Error(`Errore salvataggio riacquisti call: ${error.message}`);
-    buybacksUpserted = rows.length;
+      .select('descriptor, buyback_date, manually_edited')
+      .eq('portfolio_id', portfolioId)
+      .eq('manually_edited', true);
+    if (manualErr) {
+      console.error('[flussiIngest] lettura buyback manuali fallita:', manualErr.message);
+    }
+    const manualKeys = new Set(
+      ((existingManual || []) as unknown as { descriptor: string; buyback_date: string }[])
+        .map(r => `${r.descriptor}|${r.buyback_date}`),
+    );
+
+    const rows = buybacks
+      .filter(b => !manualKeys.has(`${b.descriptor}|${b.buyback_date}`))
+      .map(b => ({
+        portfolio_id: portfolioId,
+        underlying: b.underlying,
+        descriptor: b.descriptor,
+        strike: b.strike,
+        expiry_date: b.expiry_date,
+        quantity: b.quantity,
+        buyback_price: b.buyback_price,
+        currency: b.currency,
+        exchange_rate: b.exchange_rate,
+        buyback_date: b.buyback_date,
+      }));
+    if (rows.length > 0) {
+      const { error } = await supabase
+        .from('call_buybacks' as never)
+        .upsert(rows as never[], { onConflict: 'portfolio_id,descriptor,buyback_date' });
+      if (error) throw new Error(`Errore salvataggio riacquisti call: ${error.message}`);
+      buybacksUpserted = rows.length;
+    }
   }
 
   let resellsApplied = 0;

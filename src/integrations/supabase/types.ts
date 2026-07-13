@@ -294,6 +294,8 @@ export type Database = {
           exchange_rate: number
           expiry_date: string
           id: string
+          included_in_netting: boolean
+          manually_edited: boolean
           market_price: number | null
           market_price_updated_at: string | null
           portfolio_id: string
@@ -314,6 +316,8 @@ export type Database = {
           exchange_rate?: number
           expiry_date: string
           id?: string
+          included_in_netting?: boolean
+          manually_edited?: boolean
           market_price?: number | null
           market_price_updated_at?: string | null
           portfolio_id: string
@@ -334,6 +338,8 @@ export type Database = {
           exchange_rate?: number
           expiry_date?: string
           id?: string
+          included_in_netting?: boolean
+          manually_edited?: boolean
           market_price?: number | null
           market_price_updated_at?: string | null
           portfolio_id?: string

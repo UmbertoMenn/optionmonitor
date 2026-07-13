@@ -4,12 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Loader2, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Target, Layers, CircleDollarSign, Rocket, Puzzle, TrendingUp, Newspaper, Settings, Info, AlertCircle, XCircle, CheckCheck, Check, Pencil, Loader2, CheckCircle2 } from 'lucide-react';
 import { Position } from '@/types/portfolio';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
 import { DerivativeCategories, normalizeForMatching, getCanonicalKey } from '@/lib/derivativeStrategies';
-import { useCallBuybacks, effectiveMarketPrice, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow } from '@/hooks/useCallBuybacks';
+import { useCallBuybacks, useCallBuybackMutations, effectiveMarketPrice, openCallBuybacksValueEUR, openCallBuybacksGainLossEUR, CallBuybackRow, CallBuybackEditableFields } from '@/hooks/useCallBuybacks';
 import { useAlerts, useUnreadAlertsCount, useMarkAlertAsRead, useMarkAllAlertsAsRead, useDeleteAlert } from '@/hooks/useAlerts';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { AlertSettingsDialog } from './AlertSettingsDialog';
@@ -109,10 +110,183 @@ function CompactSection({
 }
 
 /**
+ * Riga editabile di un riacquisto call. In lettura mostra i valori; con la
+ * matita entra in modifica su prezzo di riacquisto, quantità, strike, scadenza.
+ * Il salvataggio marca la riga come manually_edited (il CSV non la sovrascrive
+ * più). Il prezzo di mercato resta gestito dal cron.
+ */
+function BuybackRow({
+  b,
+  today,
+  included,
+  onToggleIncluded,
+  onSaveFields,
+  fmt2,
+  fmtDate,
+}: {
+  b: CallBuybackRow;
+  today: string;
+  included: boolean;
+  onToggleIncluded: (included: boolean) => void;
+  onSaveFields: (fields: CallBuybackEditableFields) => void;
+  fmt2: (n: number) => string;
+  fmtDate: (iso: string) => string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [buybackPrice, setBuybackPrice] = useState(String(b.buyback_price));
+  const [quantity, setQuantity] = useState(String(b.quantity));
+  const [strike, setStrike] = useState(String(b.strike));
+  const [expiry, setExpiry] = useState(b.expiry_date);
+
+  const beginEdit = () => {
+    setBuybackPrice(String(b.buyback_price));
+    setQuantity(String(b.quantity));
+    setStrike(String(b.strike));
+    setExpiry(b.expiry_date);
+    setEditing(true);
+  };
+
+  const save = () => {
+    const bp = parseFloat(buybackPrice.replace(',', '.'));
+    const qty = parseInt(quantity, 10);
+    const stk = parseFloat(strike.replace(',', '.'));
+    const fields: CallBuybackEditableFields = {};
+    if (Number.isFinite(bp) && bp !== b.buyback_price) fields.buyback_price = bp;
+    if (Number.isFinite(qty) && qty > 0 && qty !== b.quantity) fields.quantity = qty;
+    if (Number.isFinite(stk) && stk > 0 && stk !== b.strike) fields.strike = stk;
+    if (expiry && expiry !== b.expiry_date) fields.expiry_date = expiry;
+    if (Object.keys(fields).length > 0) onSaveFields(fields);
+    setEditing(false);
+  };
+
+  const expired = b.expiry_date < today;
+  const mkt = effectiveMarketPrice(b, today);
+  const potentialGainLoss = (mkt - b.buyback_price) * 100 * b.quantity;
+
+  if (editing) {
+    return (
+      <tr className="border-b border-border/30 last:border-b-0 bg-muted/20">
+        <td className="py-1 pr-2">
+          <Checkbox checked={included} disabled aria-label="Inclusione (bloccata in modifica)" />
+        </td>
+        <td className="py-1 pr-2">
+          <div className="flex items-center gap-1">
+            <span className="text-muted-foreground">{b.underlying} C</span>
+            <Input
+              value={strike}
+              onChange={e => setStrike(e.target.value)}
+              className="h-6 w-16 text-xs px-1"
+              inputMode="decimal"
+              aria-label="Strike"
+            />
+            <Input
+              type="date"
+              value={expiry}
+              onChange={e => setExpiry(e.target.value)}
+              className="h-6 w-32 text-xs px-1"
+              aria-label="Scadenza"
+            />
+          </div>
+        </td>
+        <td className="text-right py-1 px-2">
+          <Input
+            value={quantity}
+            onChange={e => setQuantity(e.target.value)}
+            className="h-6 w-14 text-xs px-1 text-right ml-auto"
+            inputMode="numeric"
+            aria-label="Quantità"
+          />
+        </td>
+        <td className="text-right py-1 px-2">
+          <Input
+            value={buybackPrice}
+            onChange={e => setBuybackPrice(e.target.value)}
+            className="h-6 w-20 text-xs px-1 text-right ml-auto"
+            inputMode="decimal"
+            aria-label="Prezzo riacquisto"
+          />
+        </td>
+        <td className="text-right py-1 px-2 text-muted-foreground">
+          {expired ? `0,00 ${b.currency}` : (b.market_price != null ? `${fmt2(mkt)} ${b.currency}` : '—')}
+        </td>
+        <td className="py-1 pl-2" colSpan={2}>
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={save}
+              className="p-1 rounded hover:bg-green-500/20 text-green-500"
+              aria-label="Salva modifiche"
+            >
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="p-1 rounded hover:bg-red-500/20 text-red-500"
+              aria-label="Annulla modifiche"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className={`border-b border-border/30 last:border-b-0 group ${!included ? 'opacity-40' : ''}`}>
+      <td className="py-1 pr-2">
+        <Checkbox
+          checked={included}
+          onCheckedChange={val => onToggleIncluded(val === true)}
+          aria-label={`Includi ${b.underlying} C ${b.strike} nel totale`}
+        />
+      </td>
+      <td className="py-1 pr-2">
+        {b.underlying} C {b.strike} {fmtDate(b.expiry_date)}
+        {b.manually_edited && (
+          <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 h-4 bg-blue-500/10 border-blue-500/30 text-blue-400">
+            man.
+          </Badge>
+        )}
+        {expired && (
+          <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 h-4 bg-muted text-muted-foreground">
+            scaduta
+          </Badge>
+        )}
+      </td>
+      <td className="text-right py-1 px-2">{b.quantity}</td>
+      <td className="text-right py-1 px-2">{fmt2(b.buyback_price)} {b.currency}</td>
+      <td className="text-right py-1 px-2">
+        {expired ? `0,00 ${b.currency}` : (b.market_price != null ? `${fmt2(mkt)} ${b.currency}` : '—')}
+      </td>
+      <td className="text-right py-1 pl-2">
+        {fmt2(mkt * 100 * b.quantity)} {b.currency}
+      </td>
+      <td className={`text-right py-1 pl-2 ${potentialGainLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+        <div className="flex items-center justify-end gap-1.5">
+          <span>{potentialGainLoss >= 0 ? '+' : ''}{fmt2(potentialGainLoss)} {b.currency}</span>
+          <button
+            type="button"
+            onClick={beginEdit}
+            className="p-0.5 rounded hover:bg-muted text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            aria-label="Modifica riga"
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+/**
  * Sezione "Covered Call da rivendere" con tabella espandibile dei riacquisti:
  * per ogni call ricomprata (e non ancora rivenduta) mostra prezzo di
  * riacquisto e prezzo di mercato corrente (0 se scaduta). Il premio di
- * mercato complessivo è il patrimonio netting intrinseco mancante.
+ * mercato complessivo (solo righe selezionate, in EUR) è il patrimonio netting
+ * intrinseco mancante. La selezione (included_in_netting) è persistita e guida
+ * anche il totale sommato ai due netting quando il toggle globale è attivo.
  */
 function AvailableCallsSection({
   items,
@@ -123,9 +297,7 @@ function AvailableCallsSection({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { buybacks } = useCallBuybacks([portfolioId]);
-  // Riacquisti deselezionati dal totale mostrato in questa card (per id).
-  // Default: tutti inclusi, come nel comportamento precedente.
-  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const { setIncluded, editFields } = useCallBuybackMutations([portfolioId]);
 
   // Mostra solo i riacquisti dei ticker presenti nella card (esclusi archiviati a monte)
   const visibleBuybacks = useMemo(() => {
@@ -137,14 +309,6 @@ function AvailableCallsSection({
     });
   }, [items, buybacks]);
 
-  const toggleExcluded = (id: string) => {
-    setExcludedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
   if (items.length === 0) return null;
 
   const today = new Date().toISOString().split('T')[0];
@@ -154,11 +318,11 @@ function AvailableCallsSection({
   };
   const fmt2 = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Le call riacquistate possono essere in valute diverse tra loro: il totale
-  // va sempre convertito in EUR (mai sommato "a valuta mista" come prima).
-  const includedBuybacks = visibleBuybacks.filter(b => !excludedIds.has(b.id));
-  const totalMarketPremiumEUR = openCallBuybacksValueEUR(includedBuybacks, today);
-  const totalPotentialGainLossEUR = openCallBuybacksGainLossEUR(includedBuybacks, today);
+  // Totali: solo righe con included_in_netting != false, sempre in EUR (le
+  // funzioni pure filtrano già per inclusione).
+  const totalMarketPremiumEUR = openCallBuybacksValueEUR(visibleBuybacks, today);
+  const totalPotentialGainLossEUR = openCallBuybacksGainLossEUR(visibleBuybacks, today);
+  const hasIncluded = visibleBuybacks.some(b => b.included_in_netting !== false);
 
   return (
     <div className="py-2 border-b border-border/50 last:border-b-0">
@@ -174,7 +338,7 @@ function AvailableCallsSection({
         <span className="text-xs text-muted-foreground">
           ({items.length} {items.length === 1 ? 'elemento' : 'elementi'})
         </span>
-        {includedBuybacks.length > 0 && (
+        {hasIncluded && (
           <span className="text-xs font-semibold text-green-500">
             € {fmt2(totalMarketPremiumEUR)}
           </span>
@@ -213,45 +377,18 @@ function AvailableCallsSection({
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleBuybacks.map(b => {
-                    const expired = b.expiry_date < today;
-                    const mkt = effectiveMarketPrice(b, today);
-                    const potentialGainLoss = (mkt - b.buyback_price) * 100 * b.quantity;
-                    const excluded = excludedIds.has(b.id);
-                    return (
-                      <tr
-                        key={b.id}
-                        className={`border-b border-border/30 last:border-b-0 ${excluded ? 'opacity-40' : ''}`}
-                      >
-                        <td className="py-1 pr-2">
-                          <Checkbox
-                            checked={!excluded}
-                            onCheckedChange={() => toggleExcluded(b.id)}
-                            aria-label={`Includi ${b.underlying} C ${b.strike} nel totale`}
-                          />
-                        </td>
-                        <td className="py-1 pr-2">
-                          {b.underlying} C {b.strike} {fmtDate(b.expiry_date)}
-                          {expired && (
-                            <Badge variant="outline" className="ml-1.5 text-[10px] px-1 py-0 h-4 bg-muted text-muted-foreground">
-                              scaduta
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="text-right py-1 px-2">{b.quantity}</td>
-                        <td className="text-right py-1 px-2">{fmt2(b.buyback_price)} {b.currency}</td>
-                        <td className="text-right py-1 px-2">
-                          {expired ? `0,00 ${b.currency}` : (b.market_price != null ? `${fmt2(mkt)} ${b.currency}` : '—')}
-                        </td>
-                        <td className="text-right py-1 pl-2">
-                          {fmt2(mkt * 100 * b.quantity)} {b.currency}
-                        </td>
-                        <td className={`text-right py-1 pl-2 ${potentialGainLoss >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                          {potentialGainLoss >= 0 ? '+' : ''}{fmt2(potentialGainLoss)} {b.currency}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {visibleBuybacks.map(b => (
+                    <BuybackRow
+                      key={b.id}
+                      b={b}
+                      today={today}
+                      included={b.included_in_netting !== false}
+                      onToggleIncluded={(included) => setIncluded.mutate({ id: b.id, included })}
+                      onSaveFields={(fields) => editFields.mutate({ id: b.id, fields })}
+                      fmt2={fmt2}
+                      fmtDate={fmtDate}
+                    />
+                  ))}
                   <tr className="font-semibold">
                     <td className="py-1 pr-2" colSpan={5}>Premio complessivo da rivendita (selezionate, EUR)</td>
                     <td className="text-right py-1 pl-2">€ {fmt2(totalMarketPremiumEUR)}</td>
