@@ -162,3 +162,36 @@ describe('categorizeDerivatives — bug produzione: covered call col nome esteso
     )).toBe(false);
   });
 });
+
+describe('categorizeDerivatives — over-hedged covered call (copertura parziale, senza config)', () => {
+  it('3 call vendute su 200 azioni: 2 contratti in CC, 1 residuo altrove, premi pro-quota senza doppio conteggio', () => {
+    const aaplStock = stock('stk_aapl', 'APPLE INC', 'AAPL', 200);
+    const soldCall = opt({
+      underlying: 'AAPL', option_type: 'call', strike_price: 300,
+      expiry_date: '2026-12-18', quantity: -3, market_value: 300, profit_loss: -90,
+    });
+    const cats = categorizeDerivatives([soldCall], [aaplStock, soldCall], [], []);
+
+    // Porzione coperta: 2 contratti, valori pro-quota (2/3)
+    expect(cats.coveredCalls).toHaveLength(1);
+    const cc = cats.coveredCalls[0];
+    expect(cc.contractsCovered).toBe(2);
+    expect(cc.isFullyCovered).toBe(false);
+    expect(cc.option.quantity).toBe(-2);
+    expect(cc.option.market_value).toBeCloseTo(200, 6);
+    expect(cc.option.profit_loss).toBeCloseTo(-60, 6);
+
+    // La porzione eccedente (1 contratto) NON deve riapparire per intero:
+    // raccogliamo tutte le opzioni call vendute finite nelle altre categorie
+    // e verifichiamo che la somma dei contratti visibili sia 3 (2 CC + 1 residuo)
+    // e la somma dei market value sia quella della posizione originale (300).
+    const residuals = cats.otherStrategies
+      .map(o => o.option)
+      .filter(p => p && p.option_type === 'call' && (p.quantity ?? 0) < 0);
+    const residualContracts = residuals.reduce((s, p) => s + Math.abs(p.quantity), 0);
+    const residualMv = residuals.reduce((s, p) => s + (p.market_value ?? 0), 0);
+    expect(residualContracts).toBe(1);
+    expect(residualMv).toBeCloseTo(100, 6);
+    expect((cc.option.market_value ?? 0) + residualMv).toBeCloseTo(300, 6);
+  });
+});

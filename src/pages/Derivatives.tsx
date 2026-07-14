@@ -633,6 +633,13 @@ export function Derivatives() {
     if (justSavedRef.current) { justSavedRef.current = false; return; }
     if (autoReconcileRunningRef.current) return;
     if (isLoading || isConfigsLoading || wizardOpen) return;
+    // CRITICO: gli alias dinamici (underlying_mappings) devono essere caricati
+    // PRIMA di riconciliare. Con la mappa vuota, config legacy con underlying
+    // "Micron Technology Inc" e posizioni con underlying "MU" finiscono in
+    // gruppi distinti: l'auto-reconcile crea config duplicate col ticker senza
+    // chiudere le originali (hanno linked_stock), producendo riferimenti
+    // duplicati allo stesso stock base e slot persi nel wizard.
+    if (allMappings.isLoading || allMappings.isFetching) return;
     if (isHistoricalView) return; // vista storica: sola lettura, niente riparazioni
     // Gira anche SENZA item di riconciliazione: la Regola 0 (riparazione
     // covered call smarrite) opera sulle config esistenti. Serve però che
@@ -675,7 +682,7 @@ export function Derivatives() {
       .finally(() => {
         autoReconcileRunningRef.current = false;
       });
-  }, [reconciliationItems, isLoading, isConfigsLoading, isHistoricalView, wizardOpen, strategyConfigs, positions, underlyingPrices, dynamicAliases, handleSaveConfigs]);
+  }, [reconciliationItems, isLoading, isConfigsLoading, isHistoricalView, wizardOpen, strategyConfigs, positions, underlyingPrices, dynamicAliases, allMappings.isLoading, allMappings.isFetching, handleSaveConfigs]);
 
   // Auto-classificazione iniziale (Bug 1): quando non esistono configurazioni salvate,
   // classifica automaticamente i derivati senza richiedere il wizard manuale.

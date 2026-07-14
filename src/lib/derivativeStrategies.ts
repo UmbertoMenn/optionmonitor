@@ -1035,11 +1035,17 @@ function categorizeDerivativesImpl(
       
       if (contractsCovered > 0) {
         const sharesCovered = contractsCovered * 100;
+        const coveredRatio = contractsCovered / contractsSold;
+        const scaleBy = (value: number | null | undefined, ratio: number) =>
+          value == null ? value : value * ratio;
         
         coveredCalls.push({
           option: {
             ...call,
-            quantity: -contractsCovered
+            quantity: -contractsCovered,
+            market_value: scaleBy(call.market_value, coveredRatio),
+            snapshot_market_value: scaleBy(call.snapshot_market_value, coveredRatio),
+            profit_loss: scaleBy(call.profit_loss, coveredRatio),
           },
           underlying: underlyingStock,
           contractsCovered,
@@ -1047,7 +1053,26 @@ function categorizeDerivativesImpl(
           isFullyCovered: contractsCovered === contractsSold
         });
         
-        if (contractsCovered === contractsSold) usedDerivatives.add(call.id);
+        if (contractsCovered === contractsSold) {
+          usedDerivatives.add(call.id);
+        } else {
+          // Copertura parziale (over-hedged): solo la porzione ECCEDENTE deve
+          // proseguire negli step successivi. Sostituiamo la posizione
+          // nell'array locale con la quota residua (valori pro-quota), cosi'
+          // premio e P/L non vengono contati due volte tra "Covered Call" e
+          // le altre categorie.
+          const residualContracts = contractsSold - contractsCovered;
+          const residualRatio = residualContracts / contractsSold;
+          const residual: Position = {
+            ...call,
+            quantity: -residualContracts,
+            market_value: scaleBy(call.market_value, residualRatio) ?? null,
+            snapshot_market_value: scaleBy(call.snapshot_market_value, residualRatio) ?? null,
+            profit_loss: scaleBy(call.profit_loss, residualRatio) ?? null,
+          };
+          const idx = filteredDerivatives.indexOf(call);
+          if (idx !== -1) filteredDerivatives[idx] = residual;
+        }
       }
     }
   }

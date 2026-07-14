@@ -15,6 +15,8 @@ interface Position {
   asset_type: string;
   quantity: number;
   currency: string | null;
+  snapshot_price: number | null;
+  avg_cost: number | null;
 }
 
 interface PriceResult {
@@ -439,6 +441,38 @@ async function fetchYahooPrice(ticker: string): Promise<PriceResult | null> {
     };
   } catch (error) {
     console.error(`Error fetching price for ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Recupera l'eventuale split piu' recente (ultimi 6 mesi) dagli eventi Yahoo.
+// Usato per verificare che un salto di prezzo oltre soglia sia una corporate
+// action reale e non un dato errato.
+async function fetchRecentSplit(ticker: string): Promise<{ numerator: number; denominator: number; date: Date } | null> {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=6mo&events=splits`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const splits = data.chart?.result?.[0]?.events?.splits;
+    if (!splits) return null;
+    let latest: { numerator: number; denominator: number; date: Date } | null = null;
+    for (const key of Object.keys(splits)) {
+      const s = splits[key];
+      const numerator = Number(s?.numerator);
+      const denominator = Number(s?.denominator);
+      const ts = Number(s?.date ?? key) * 1000;
+      if (!numerator || !denominator || !Number.isFinite(ts) || ts <= 0) continue;
+      const date = new Date(ts);
+      if (!latest || date > latest.date) latest = { numerator, denominator, date };
+    }
+    return latest;
+  } catch (error) {
+    console.error(`Error fetching splits for ${ticker}:`, error);
     return null;
   }
 }
@@ -1084,7 +1118,7 @@ serve(async (req) => {
     // Fetch positions to update (Stocks, ETFs, Commodities only)
     const { data: positions, error: fetchError } = await supabase
       .from('positions')
-      .select('id, description, isin, ticker, current_price, asset_type, quantity, currency, portfolio_id')
+      .select('id, description, isin, ticker, current_price, asset_type, quantity, currency, portfolio_id, snapshot_price, avg_cost')
       .in('asset_type', ['stock', 'Stock']);
 
     if (fetchError) {
@@ -1130,6 +1164,65 @@ serve(async (req) => {
           const validation = validatePriceChange(position.current_price, priceData.price);
           
           if (!validation.valid) {
+            // Un salto oltre soglia puo' essere uno split reale: la posizione in DB
+            // (quantita' e prezzi) sarebbe ancora pre-split perche' arriva dall'ultimo
+            // upload banca. Verifichiamo con gli eventi split di Yahoo e, se il salto
+            // osservato e' compatibile col ratio, applichiamo l'adjust atomico
+            // (quantita' x ratio, prezzi / ratio) cosi' il market value resta corretto.
+            const split = await fetchRecentSplit(ticker);
+            const splitFactor = split ? split.numerator / split.denominator : null;
+            const observedRatio =
+              position.current_price && position.current_price > 0 && priceData.price > 0
+                ? position.current_price / priceData.price
+                : null;
+            const SPLIT_TOLERANCE = 0.15; // drift di mercato ammesso tra split e primo aggiornamento
+
+            if (
+              split &&
+              splitFactor &&
+              splitFactor !== 1 &&
+              observedRatio &&
+              Math.abs(observedRatio / splitFactor - 1) <= SPLIT_TOLERANCE
+            ) {
+              const newQuantity = position.quantity * splitFactor;
+              const exchangeRate = await getExchangeRateForCurrency(position.currency);
+              const newMarketValue = (priceData.price * newQuantity) / exchangeRate;
+              const updatePayload: Record<string, unknown> = {
+                quantity: newQuantity,
+                current_price: priceData.price,
+                market_value: newMarketValue,
+                exchange_rate: exchangeRate,
+                ticker: ticker,
+                updated_at: new Date().toISOString(),
+              };
+              // snapshot_market_value resta invariato per costruzione:
+              // (snapshot_price / f) * (quantity * f) = snapshot_price * quantity
+              if (position.snapshot_price != null) {
+                updatePayload.snapshot_price = position.snapshot_price / splitFactor;
+              }
+              if (position.avg_cost != null) {
+                updatePayload.avg_cost = position.avg_cost / splitFactor;
+              }
+
+              const { error: splitUpdateError } = await supabase
+                .from('positions')
+                .update(updatePayload)
+                .eq('id', position.id);
+
+              if (splitUpdateError) {
+                result.error = `Split adjust failed: ${splitUpdateError.message}`;
+              } else {
+                result.success = true;
+                result.newPrice = priceData.price;
+                console.log(
+                  `Split-adjusted ${position.description}: ${split.numerator}:${split.denominator} on ${split.date.toISOString().slice(0, 10)} ` +
+                  `(qty ${position.quantity} -> ${newQuantity}, price ${position.current_price} -> ${priceData.price})`
+                );
+              }
+              results.push(result);
+              return;
+            }
+
             result.error = validation.reason;
             console.warn(`Price validation failed for ${position.description}: ${validation.reason}`);
             results.push(result);
