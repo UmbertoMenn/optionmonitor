@@ -6,12 +6,12 @@ describe('parsePortfolioData exclusions', () => {
     const rows = [
       ['AZIONI ED ETF'],
       ['ISIN', 'DESCRIZIONE', 'DIVISA', 'QUANTITA', 'VALORIZZAZIONE EUR'],
-      ['US09075V1026', ' BION   ON ', 'USD', 10, 2704],
+      ['IT0005056236', ' BIO   ON ', 'EUR', 10, 2704],
       ['US0378331005', 'APPLE INC', 'USD', 10, 2000],
     ];
 
     const result = parsePortfolioData(rows, {
-      excludedPositionDescriptions: ['BION ON'],
+      excludedPositionDescriptions: ['BIO ON'],
     });
 
     expect(result.positions.map(position => position.description)).toEqual(['APPLE INC']);
@@ -21,12 +21,12 @@ describe('parsePortfolioData exclusions', () => {
     const rows = [
       ['AZIONI ED ETF'],
       ['ISIN', 'DESCRIZIONE', 'DIVISA', 'QUANTITA', 'VALORIZZAZIONE EUR'],
-      ['US09075V1026', 'BION BIOTECH CLASS A', 'USD', 10, 2704],
+      ['IT0005056236', 'BIO-ON SPA AZ ORD', 'EUR', 10, 2704],
       ['US0378331005', 'APPLE INC', 'USD', 10, 2000],
     ];
 
     const result = parsePortfolioData(rows, {
-      excludedPositionIsins: ['US09075V1026'],
+      excludedPositionIsins: ['IT0005056236'],
     });
 
     expect(result.positions.map(position => position.description)).toEqual(['APPLE INC']);

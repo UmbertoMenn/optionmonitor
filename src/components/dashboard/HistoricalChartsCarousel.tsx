@@ -22,18 +22,8 @@ import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTo
 import { PerformanceEvolutionChart } from './charts/PerformanceEvolutionChart';
 import { YearlyReturnChart } from './charts/YearlyReturnChart';
 import { PortfolioEvolutionChart } from './charts/PortfolioEvolutionChart';
-import { TrendingUp, BarChart3, LineChart, Wallet } from 'lucide-react';
+import { TrendingUp, BarChart3, LineChart } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatEUR } from '@/lib/formatters';
-
-export interface PatrimonyComponents {
-  liquidity: number;
-  stocks: number;
-  bonds: number;
-  gp: number;
-  derivatives: number;
-  total: number;
-}
 
 interface HistoricalChartsCarouselProps {
   historicalData: HistoricalDataEntry[];
@@ -42,7 +32,6 @@ interface HistoricalChartsCarouselProps {
   currentValue: number;
   currentDate: string | null;
   deposits: DepositEntry[];
-  patrimonyComponents?: PatrimonyComponents;
 }
 
 const VIEW_MODE_LABELS: Record<ViewMode, string> = {
@@ -66,13 +55,6 @@ const slides = [
   },
 ];
 
-const componentsSlide = {
-  id: 'components',
-  title: 'Componenti Patrimonio',
-  icon: Wallet,
-  description: 'Ripartizione del patrimonio per componente (Netting Totale)',
-};
-
 export function HistoricalChartsCarousel({
   historicalData,
   viewMode,
@@ -80,13 +62,11 @@ export function HistoricalChartsCarousel({
   currentValue,
   currentDate,
   deposits,
-  patrimonyComponents,
 }: HistoricalChartsCarouselProps) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
 
-  const showComponentsSlide = viewMode === 'netting_total' && !!patrimonyComponents;
-  const activeSlides = showComponentsSlide ? [...slides, componentsSlide] : slides;
+  const activeSlides = slides;
   const activeSlide = activeSlides[current] ?? activeSlides[0];
 
   const onSelect = useCallback(() => {
@@ -103,7 +83,7 @@ export function HistoricalChartsCarousel({
     };
   }, [api, onSelect]);
 
-  // Se la slide componenti scompare (cambio vista) mentre è selezionata, torna alla prima
+  // Guardia: se il numero di slide cambia mentre una slide rimossa è selezionata, torna alla prima
   useEffect(() => {
     if (!api) return;
     api.reInit();
@@ -188,39 +168,6 @@ export function HistoricalChartsCarousel({
                   />
                 </div>
               </CarouselItem>
-              {showComponentsSlide && patrimonyComponents && (
-                <CarouselItem>
-                  <div className="h-[250px] flex flex-col justify-center max-w-md mx-auto px-4">
-                    <div className="space-y-2">
-                      {[
-                        { label: 'Liquidità', value: patrimonyComponents.liquidity },
-                        { label: 'Azioni', value: patrimonyComponents.stocks },
-                        { label: 'Obbligazioni', value: patrimonyComponents.bonds },
-                        { label: 'GP (conto 08...)', value: patrimonyComponents.gp },
-                        { label: 'Derivati', value: patrimonyComponents.derivatives },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">{label}</span>
-                          <span
-                            className={cn(
-                              'font-mono font-medium tabular-nums',
-                              value < 0 && 'text-destructive'
-                            )}
-                          >
-                            {formatEUR(value)}
-                          </span>
-                        </div>
-                      ))}
-                      <div className="flex items-center justify-between text-sm border-t border-border pt-2 mt-2">
-                        <span className="font-semibold">Totale (Netting Totale)</span>
-                        <span className="font-mono font-semibold tabular-nums">
-                          {formatEUR(patrimonyComponents.total)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </CarouselItem>
-              )}
             </CarouselContent>
             <div className="flex items-center justify-center gap-4 mt-4">
               <CarouselPrevious className="static translate-y-0" />

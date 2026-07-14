@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseFlussiCsvText, detectFlussiCsvType, buildDepositCandidates, pairInternalTransfers, FlussiCashMovement } from '@/lib/flussiCsvParser';
+import { getPortfolioParseOptions } from '@/lib/portfolioUpload';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -136,16 +137,16 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(byType('derivative')).toHaveLength(3);
   });
 
-  it('esclude BION ON e BION ON SPA dalle posizioni e dalle holdings GP quando configurato', () => {
+  it('esclude BIO ON e BIO ON SPA dalle posizioni e dalle holdings GP quando configurato', () => {
     const csv = [
       'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
-      "01/07/2026;'03211;'02225971281;'010605;BION ON;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
-      "01/07/2026;'03211;'08H00012345;'010605; BION   ON ;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
-      "01/07/2026;'03211;'02225971281;'010605;BION ON SPA;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'02225971281;'010605;BIO ON;IT0005056236;EUR;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'08H00012345;'010605; BIO   ON ;IT0005056236;EUR;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'02225971281;'010605;BIO ON SPA;IT0005056236;EUR;0,0;10,0;2704,0;1,0;270,4;0,0;",
       "01/07/2026;'03211;'02225971281;'010696;APPLE INC;US0378331005;USD;0,0;10,0;2000,0;1,0;200,0;0,0;",
     ].join('\r\n');
     const res = parseFlussiCsvText(csv, {
-      excludedPositionDescriptions: ['BION ON', 'BION ON SPA'],
+      excludedPositionDescriptions: ['BIO ON', 'BIO ON SPA'],
     });
 
     expect(res.positions.map(position => position.description)).toEqual(['APPLE INC']);
@@ -153,14 +154,30 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(res.gpSnapshotPresent).toBe(true);
   });
 
+  it('esclude la riga reale "BIO ON SPA" con le opzioni risolte per silvias (regressione)', () => {
+    // Riga con descrizione e ISIN ESATTI del flusso banca di produzione:
+    // la config precedente ("BION ON SPA" / US09075V1026) non la matchava mai.
+    const csv = [
+      'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
+      "10/07/2026;'03211;'02225971281;'507788;BIO ON SPA;IT0005056236;EUR;0,0;875,0;48273,95;1,0;55,17;0,0;",
+      "10/07/2026;'03211;'02225971281;'010696;APPLE INC;US0378331005;USD;0,0;10,0;2000,0;1,0;200,0;0,0;",
+    ].join('\r\n');
+
+    const silviaOptions = getPortfolioParseOptions('silvia-id', 'silvias');
+    const res = parseFlussiCsvText(csv, silviaOptions);
+
+    expect(res.positions.map(position => position.description)).toEqual(['APPLE INC']);
+    expect(res.positionsSnapshotPresent).toBe(true);
+  });
+
   it('segnala la sorgente GP ed esclude per ISIN anche con descrizione variata', () => {
     const csv = [
       'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
-      "01/07/2026;'03211;'08H00012345;'010605;BION BIOTECH CLASS A;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'08H00012345;'010605;BIO-ON SPA AZ ORD;IT0005056236;EUR;0,0;10,0;2704,0;1,0;270,4;0,0;",
     ].join('\r\n');
 
     const res = parseFlussiCsvText(csv, {
-      excludedPositionIsins: ['US09075V1026'],
+      excludedPositionIsins: ['IT0005056236'],
     });
 
     expect(res.gpSnapshotPresent).toBe(true);
@@ -168,14 +185,14 @@ describe('parseFlussiCsvText — file titoli', () => {
     expect(res.positions).toHaveLength(0);
   });
 
-  it('segnala la sorgente posizioni ordinarie anche quando BION è l’unica riga ed è esclusa', () => {
+  it('segnala la sorgente posizioni ordinarie anche quando BIO ON è l’unica riga ed è esclusa', () => {
     const csv = [
       'DATA RIFERIMENTO;CODICE ABI;NUMERO CONTO;CODICE TITOLO;DESCRIZIONE TITOLO;ISIN;DIVISA;VALORE NOMINALE;QUANTITA;CONTROVALORE;CAMBIO;PREZZO;RATEO INTERESSI;',
-      "01/07/2026;'03211;'02225971281;'010605;BION ON SPA;US09075V1026;USD;0,0;10,0;2704,0;1,0;270,4;0,0;",
+      "01/07/2026;'03211;'02225971281;'010605;BIO ON SPA;IT0005056236;EUR;0,0;10,0;2704,0;1,0;270,4;0,0;",
     ].join('\r\n');
 
     const res = parseFlussiCsvText(csv, {
-      excludedPositionIsins: ['US09075V1026'],
+      excludedPositionIsins: ['IT0005056236'],
     });
 
     expect(res.positionsSnapshotPresent).toBe(true);

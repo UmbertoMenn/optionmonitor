@@ -38,9 +38,10 @@ describe('portfolio upload user options', () => {
     });
   });
 
-  it('applica le esclusioni BION soltanto allo username silvias', () => {
+  it('applica le esclusioni BIO ON soltanto allo username silvias', () => {
     const silviaOptions = getPortfolioParseOptions('silvia-id', 'SilviaS');
-    expect(silviaOptions.excludedPositionIsins).toEqual(['US09075V1026']);
+    expect(silviaOptions.excludedPositionIsins).toEqual(['IT0005056236']);
+    expect(silviaOptions.excludedPositionDescriptions).toContain('BIO ON SPA');
     expect(silviaOptions.includeGpCashInCash).toBe(true);
 
     const otherOptions = getPortfolioParseOptions('other-id', 'other');

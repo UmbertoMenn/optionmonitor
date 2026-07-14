@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PatrimonyComponentsSlide, type PatrimonyComponents } from '@/components/dashboard/PatrimonyComponentsSlide';
 import { PortfolioSummary, Portfolio, Position } from '@/types/portfolio';
 import { NettingResult, NettingBreakdownItem, getBreakdownForViewMode, computeLegDecomposition, STRATEGY_SECTION_LABELS, StrategySectionCategory } from '@/hooks/useDerivativeNetting';
 import { NettingLegDetailTable } from '@/components/dashboard/NettingLegDetailTable';
@@ -38,6 +39,8 @@ interface DynamicPortfolioChartProps {
   underlyingPrices?: Record<string, UnderlyingPrice>;
   hasConfigurations?: boolean;
   strategyConfigs?: StrategyConfiguration[];
+  /** Ripartizione del patrimonio per componente (slide extra in vista Netting Totale). */
+  patrimonyComponents?: PatrimonyComponents;
 }
 
 // ─── Colors per strategy section ──────────────────────────────
@@ -251,7 +254,7 @@ const CHART_TITLES: Record<ViewMode, string> = {
 };
 
 
-export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices, hasConfigurations = true, strategyConfigs = [] }: DynamicPortfolioChartProps) {
+export function DynamicPortfolioChart({ summary, portfolio, positions, netting, viewMode, onViewModeChange, overrides = [], underlyingPrices, hasConfigurations = true, strategyConfigs = [], patrimonyComponents }: DynamicPortfolioChartProps) {
   const { isAdmin } = useAuth();
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
@@ -269,6 +272,21 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
   }, [api, onSelect]);
 
   const scrollTo = useCallback((index: number) => { api?.scrollTo(index); }, [api]);
+
+  // Il numero di slide dipende da viewMode/admin/componenti: al cambio va
+  // reinizializzato embla e riportato l'indice in range (stessa logica dello
+  // HistoricalChartsCarousel).
+  const slideCountForEffect = 2
+    + (isAdmin && viewMode === 'netting_total' ? 1 : 0)
+    + (viewMode === 'netting_total' && !!patrimonyComponents ? 1 : 0);
+  useEffect(() => {
+    if (!api) return;
+    api.reInit();
+    if (api.selectedScrollSnap() >= slideCountForEffect) {
+      api.scrollTo(0);
+      setCurrent(0);
+    }
+  }, [api, slideCountForEffect]);
 
   const { items: breakdownItems, finalValue } = useMemo(() => {
     if (!summary) return { items: [], finalValue: 0 };
@@ -302,7 +320,8 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
 
     // Netting views — carousel
     const baseValue = summary?.totalValue ?? 0;
-    const slideCount = isAdmin && viewMode === 'netting_total' ? 3 : 2;
+    const showComponentsSlide = viewMode === 'netting_total' && !!patrimonyComponents;
+    const slideCount = 2 + (isAdmin && viewMode === 'netting_total' ? 1 : 0) + (showComponentsSlide ? 1 : 0);
 
     return (
       <div className="flex flex-col">
@@ -328,6 +347,12 @@ export function DynamicPortfolioChart({ summary, portfolio, positions, netting, 
             <CarouselItem>
               <NettingBreakdownChart items={breakdownItems} hasConfigurations={hasDer ? hasConfigurations : true} />
             </CarouselItem>
+            {/* Slide 3 (Netting Totale): Componenti Patrimonio */}
+            {showComponentsSlide && patrimonyComponents && (
+              <CarouselItem>
+                <PatrimonyComponentsSlide components={patrimonyComponents} />
+              </CarouselItem>
+            )}
           </CarouselContent>
           <div className="flex items-center justify-center gap-4 mt-2">
             <CarouselPrevious className="static translate-y-0" />

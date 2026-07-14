@@ -419,6 +419,7 @@ export function Dashboard() {
             underlyingPrices={frozenUnderlyingPrices}
             hasConfigurations={hasConfigurations}
             strategyConfigs={strategyConfigs}
+            patrimonyComponents={patrimonyComponents}
           />
 
           {/* File Upload & Historical Data - Hidden in aggregated view */}
@@ -490,7 +491,6 @@ export function Dashboard() {
             }
             currentDate={portfolio?.snapshot_date ?? null}
             deposits={allDepositsForCharts}
-            patrimonyComponents={patrimonyComponents}
           />
         </div>
 

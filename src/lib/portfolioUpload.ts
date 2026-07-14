@@ -14,8 +14,13 @@ const EXCLUDED_CASH_PATTERNS: Record<string, { mid?: string; last: string }[]> =
 const PARSE_OPTIONS_BY_USERNAME: Record<string, PortfolioParseOptions> = {
   silvias: {
     excludedCashPatterns: [{ last: '452' }],
-    excludedPositionDescriptions: ['BION ON', 'BION ON SPA'],
-    excludedPositionIsins: ['US09075V1026'],
+    // Titolo da escludere: Bio-On S.p.A. Nel flusso banca la descrizione
+    // esatta è "BIO ON SPA" e l'ISIN è IT0005056236. Le vecchie voci
+    // "BION ON"/"BION ON SPA" e l'ISIN US09075V1026 erano trascrizioni
+    // errate: il match esatto non scattava mai e il titolo restava
+    // incluso nel patrimonio ad ogni upload.
+    excludedPositionDescriptions: ['BIO ON', 'BIO ON SPA', 'BIO-ON SPA'],
+    excludedPositionIsins: ['IT0005056236'],
     includeGpCashInCash: true,
   },
   maurog: {
