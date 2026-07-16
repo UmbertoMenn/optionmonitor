@@ -117,7 +117,10 @@ interface StrategyConfigWizardProps {
   onArchive?: (key: string, displayName: string) => void;
   onUnarchive?: (key: string) => void;
   onCancelOverride?: (configId: string) => void;
+  /** Alias dinamici da `underlying_mappings`; abilita ADBE/Adobe, DAI/MBG ecc. */
+  dynamicAliases?: Map<string, string> | Record<string, string>;
 }
+
 
 export function buildSignatures(positions: Position[]): PositionSignature[] {
   // Group derivative positions by signature key, summing quantities
