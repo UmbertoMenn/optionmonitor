@@ -721,16 +721,19 @@ export function Derivatives() {
     if (isLoading || isConfigsLoading) return; // ancora in caricamento
     if (isHistoricalView) return; // sola lettura
     if (derivatives.length === 0 || positions.length === 0) return;
+    // Attendere gli alias dinamici: senza di essi ADBE/Adobe finirebbero in
+    // config distinte e servirebbe una riconciliazione manuale successiva.
+    if (allMappings.isLoading || allMappings.isFetching) return;
 
     initialAutoClassifyDoneRef.current = true;
 
     const archivedKeysList = archivedItems.map(a => a.key);
-    const strategies = autoClassify(derivatives, positions, archivedKeysList);
+    const strategies = autoClassify(derivatives, positions, archivedKeysList, dynamicAliases);
     if (strategies.length === 0) return;
 
-    const configs = buildConfigsFromStrategies(strategies).map(c => ({ ...c, config_locked: false }));
+    const configs = buildConfigsFromStrategies(strategies, dynamicAliases).map(c => ({ ...c, config_locked: false }));
     handleSaveConfigs(configs);
-  }, [hasConfigurations, isLoading, isConfigsLoading, isHistoricalView, derivatives, positions, archivedItems, handleSaveConfigs]);
+  }, [hasConfigurations, isLoading, isConfigsLoading, isHistoricalView, derivatives, positions, archivedItems, handleSaveConfigs, dynamicAliases, allMappings.isLoading, allMappings.isFetching]);
 
   if (isLoading) {
     return <DerivativesSkeleton />;
