@@ -253,43 +253,48 @@ function hasTokenOverlap(a: string, b: string): boolean {
   return matchCount === 1 && shorter[0].length >= 4;
 }
 
-function getUnderlyingKey(p: Position, allDerivatives: Position[]): string {
+type DynamicAliases = Map<string, string> | Record<string, string> | undefined;
+
+/**
+ * Canonicalizza qualunque input testuale/posizione in una chiave sottostante
+ * unica (via `tickerIdentity`). Sostituisce il vecchio pattern
+ * `getCanonicalKey || normalizeForMatching` che generava chiavi diverse per
+ * ADBE/Adobe Inc, CRDO/Credo Technology GRP, DAI/Mercedes-Benz Group.
+ */
+function canonicalKeyForPosition(p: Position, dynamicAliases: DynamicAliases): string {
   if (p.asset_type === 'derivative') {
-    const raw = p.underlying || p.description || '';
-    return getCanonicalKey(raw) || normalizeForMatching(raw);
+    return getCanonicalTickerKey(
+      {
+        rawTicker: p.underlying || p.ticker,
+        underlyingName: p.underlying,
+        description: p.description,
+      },
+      { dynamicAliases },
+    );
   }
-  // Stock or ETF: try canonical first
-  const stockText = `${p.description ?? ''} ${p.ticker ?? ''}`;
-  const canonical = getCanonicalKey(stockText);
-  if (canonical) return canonical;
-
-  // Also try description-only canonical (without ticker noise)
-  const descOnly = p.description ?? '';
-  const descCanonical = getCanonicalKey(descOnly);
-  if (descCanonical) return descCanonical;
-
-  // Try to match against derivative underlyings
-  const stockNorm = normalizeForMatching(stockText);
-  const descNorm = normalizeForMatching(descOnly);
-  
-  for (const d of allDerivatives) {
-    const dUnderlying = d.underlying || d.description || '';
-    const dNorm = normalizeForMatching(dUnderlying);
-    const dCanonical = getCanonicalKey(dUnderlying);
-    
-    // Check includes with both full text and description-only
-    if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm) ||
-        descNorm.includes(dNorm) || dNorm.includes(descNorm)) {
-      return dCanonical || dNorm;
-    }
-    
-    // Token overlap fallback: if significant tokens match, same underlying
-    if (hasTokenOverlap(descOnly, dUnderlying)) {
-      return dCanonical || dNorm;
-    }
-  }
-  return stockNorm;
+  // stock / etf
+  return getCanonicalTickerKey(
+    {
+      rawTicker: p.ticker,
+      rawName: p.description,
+      description: p.description,
+      isin: p.isin,
+    },
+    { dynamicAliases },
+  );
 }
+
+function canonicalKeyForText(text: string, dynamicAliases: DynamicAliases): string {
+  return getCanonicalTickerKey(
+    { rawTicker: text, rawName: text, underlyingName: text, description: text },
+    { dynamicAliases },
+  );
+}
+
+function getUnderlyingKey(p: Position, _allDerivatives: Position[], dynamicAliases?: DynamicAliases): string {
+  return canonicalKeyForPosition(p, dynamicAliases);
+}
+
 
 export function autoClassify(derivatives: Position[], allPositions: Position[], archivedKeysToExclude: string[] = []): WizardStrategy[] {
   // Filter out archived underlyings before auto-classifying
