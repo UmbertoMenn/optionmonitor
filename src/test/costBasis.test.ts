@@ -4,7 +4,7 @@ import {
   applyOptionTradesToBasis,
   detectEarlyAssignments,
   unitCostWithCommission,
-  optionUnitPremiumWithCommission,
+  optionUnitPremium,
   optionBasisKey,
   CostBasisEntry,
   PutPositionLite,
@@ -372,10 +372,33 @@ describe('costBasis', () => {
       expect(e.pmc).toBeCloseTo(4);
     });
 
-    it('le commissioni (EUR) entrano nel premio unitario convertite in divisa', () => {
-      // 12 EUR con cambio 1.2 su 1 contratto (100 azioni) = +0.144 per azione
-      const t = optionTrade({ contracts: 1, pricePerShare: 3, commission: 12, exchangeRate: 1.2 });
-      expect(optionUnitPremiumWithCommission(t)).toBeCloseTo(3.144);
+    it('le commissioni NON entrano nel PMC delle opzioni (premio grezzo, come la banca)', () => {
+      // VEN: il premio incassato al lordo è quello di scambio. Sommare la
+      // commissione (vecchio comportamento) gonfiava il premio della short;
+      // la convenzione della banca è il premio grezzo su entrambi i versi.
+      const ven = optionTrade({ side: 'VEN', contracts: 1, pricePerShare: 3, commission: 12, exchangeRate: 1.2 });
+      expect(optionUnitPremium(ven)).toBe(3);
+      const acq = optionTrade({ side: 'ACQ', contracts: 1, pricePerShare: 3, commission: 12, exchangeRate: 1.2 });
+      expect(optionUnitPremium(acq)).toBe(3);
+    });
+
+    it('la media dei premi non è influenzata dalle commissioni', () => {
+      const res = applyOptionTradesToBasis(
+        [],
+        [
+          optionTrade({ side: 'VEN', contracts: 1, pricePerShare: 3, commission: 12, exchangeRate: 1.2 }),
+          optionTrade({ side: 'VEN', contracts: 1, pricePerShare: 5, commission: 40, exchangeRate: 1.2 }),
+        ],
+        uKey,
+      );
+      const e = res.entries.get(KEY)!;
+      expect(e.quantity).toBe(-2);
+      expect(e.pmc).toBe(4); // (3+5)/2, commissioni ignorate
+    });
+
+    it('i titoli invece caricano le commissioni sul PMC (convenzione diversa)', () => {
+      const t = stock({ side: 'ACQ', quantity: 100, price: 100, commission: 10, exchangeRate: 1.2 });
+      expect(unitCostWithCommission(t)).toBeCloseTo(100.12);
     });
 
     it('opzioni distinte (strike/scadenza/tipo) non si mescolano', () => {

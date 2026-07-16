@@ -158,11 +158,21 @@ export function optionBasisKey(
   return `OPT:${underlyingKey}:${optionType === 'call' ? 'C' : 'P'}:${strike}:${expiryDateISO}`;
 }
 
-/** Premio unitario per azione comprensivo di commissioni (divisa del titolo). */
-export function optionUnitPremiumWithCommission(t: FlussiTitoliOptionTrade): number {
-  const commissionCcy = (t.commission || 0) * (t.exchangeRate > 0 ? t.exchangeRate : 1);
-  const shares = t.contracts * 100;
-  return t.pricePerShare + (shares > 0 ? commissionCcy / shares : 0);
+/**
+ * Premio unitario per azione, nella divisa del titolo.
+ *
+ * A differenza dei titoli, il PMC delle opzioni NON include le commissioni:
+ * è la convenzione della banca (i PMC opzione nei file sono premi grezzi, a
+ * tick di 0,05) ed è quella con cui arriva la baseline dal caricamento Excel.
+ * Tenere la stessa convenzione anche sui movimenti è necessario perché la
+ * media ponderata non mescoli premi netti e premi lordi.
+ *
+ * Nota: la vecchia versione sommava la commissione su entrambi i versi, quindi
+ * sulle VEN (apertura di una short) gonfiava il premio incassato invece di
+ * ridurlo — il premio va sempre a sfavore, mai a favore.
+ */
+export function optionUnitPremium(t: FlussiTitoliOptionTrade): number {
+  return t.pricePerShare;
 }
 
 export interface AppliedOptionTradeResult {
@@ -172,7 +182,8 @@ export interface AppliedOptionTradeResult {
 
 /**
  * PMC delle opzioni a posizione FIRMATA (quantity in contratti: >0 long,
- * <0 short). Regole simmetriche alla media ponderata continua:
+ * <0 short). Premio grezzo, commissioni escluse (vedi optionUnitPremium).
+ * Regole simmetriche alla media ponderata continua:
  * - aprire/aumentare la posizione nella sua direzione (ACQ per le long,
  *   VEN per le short) ricalcola la media del premio per azione;
  * - ridurre la posizione verso zero NON cambia il PMC;
@@ -191,7 +202,7 @@ export function applyOptionTradesToBasis(
   for (const t of sorted) {
     if (!t.contracts || !Number.isFinite(t.pricePerShare)) continue;
     const key = optionBasisKey(resolveUnderlyingKey(t.underlyingTicker), t.optionType, t.strike, t.expiryDate);
-    const unit = optionUnitPremiumWithCommission(t);
+    const unit = optionUnitPremium(t);
     const delta = t.side === 'ACQ' ? t.contracts : -t.contracts;
     const entry = entries.get(key);
     const qty0 = entry?.quantity ?? 0;
