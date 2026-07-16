@@ -69,7 +69,8 @@ const CANONICAL_UNDERLYINGS: Record<string, string[]> = {
   AVGO: ['AVGO', 'BROADCOM', 'BROADCOM INC'],
   ORCL: ['ORCL', 'ORACLE', 'ORACLE CORP', 'ORACLE CORPORATION'],
   CRM: ['CRM', 'SALESFORCE', 'SALESFORCE INC', 'SALESFORCE COM'],
-  ADBE: ['ADBE', 'ADOBE', 'ADOBE INC', 'ADOBE SYSTEMS'],
+  ADBE: ['ADBE', 'ADOBE', 'ADOBE INC', 'ADOBE SYSTEMS', 'ADOBE SYSTEMS INC'],
+  CRDO: ['CRDO', 'CREDO', 'CREDO TECHNOLOGY', 'CREDO TECHNOLOGY GRP', 'CREDO TECHNOLOGY GROUP', 'CREDO TECHNOLOGY GROUP HOLDING', 'CREDO TECHNOLOGY GROUP HOLDING LTD'],
   CSCO: ['CSCO', 'CISCO', 'CISCO SYSTEMS'],
   INTC: ['INTC', 'INTEL', 'INTEL CORP'],
   AMD: ['AMD', 'ADVANCED MICRO', 'ADVANCED MICRO DEVICES'],
@@ -177,7 +178,7 @@ const CANONICAL_UNDERLYINGS: Record<string, string[]> = {
   // === European stocks (cross-listed / local exchanges) ===
   RACE: ['RACE', 'FERRARI', 'FERRARI NV', 'FERRARI N V'],
   STLA: ['STLA', 'STELLANTIS', 'STELLANTIS NV', 'STELLANTIS N V'],
-  MBG: ['MBG', 'MERCEDES', 'MERCEDES BENZ', 'MERCEDES BENZ GROUP', 'MERCEDES BENZ GROUP AG'],
+  MBG: ['MBG', 'DAI', 'DAIMLER', 'DAIMLER AG', 'MERCEDES', 'MERCEDES BENZ', 'MERCEDES BENZ GROUP', 'MERCEDES BENZ GROUP AG'],
   DPW: ['DPW', 'DEUTSCHE POST', 'DEUTSCHE POST AG', 'DHL GROUP'],
   SAP: ['SAP', 'SAP SE', 'SAP AG'],
   TIT: ['TIT', 'TELECOM ITALIA', 'TELECOM ITALIA SPA', 'DIR TELECOM ITALIA', 'DIR TELECOM ITALIA SPA'],
@@ -203,6 +204,8 @@ const EXCHANGE_TICKER_TO_CANONICAL: Record<string, string> = {
   'STLAM.MI': 'STLA',
   'MBG.DE': 'MBG',
   'MBG.F': 'MBG',
+  'DAI.DE': 'MBG',
+  'DAI.F': 'MBG',
   'DHL.DE': 'DPW',
   'DPW.DE': 'DPW',
   'SAP.DE': 'SAP',
@@ -212,6 +215,18 @@ const EXCHANGE_TICKER_TO_CANONICAL: Record<string, string> = {
   'UCG.MI': 'UCG',
   'G.MI': 'G',
   'ENI.MI': 'ENI',
+};
+
+/**
+ * Mapping da ISIN a canonical ticker.
+ * L'ISIN è un identificatore unico e non ambiguo: quando presente, vince su
+ * qualsiasi risoluzione basata su ticker/nome (che possono essere aliases,
+ * abbreviazioni storiche, o nomi tradotti).
+ */
+const ISIN_TO_CANONICAL: Record<string, string> = {
+  US00724F1012: 'ADBE',
+  KYG254571055: 'CRDO',
+  DE0007100000: 'MBG',
 };
 
 // ============================================================================
@@ -377,6 +392,26 @@ export function resolveUnderlyingIdentity(
       confidence: 'high',
     };
   }
+
+  // 0b. ISIN autoritativo. L'ISIN è un identificatore unico e globale: quando
+  // presente e conosciuto, vince su ticker/nome. Usa sia l'ISIN esplicito
+  // dell'input sia quello del linkedStock.
+  const isinCandidates = [input.isin, input.linkedStock?.isin]
+    .filter((s): s is string => !!s)
+    .map(s => s.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+  for (const isin of isinCandidates) {
+    if (ISIN_TO_CANONICAL[isin]) {
+      const canonical = ISIN_TO_CANONICAL[isin];
+      return {
+        tickerKey: canonical,
+        displayTicker: canonical,
+        canonicalName: pickCanonicalName(input, canonical),
+        source: 'alias_map',
+        confidence: 'high',
+      };
+    }
+  }
+
 
   // 1. linkedStock wins
   if (input.linkedStock) {

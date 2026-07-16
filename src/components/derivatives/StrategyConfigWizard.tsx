@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, startTransition } from 'react';
 import { Position } from '@/types/portfolio';
-import { normalizeForMatching, findUnderlyingStock, categorizeDerivatives, getCanonicalKey } from '@/lib/derivativeStrategies';
+import { categorizeDerivatives } from '@/lib/derivativeStrategies';
+import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -116,7 +117,10 @@ interface StrategyConfigWizardProps {
   onArchive?: (key: string, displayName: string) => void;
   onUnarchive?: (key: string) => void;
   onCancelOverride?: (configId: string) => void;
+  /** Alias dinamici da `underlying_mappings`; abilita ADBE/Adobe, DAI/MBG ecc. */
+  dynamicAliases?: Map<string, string> | Record<string, string>;
 }
+
 
 export function buildSignatures(positions: Position[]): PositionSignature[] {
   // Group derivative positions by signature key, summing quantities
@@ -252,54 +256,65 @@ function hasTokenOverlap(a: string, b: string): boolean {
   return matchCount === 1 && shorter[0].length >= 4;
 }
 
-function getUnderlyingKey(p: Position, allDerivatives: Position[]): string {
+type DynamicAliases = Map<string, string> | Record<string, string> | undefined;
+
+/**
+ * Canonicalizza qualunque input testuale/posizione in una chiave sottostante
+ * unica (via `tickerIdentity`). Sostituisce il vecchio pattern
+ * `getCanonicalKey || normalizeForMatching` che generava chiavi diverse per
+ * ADBE/Adobe Inc, CRDO/Credo Technology GRP, DAI/Mercedes-Benz Group.
+ */
+function canonicalKeyForPosition(p: Position, dynamicAliases: DynamicAliases): string {
   if (p.asset_type === 'derivative') {
-    const raw = p.underlying || p.description || '';
-    return getCanonicalKey(raw) || normalizeForMatching(raw);
+    return getCanonicalTickerKey(
+      {
+        rawTicker: p.underlying || p.ticker,
+        underlyingName: p.underlying,
+        description: p.description,
+      },
+      { dynamicAliases },
+    );
   }
-  // Stock or ETF: try canonical first
-  const stockText = `${p.description ?? ''} ${p.ticker ?? ''}`;
-  const canonical = getCanonicalKey(stockText);
-  if (canonical) return canonical;
-
-  // Also try description-only canonical (without ticker noise)
-  const descOnly = p.description ?? '';
-  const descCanonical = getCanonicalKey(descOnly);
-  if (descCanonical) return descCanonical;
-
-  // Try to match against derivative underlyings
-  const stockNorm = normalizeForMatching(stockText);
-  const descNorm = normalizeForMatching(descOnly);
-  
-  for (const d of allDerivatives) {
-    const dUnderlying = d.underlying || d.description || '';
-    const dNorm = normalizeForMatching(dUnderlying);
-    const dCanonical = getCanonicalKey(dUnderlying);
-    
-    // Check includes with both full text and description-only
-    if (stockNorm.includes(dNorm) || dNorm.includes(stockNorm) ||
-        descNorm.includes(dNorm) || dNorm.includes(descNorm)) {
-      return dCanonical || dNorm;
-    }
-    
-    // Token overlap fallback: if significant tokens match, same underlying
-    if (hasTokenOverlap(descOnly, dUnderlying)) {
-      return dCanonical || dNorm;
-    }
-  }
-  return stockNorm;
+  // stock / etf
+  return getCanonicalTickerKey(
+    {
+      rawTicker: p.ticker,
+      rawName: p.description,
+      description: p.description,
+      isin: p.isin,
+    },
+    { dynamicAliases },
+  );
 }
 
-export function autoClassify(derivatives: Position[], allPositions: Position[], archivedKeysToExclude: string[] = []): WizardStrategy[] {
-  // Filter out archived underlyings before auto-classifying
-  const archivedSet = new Set(archivedKeysToExclude.map(k => k.toUpperCase().trim()));
+function canonicalKeyForText(text: string, dynamicAliases: DynamicAliases): string {
+  return getCanonicalTickerKey(
+    { rawTicker: text, rawName: text, underlyingName: text, description: text },
+    { dynamicAliases },
+  );
+}
+
+function getUnderlyingKey(p: Position, _allDerivatives: Position[], dynamicAliases?: DynamicAliases): string {
+  return canonicalKeyForPosition(p, dynamicAliases);
+}
+
+
+export function autoClassify(
+  derivatives: Position[],
+  allPositions: Position[],
+  archivedKeysToExclude: string[] = [],
+  dynamicAliases?: DynamicAliases,
+): WizardStrategy[] {
+  // Filter out archived underlyings before auto-classifying — comparazione canonica
+  const archivedSet = new Set(
+    archivedKeysToExclude
+      .map(k => canonicalKeyForText(k, dynamicAliases))
+      .filter(Boolean),
+  );
   const filteredDerivs = archivedSet.size > 0
-    ? derivatives.filter(d => {
-        const key = (d.underlying || d.description || '').toUpperCase().trim();
-        return !archivedSet.has(key);
-      })
+    ? derivatives.filter(d => !archivedSet.has(canonicalKeyForPosition(d, dynamicAliases)))
     : derivatives;
-  const result = categorizeDerivatives(filteredDerivs, allPositions, [], []);
+  const result = categorizeDerivatives(filteredDerivs, allPositions, [], [], { dynamicAliases });
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
   const consumedIds = new Set<string>();
@@ -363,7 +378,7 @@ export function autoClassify(derivatives: Position[], allPositions: Position[], 
   // Naked Puts
   const npByUnderlying = new Map<string, Position[]>();
   for (const np of result.nakedPuts) {
-    const key = normalizeForMatching(np.option.underlying || np.option.description || '');
+    const key = canonicalKeyForPosition(np.option, dynamicAliases);
     if (!npByUnderlying.has(key)) npByUnderlying.set(key, []);
     npByUnderlying.get(key)!.push(np.option);
   }
@@ -375,7 +390,7 @@ export function autoClassify(derivatives: Position[], allPositions: Position[], 
   // Leap Calls
   const lcByUnderlying = new Map<string, Position[]>();
   for (const lc of result.leapCalls) {
-    const key = normalizeForMatching(lc.option.underlying || lc.option.description || '');
+    const key = canonicalKeyForPosition(lc.option, dynamicAliases);
     if (!lcByUnderlying.has(key)) lcByUnderlying.set(key, []);
     lcByUnderlying.get(key)!.push(lc.option);
   }
@@ -388,11 +403,12 @@ export function autoClassify(derivatives: Position[], allPositions: Position[], 
   for (const lp of result.longPuts) {
     const legs = addUnique([lp.option]);
     if (legs.length === 0) continue;
-    
-    const putKey = normalizeForMatching(lp.option.underlying || lp.option.description || '');
-    const matchingCC = strategies.find(s => 
+
+    const putKey = canonicalKeyForPosition(lp.option, dynamicAliases);
+    const matchingCC = strategies.find(s =>
       s.strategyType === 'covered_call' &&
-      normalizeForMatching(s.positions[0]?.underlying || s.positions[0]?.description || '') === putKey
+      s.positions[0] &&
+      canonicalKeyForPosition(s.positions[0], dynamicAliases) === putKey
     );
     
     if (matchingCC) {
@@ -446,14 +462,27 @@ export function autoClassify(derivatives: Position[], allPositions: Position[], 
 let nextId = 0;
 function genId() { return `ws-${Date.now()}-${nextId++}`; }
 
-/** Converts WizardStrategy[] to UpsertConfigParams[] (pure, no React state). */
-export function buildConfigsFromStrategies(strategies: WizardStrategy[]): UpsertConfigParams[] {
+/** Converts WizardStrategy[] to UpsertConfigParams[] (pure, no React state).
+ *  `underlying` è sempre il ticker canonico (via `tickerIdentity`), non il
+ *  raw dell'opzione: così ADBE, "ADOBE INC" e US00724F1012 finiscono uguali.
+ */
+export function buildConfigsFromStrategies(
+  strategies: WizardStrategy[],
+  dynamicAliases?: DynamicAliases,
+): UpsertConfigParams[] {
   return strategies.map((strategy, i) => {
-    const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
-    const underlying = derivPos
-      ? (derivPos.underlying || derivPos.description || 'Unknown')
-      : (getCanonicalKey(strategy.positions[0]?.description || '') || strategy.positions[0]?.description || 'Unknown');
+    // Preferisci l'azione collegata (linked_stock) come fonte di identità: è
+    // il segnale più forte (ha ticker + ISIN). In assenza, deriva dal derivato.
     const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+    const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+    let underlying: string;
+    if (stockPositions[0]) {
+      underlying = canonicalKeyForPosition(stockPositions[0], dynamicAliases);
+    } else if (derivPos) {
+      underlying = canonicalKeyForPosition(derivPos, dynamicAliases);
+    } else {
+      underlying = strategy.positions[0]?.description || 'Unknown';
+    }
     const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
     return {
       underlying,
@@ -479,10 +508,16 @@ function sigsEqual(a: PositionSignature[], b: PositionSignature[]): boolean {
   return true;
 }
 
-/** Return true when `raw` config matches any of the auto-classified configs. */
-function matchesAutoClassify(raw: UpsertConfigParams, autoConfigs: UpsertConfigParams[]): boolean {
+/** Return true when `raw` config matches any of the auto-classified configs.
+ *  Confronto in chiave canonica: "ADBE" vs "Adobe Inc" devono corrispondere. */
+function matchesAutoClassify(
+  raw: UpsertConfigParams,
+  autoConfigs: UpsertConfigParams[],
+  dynamicAliases?: DynamicAliases,
+): boolean {
+  const rawKey = canonicalKeyForText(raw.underlying, dynamicAliases);
   return autoConfigs.some(ac =>
-    normalizeForMatching(ac.underlying) === normalizeForMatching(raw.underlying) &&
+    canonicalKeyForText(ac.underlying, dynamicAliases) === rawKey &&
     ac.strategy_type === raw.strategy_type &&
     sigsEqual(ac.position_signatures, raw.position_signatures),
   );
@@ -519,6 +554,7 @@ export function StrategyConfigWizard({
   onArchive,
   onUnarchive,
   onCancelOverride,
+  dynamicAliases,
 }: StrategyConfigWizardProps) {
   const draftStorageKey = `strategyConfigWizardDraft:${draftKey || 'default'}`;
   // Build all available positions (derivatives as-is + stocks as-is) — skip when closed
@@ -581,11 +617,11 @@ export function StrategyConfigWizard({
     // Pre-compute underlying key map for O(n) total instead of O(n²)
     const keyMapForGroups = new Map<string, string>();
     for (const p of effectivePositions) {
-      keyMapForGroups.set(p.id, getUnderlyingKey(p, derivsOnlyForGroups));
+      keyMapForGroups.set(p.id, getUnderlyingKey(p, derivsOnlyForGroups, dynamicAliases));
     }
 
     for (const p of effectivePositions) {
-      const key = keyMapForGroups.get(p.id) || getUnderlyingKey(p, derivsOnlyForGroups);
+      const key = keyMapForGroups.get(p.id) || getUnderlyingKey(p, derivsOnlyForGroups, dynamicAliases);
       if (!groupMap.has(key)) {
         let display = key;
         if (p.asset_type === 'derivative' && p.underlying) {
@@ -601,7 +637,7 @@ export function StrategyConfigWizard({
     return Array.from(groupMap.entries())
       .map(([key, { displayName, positions }]) => ({ key, displayName, positions }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [open, effectivePositions]);
+  }, [open, effectivePositions, dynamicAliases]);
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());
@@ -612,8 +648,11 @@ export function StrategyConfigWizard({
    *  to detect whether an existing locked config is a genuine user override. */
   const autoClassifiedConfigs = useMemo((): UpsertConfigParams[] => {
     if (!open) return [];
-    return buildConfigsFromStrategies(autoClassify(derivatives, allPositions, archivedKeys));
-  }, [open, derivatives, allPositions, archivedKeys]);
+    return buildConfigsFromStrategies(
+      autoClassify(derivatives, allPositions, archivedKeys, dynamicAliases),
+      dynamicAliases,
+    );
+  }, [open, derivatives, allPositions, archivedKeys, dynamicAliases]);
 
   const markGroupTouched = useCallback((groupKey: string) => {
     setTouchedGroupKeys(prev => {
@@ -637,7 +676,7 @@ export function StrategyConfigWizard({
     const derivsOnlyRestore = allAvailable.filter(pp => pp.asset_type === 'derivative');
     const keyMapRestore = new Map<string, string>();
     for (const p of allAvailable) {
-      keyMapRestore.set(p.id, getUnderlyingKey(p, derivsOnlyRestore));
+      keyMapRestore.set(p.id, getUnderlyingKey(p, derivsOnlyRestore, dynamicAliases));
     }
     const resolveConfigKey = (config: StrategyConfiguration, keyMap: Map<string, string>, positions: Position[]) => {
       const slotIds = (config.linked_stock_slot_ids as unknown as string[]) || [];
@@ -647,9 +686,9 @@ export function StrategyConfigWizard({
         (p.id === config.linked_stock_id || (!!baseFromSlot && p.id === baseFromSlot))
       );
       if (linkedStock) {
-        return keyMap.get(linkedStock.id) || getUnderlyingKey(linkedStock, derivsOnlyRestore);
+        return keyMap.get(linkedStock.id) || getUnderlyingKey(linkedStock, derivsOnlyRestore, dynamicAliases);
       }
-      return getCanonicalKey(config.underlying) || normalizeForMatching(config.underlying);
+      return canonicalKeyForText(config.underlying, dynamicAliases);
     };
     const usedIds = new Set<string>();
     const restored: WizardStrategy[] = [];
@@ -731,7 +770,7 @@ export function StrategyConfigWizard({
     const derivsOnlyRestore2 = restorePositions.filter(pp => pp.asset_type === 'derivative');
     const keyMapRestore2 = new Map<string, string>();
     for (const p of restorePositions) {
-      keyMapRestore2.set(p.id, getUnderlyingKey(p, derivsOnlyRestore2));
+      keyMapRestore2.set(p.id, getUnderlyingKey(p, derivsOnlyRestore2, dynamicAliases));
     }
 
     for (const config of existingConfigs) {
@@ -1035,11 +1074,20 @@ export function StrategyConfigWizard({
 
     for (let i = 0; i < strategies.length; i++) {
       const strategy = strategies[i];
-      const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
-      const underlying = derivPos
-        ? (derivPos.underlying || derivPos.description || 'Unknown')
-        : (getCanonicalKey(strategy.positions[0]?.description || '') || getCanonicalKey(`${strategy.positions[0]?.description || ''} ${strategy.positions[0]?.ticker || ''}`) || strategy.positions[0]?.description || 'Unknown');
       const stockPositions = strategy.positions.filter(p => p.asset_type === 'stock' || p.asset_type === 'etf');
+      const derivPos = strategy.positions.find(p => p.asset_type === 'derivative');
+      // Identità canonica: azione collegata > derivato > fallback. Il campo
+      // `underlying` in DB è la chiave di raggruppamento della strategia,
+      // quindi DEVE essere il ticker canonico (via tickerIdentity), non il
+      // raw dell'opzione o il nome esteso dell'azione.
+      let underlying: string;
+      if (stockPositions[0]) {
+        underlying = canonicalKeyForPosition(stockPositions[0], dynamicAliases);
+      } else if (derivPos) {
+        underlying = canonicalKeyForPosition(derivPos, dynamicAliases);
+      } else {
+        underlying = strategy.positions[0]?.description || 'Unknown';
+      }
       const slotIds = stockPositions.map(p => p.id); // preserve full slot IDs including __slot_N
       const realStockId = stockPositions[0]?.id?.replace(/__slot_\d+$/, '') || null;
 
@@ -1058,7 +1106,7 @@ export function StrategyConfigWizard({
     // auto-classification. Strategies that match auto-classify are NOT overrides.
     const configsWithLocked = rawConfigs.map(raw => ({
       ...raw,
-      config_locked: !matchesAutoClassify(raw, autoClassifiedConfigs),
+      config_locked: !matchesAutoClassify(raw, autoClassifiedConfigs, dynamicAliases),
     }));
 
     if (filterUnderlyings) {
@@ -1272,7 +1320,7 @@ export function StrategyConfigWizard({
                             // (i.e. differs from auto-classification)
                             const lockedOverride = existingConfigs.find(c => {
                               if (!c.config_locked) return false;
-                              const configKey = getCanonicalKey(c.underlying) || normalizeForMatching(c.underlying);
+                              const configKey = canonicalKeyForText(c.underlying, dynamicAliases);
                               if (configKey !== group.key) return false;
                               return !matchesAutoClassify(
                                 {
@@ -1281,6 +1329,7 @@ export function StrategyConfigWizard({
                                   position_signatures: c.position_signatures as PositionSignature[],
                                 },
                                 autoClassifiedConfigs,
+                                dynamicAliases,
                               );
                             });
                             if (lockedOverride) {
