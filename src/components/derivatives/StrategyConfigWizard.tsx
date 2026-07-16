@@ -554,6 +554,7 @@ export function StrategyConfigWizard({
   onArchive,
   onUnarchive,
   onCancelOverride,
+  dynamicAliases,
 }: StrategyConfigWizardProps) {
   const draftStorageKey = `strategyConfigWizardDraft:${draftKey || 'default'}`;
   // Build all available positions (derivatives as-is + stocks as-is) — skip when closed
