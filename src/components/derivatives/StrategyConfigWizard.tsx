@@ -375,7 +375,7 @@ export function autoClassify(
   // Naked Puts
   const npByUnderlying = new Map<string, Position[]>();
   for (const np of result.nakedPuts) {
-    const key = normalizeForMatching(np.option.underlying || np.option.description || '');
+    const key = canonicalKeyForPosition(np.option, dynamicAliases);
     if (!npByUnderlying.has(key)) npByUnderlying.set(key, []);
     npByUnderlying.get(key)!.push(np.option);
   }
@@ -387,7 +387,7 @@ export function autoClassify(
   // Leap Calls
   const lcByUnderlying = new Map<string, Position[]>();
   for (const lc of result.leapCalls) {
-    const key = normalizeForMatching(lc.option.underlying || lc.option.description || '');
+    const key = canonicalKeyForPosition(lc.option, dynamicAliases);
     if (!lcByUnderlying.has(key)) lcByUnderlying.set(key, []);
     lcByUnderlying.get(key)!.push(lc.option);
   }
@@ -400,11 +400,12 @@ export function autoClassify(
   for (const lp of result.longPuts) {
     const legs = addUnique([lp.option]);
     if (legs.length === 0) continue;
-    
-    const putKey = normalizeForMatching(lp.option.underlying || lp.option.description || '');
-    const matchingCC = strategies.find(s => 
+
+    const putKey = canonicalKeyForPosition(lp.option, dynamicAliases);
+    const matchingCC = strategies.find(s =>
       s.strategyType === 'covered_call' &&
-      normalizeForMatching(s.positions[0]?.underlying || s.positions[0]?.description || '') === putKey
+      s.positions[0] &&
+      canonicalKeyForPosition(s.positions[0], dynamicAliases) === putKey
     );
     
     if (matchingCC) {
