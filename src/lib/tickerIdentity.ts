@@ -204,6 +204,8 @@ const EXCHANGE_TICKER_TO_CANONICAL: Record<string, string> = {
   'STLAM.MI': 'STLA',
   'MBG.DE': 'MBG',
   'MBG.F': 'MBG',
+  'DAI.DE': 'MBG',
+  'DAI.F': 'MBG',
   'DHL.DE': 'DPW',
   'DPW.DE': 'DPW',
   'SAP.DE': 'SAP',
