@@ -637,7 +637,7 @@ export function StrategyConfigWizard({
     return Array.from(groupMap.entries())
       .map(([key, { displayName, positions }]) => ({ key, displayName, positions }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [open, effectivePositions]);
+  }, [open, effectivePositions, dynamicAliases]);
 
   const [strategies, setStrategies] = useState<WizardStrategy[]>([]);
   const [selectedIdsByGroup, setSelectedIdsByGroup] = useState<Map<string, Set<string>>>(new Map());
