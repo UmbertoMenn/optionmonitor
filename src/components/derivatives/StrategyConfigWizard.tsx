@@ -296,16 +296,22 @@ function getUnderlyingKey(p: Position, _allDerivatives: Position[], dynamicAlias
 }
 
 
-export function autoClassify(derivatives: Position[], allPositions: Position[], archivedKeysToExclude: string[] = []): WizardStrategy[] {
-  // Filter out archived underlyings before auto-classifying
-  const archivedSet = new Set(archivedKeysToExclude.map(k => k.toUpperCase().trim()));
+export function autoClassify(
+  derivatives: Position[],
+  allPositions: Position[],
+  archivedKeysToExclude: string[] = [],
+  dynamicAliases?: DynamicAliases,
+): WizardStrategy[] {
+  // Filter out archived underlyings before auto-classifying — comparazione canonica
+  const archivedSet = new Set(
+    archivedKeysToExclude
+      .map(k => canonicalKeyForText(k, dynamicAliases))
+      .filter(Boolean),
+  );
   const filteredDerivs = archivedSet.size > 0
-    ? derivatives.filter(d => {
-        const key = (d.underlying || d.description || '').toUpperCase().trim();
-        return !archivedSet.has(key);
-      })
+    ? derivatives.filter(d => !archivedSet.has(canonicalKeyForPosition(d, dynamicAliases)))
     : derivatives;
-  const result = categorizeDerivatives(filteredDerivs, allPositions, [], []);
+  const result = categorizeDerivatives(filteredDerivs, allPositions, [], [], { dynamicAliases });
   const strategies: WizardStrategy[] = [];
   let idCounter = 0;
   const consumedIds = new Set<string>();
