@@ -1320,7 +1320,7 @@ export function StrategyConfigWizard({
                             // (i.e. differs from auto-classification)
                             const lockedOverride = existingConfigs.find(c => {
                               if (!c.config_locked) return false;
-                              const configKey = getCanonicalKey(c.underlying) || normalizeForMatching(c.underlying);
+                              const configKey = canonicalKeyForText(c.underlying, dynamicAliases);
                               if (configKey !== group.key) return false;
                               return !matchesAutoClassify(
                                 {
@@ -1329,6 +1329,7 @@ export function StrategyConfigWizard({
                                   position_signatures: c.position_signatures as PositionSignature[],
                                 },
                                 autoClassifiedConfigs,
+                                dynamicAliases,
                               );
                             });
                             if (lockedOverride) {
