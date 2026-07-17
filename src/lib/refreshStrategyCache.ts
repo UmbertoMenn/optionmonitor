@@ -4,6 +4,38 @@ import { DerivativeOverride } from '@/types/derivativeOverrides';
 import { categorizeDerivatives } from './derivativeStrategies';
 import { saveStrategyCache } from './strategyCache';
 import { UnderlyingPrice } from '@/hooks/useUnderlyingPrices';
+import { buildDynamicAliasMap, canonicalKeyForPosition, canonicalKeyForText, DynamicAliases } from './tickerIdentity';
+
+/**
+ * Esclude dai derivati quelli il cui sottostante è archiviato.
+ *
+ * Il wizard archivia salvando la CHIAVE CANONICA (canonicalKeyForPosition):
+ * il confronto usa la stessa identica risoluzione, alias dinamici inclusi.
+ * Il confronto raw (testo uppercased) resta come fallback per chiavi legacy
+ * in formato testuale salvate prima della canonicalizzazione.
+ *
+ * Funzione pura, esportata per i test.
+ */
+export function filterArchivedDerivatives(
+  derivatives: Position[],
+  archivedUnderlyingKeys: string[],
+  dynamicAliases: DynamicAliases,
+): Position[] {
+  const archivedRawKeys = new Set<string>();
+  const archivedCanonicalKeys = new Set<string>();
+  for (const k of archivedUnderlyingKeys) {
+    const trimmed = (k || '').trim();
+    if (!trimmed) continue;
+    archivedRawKeys.add(trimmed.toUpperCase());
+    archivedCanonicalKeys.add(canonicalKeyForText(trimmed, dynamicAliases));
+  }
+  if (archivedCanonicalKeys.size === 0 && archivedRawKeys.size === 0) return derivatives;
+  return derivatives.filter(d => {
+    if (archivedCanonicalKeys.has(canonicalKeyForPosition(d, dynamicAliases))) return false;
+    const rawKey = (d.underlying || d.description || '').toUpperCase().trim();
+    return !archivedRawKeys.has(rawKey);
+  });
+}
 
 /**
  * Refreshes the strategy_cache for a portfolio after an Excel upload.
@@ -36,22 +68,26 @@ export async function refreshStrategyCacheForPortfolio(portfolioId: string): Pro
       return;
     }
 
+    // 1a. Fetch underlying mappings FIRST: servono sia per gli alias dinamici
+    // (identità canonica di archiviati e categorizzazione) sia per la mappa
+    // prezzi keyed-by-name più sotto.
+    const { data: mappingsRaw } = await supabase
+      .from('underlying_mappings')
+      .select('underlying, ticker');
+    const dynamicAliases = buildDynamicAliasMap(
+      (mappingsRaw || []) as Array<{ underlying: string; ticker: string }>,
+    );
+
     // 1b. Fetch archived underlyings for this portfolio (to exclude from cache)
     const { data: archivedRaw } = await supabase
       .from('archived_underlyings')
       .select('underlying_key')
       .eq('portfolio_id', portfolioId);
-    const archivedKeys = new Set(
-      (archivedRaw || []).map((a: any) => (a.underlying_key as string).toUpperCase().trim())
-    );
+    const archivedUnderlyingKeys = ((archivedRaw || []) as Array<{ underlying_key: string }>)
+      .map(a => a.underlying_key);
 
-    // Filter out archived derivatives
-    const activeDerivatives = archivedKeys.size > 0
-      ? derivatives.filter(d => {
-          const key = (d.underlying || d.description || '').toUpperCase().trim();
-          return !archivedKeys.has(key);
-        })
-      : derivatives;
+    // Filter out archived derivatives — match canonico autoritativo, raw come fallback
+    const activeDerivatives = filterArchivedDerivatives(derivatives, archivedUnderlyingKeys, dynamicAliases);
 
     if (activeDerivatives.length === 0) {
       await supabase.from('strategy_cache').delete().eq('portfolio_id', portfolioId);
@@ -72,11 +108,7 @@ export async function refreshStrategyCacheForPortfolio(portfolioId: string): Pro
       .from('underlying_prices')
       .select('*');
 
-    // 4. Fetch underlying mappings to build the prices map keyed by underlying name
-    const { data: mappingsRaw } = await supabase
-      .from('underlying_mappings')
-      .select('underlying, ticker');
-
+    // 4. Build the prices map keyed by underlying name (mappings già caricati allo step 1a)
     const tickerToUnderlying = new Map<string, string>();
     (mappingsRaw || []).forEach((m: any) => {
       tickerToUnderlying.set(m.ticker.toUpperCase(), m.underlying);
@@ -111,8 +143,12 @@ export async function refreshStrategyCacheForPortfolio(portfolioId: string): Pro
       .eq('portfolio_id', portfolioId);
     const strategyConfigs = (configsRaw || []) as any[];
 
-    // 6. Categorize (config-only: no orphan fallback) and save
-    const categories = categorizeDerivatives(activeDerivatives, positions, overrides, strategyConfigs, { configOnly: true });
+    // 6. Categorize (config-only: no orphan fallback) and save.
+    // dynamicAliases DEVE essere passato: la UI (Derivatives.tsx) categorizza
+    // con gli alias dinamici, e la cache letta dal cron deve produrre lo
+    // stesso identico risultato — altrimenti i sottostanti risolvibili solo
+    // via underlying_mappings vengono raggruppati/matchati diversamente.
+    const categories = categorizeDerivatives(activeDerivatives, positions, overrides, strategyConfigs, { configOnly: true, dynamicAliases });
     await saveStrategyCache(portfolioId, categories, underlyingPrices);
 
     console.log('[refreshStrategyCache] Cache refreshed for portfolio', portfolioId);

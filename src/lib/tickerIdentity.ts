@@ -564,8 +564,19 @@ export function canonicalKeyForPosition(p: Position, dynamicAliases: DynamicAlia
 
 /** Stessa canonicalizzazione di `canonicalKeyForPosition`, per input testuali liberi (es. una chiave archiviata). */
 export function canonicalKeyForText(text: string, dynamicAliases: DynamicAliases): string {
+  const trimmed = (text || '').trim();
+  // Idempotenza: una chiave già canonica in formato fallback "NAME:..." deve
+  // rimappare a se stessa (round-trip stabile con canonicalKeyForPosition).
+  // Senza questo guard, il prefisso verrebbe rinormalizzato come testo libero
+  // ("NAME:BIO ON" → "NAME:NAME BIO ON") rompendo il confronto con le chiavi
+  // salvate in archived_underlyings.
+  if (trimmed.toUpperCase().startsWith('NAME:')) {
+    const rest = trimmed.slice(5);
+    const norm = normalizeText(rest) || rest.toUpperCase().trim();
+    return `NAME:${norm}`;
+  }
   return getCanonicalTickerKey(
-    { rawTicker: text, rawName: text, underlyingName: text, description: text },
+    { rawTicker: trimmed, rawName: trimmed, underlyingName: trimmed, description: trimmed },
     { dynamicAliases },
   );
 }
