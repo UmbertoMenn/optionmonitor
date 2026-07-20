@@ -10,7 +10,7 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
-import { detectExpiryAssignments, PutPositionLite } from '@/lib/costBasis';
+import { detectExpiryAssignments, applyExpiryAssignmentToStore, PutPositionLite } from '@/lib/costBasis';
 import { fetchDynamicAliases } from '@/lib/costBasisStore';
 import { ParsedPosition } from '@/lib/flussiCsvParser';
 
