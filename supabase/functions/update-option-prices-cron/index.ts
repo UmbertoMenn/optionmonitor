@@ -6,16 +6,56 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-function chunkArray<T>(array: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// All outbound Yahoo requests use this timeout so a single slow/hanging request
+// can't stall a whole processing lane (there was previously no timeout at all).
+const YAHOO_FETCH_TIMEOUT_MS = 10000;
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Processes `items` with up to `concurrency` in flight at once (instead of fully
+ * serial processing). Each lane also waits `perItemDelayMs` between its own items
+ * as a mild throttle against Yahoo Finance rate limits. Lanes stop claiming new
+ * items once `isTimeUp()` returns true, so the caller can enforce an overall time
+ * budget and always return before the platform's request timeout — any unclaimed
+ * items are simply left for the next cron run instead of causing a 504.
+ */
+async function processWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  perItemDelayMs: number,
+  isTimeUp: () => boolean,
+  worker: (item: T) => Promise<void>,
+): Promise<{ claimed: number; skippedDueToTimeBudget: number }> {
+  let cursor = 0;
+
+  async function lane(): Promise<void> {
+    while (cursor < items.length) {
+      if (isTimeUp()) return;
+      const item = items[cursor++];
+      await worker(item);
+      if (perItemDelayMs > 0 && cursor < items.length) {
+        await delay(perItemDelayMs);
+      }
+    }
+  }
+
+  const laneCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: laneCount }, () => lane()));
+
+  return { claimed: cursor, skippedDueToTimeBudget: items.length - cursor };
 }
 
 function getThirdFriday(year: number, month: number): Date {
@@ -57,10 +97,10 @@ interface GroupKey {
 async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
   try {
     // Step 1: Get cookie from Yahoo
-    const initResp = await fetch('https://fc.yahoo.com', {
+    const initResp = await fetchWithTimeout('https://fc.yahoo.com', {
       redirect: 'manual',
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-    });
+    }, YAHOO_FETCH_TIMEOUT_MS);
     // Consume body to avoid resource leak
     await initResp.text();
 
@@ -74,12 +114,12 @@ async function getYahooCrumb(): Promise<{ crumb: string; cookie: string } | null
     }
 
     // Step 2: Get crumb
-    const crumbResp = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+    const crumbResp = await fetchWithTimeout('https://query2.finance.yahoo.com/v1/test/getcrumb', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Cookie': cookies,
       },
-    });
+    }, YAHOO_FETCH_TIMEOUT_MS);
 
     if (!crumbResp.ok) {
       console.log(`Crumb request failed: ${crumbResp.status}`);
@@ -113,12 +153,12 @@ async function fetchOptionChain(
 } | null> {
   try {
     const url = `https://query2.finance.yahoo.com/v7/finance/options/${encodeURIComponent(ticker)}?date=${expiryUnix}&crumb=${encodeURIComponent(crumb)}`;
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Cookie': cookie,
       },
-    });
+    }, YAHOO_FETCH_TIMEOUT_MS);
 
     if (!response.ok) {
       const body = await response.text();
@@ -173,12 +213,12 @@ function getMidPrice(contract: { bid: number; ask: number; lastPrice: number } |
 async function fetchFallbackPrice(occSymbol: string, crumb: string, cookie: string): Promise<number | null> {
   try {
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(occSymbol)}?crumb=${encodeURIComponent(crumb)}`;
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Cookie': cookie,
       },
-    });
+    }, YAHOO_FETCH_TIMEOUT_MS);
 
     if (!response.ok) {
       const body = await response.text();
@@ -378,27 +418,57 @@ serve(async (req) => {
     const groupEntries = Object.entries(groups);
     console.log(`Grouped into ${groupEntries.length} ticker+expiry groups (covering ${derivatives.length - skipped.length} positions)`);
 
-    // Step 4: Fetch option chains in batches
-    const BATCH_SIZE = 20;
-    const DELAY_BETWEEN_CALLS = 300;
-    const DELAY_BETWEEN_BATCHES = 2000;
+    // Step 4: Fetch option chains and update prices with bounded concurrency.
+    // Chains are fetched CONCURRENCY at a time instead of one-at-a-time with fixed
+    // delays, so wall-clock time no longer scales ~linearly with the number of
+    // ticker+expiry groups. A soft MAX_RUNTIME_MS budget guarantees the function
+    // always returns before Supabase's 150s request idle timeout (which otherwise
+    // surfaces as a 504 and silently drops the whole run) — any groups or fallback
+    // lookups left over when the budget is hit are simply picked up on the next
+    // cron run instead of losing every price update for that run.
+    const CONCURRENCY = 4;
+    const PACING_DELAY_MS = 150; // per-lane pacing, mild throttle vs Yahoo rate limits
+    const MAX_RUNTIME_MS = 100_000; // 100s, well under Supabase's 150s idle timeout
 
-    const batches = chunkArray(groupEntries, BATCH_SIZE);
+    const isTimeUp = () => Date.now() - startTime > MAX_RUNTIME_MS;
+
     let updated = 0;
     let failed = 0;
     const errors: string[] = [];
+    const fallbackNeeded: PositionToUpdate[] = [];
 
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
+    async function writePrice(pos: PositionToUpdate, price: number): Promise<void> {
+      const isBuyback = pos.table === 'call_buybacks';
+      const { error: updateError } = isBuyback
+        ? await supabase
+            .from('call_buybacks')
+            .update({ market_price: price, market_price_updated_at: new Date().toISOString() })
+            .eq('id', pos.positionId)
+        : await supabase
+            .from('positions')
+            .update({ current_price: price, updated_at: new Date().toISOString() })
+            .eq('id', pos.positionId);
 
-      if (batchIndex > 0) {
-        console.log(`Pausing ${DELAY_BETWEEN_BATCHES}ms between batches (${batchIndex + 1}/${batches.length})...`);
-        await delay(DELAY_BETWEEN_BATCHES);
+      if (updateError) {
+        console.error(`Failed to update ${pos.positionId}:`, updateError.message);
+        failed++;
+        errors.push(`${pos.occSymbol}: update failed`);
+      } else {
+        updated++;
       }
+    }
 
-      console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} groups)`);
-
-      for (const [groupKey, group] of batch) {
+    // Phase A: fetch each ticker+expiry chain once, price every position in it.
+    // Positions with no usable quote in the chain are queued for the per-contract
+    // fallback lookup in Phase B (same matching behaviour as before, just no
+    // longer fully serial).
+    console.log(`Processing ${groupEntries.length} ticker+expiry groups (concurrency=${CONCURRENCY})...`);
+    const { skippedDueToTimeBudget: groupsSkipped } = await processWithConcurrency(
+      groupEntries,
+      CONCURRENCY,
+      PACING_DELAY_MS,
+      isTimeUp,
+      async ([groupKey, group]) => {
         try {
           const chain = await fetchOptionChain(group.ticker, group.thirdFridayUnix, auth.crumb, auth.cookie);
 
@@ -407,49 +477,21 @@ serve(async (req) => {
               failed++;
               errors.push(`${pos.occSymbol}: no chain data`);
             }
-            await delay(DELAY_BETWEEN_CALLS);
-            continue;
+            return;
           }
 
           for (const pos of group.positions) {
             const isCall = pos.optionType.toLowerCase() === 'call';
             const contractMap = isCall ? chain.calls : chain.puts;
             const contract = contractMap[pos.occSymbol];
-            let price = getMidPrice(contract, pos.occSymbol);
-
-            // Fallback: try v8/chart for regularMarketPrice
-            if (price === null) {
-              await delay(DELAY_BETWEEN_CALLS);
-              price = await fetchFallbackPrice(pos.occSymbol, auth.crumb, auth.cookie);
-            }
+            const price = getMidPrice(contract, pos.occSymbol);
 
             if (price !== null) {
-              const isBuyback = pos.table === 'call_buybacks';
-              const { error: updateError } = isBuyback
-                ? await supabase
-                    .from('call_buybacks')
-                    .update({ market_price: price, market_price_updated_at: new Date().toISOString() })
-                    .eq('id', pos.positionId)
-                : await supabase
-                    .from('positions')
-                    .update({ current_price: price, updated_at: new Date().toISOString() })
-                    .eq('id', pos.positionId);
-
-              if (updateError) {
-                console.error(`Failed to update ${pos.positionId}:`, updateError.message);
-                failed++;
-                errors.push(`${pos.occSymbol}: update failed`);
-              } else {
-                updated++;
-              }
+              await writePrice(pos, price);
             } else {
-              console.log(`[Price] ${pos.occSymbol}: FAILED - no price from chain or fallback`);
-              failed++;
-              errors.push(`${pos.occSymbol}: no price data (chain+fallback)`);
+              fallbackNeeded.push(pos);
             }
           }
-
-          await delay(DELAY_BETWEEN_CALLS);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
           console.error(`Error processing group ${groupKey}:`, errorMsg);
@@ -458,9 +500,44 @@ serve(async (req) => {
             errors.push(`${pos.occSymbol}: ${errorMsg}`);
           }
         }
-      }
+      },
+    );
+
+    if (groupsSkipped > 0) {
+      console.log(`Time budget reached: skipped ${groupsSkipped}/${groupEntries.length} groups, will retry next run`);
     }
 
+    // Phase B: per-contract fallback (v8/chart regularMarketPrice) for positions
+    // the chain didn't have a usable quote for.
+    console.log(`Running fallback lookup for ${fallbackNeeded.length} positions (concurrency=${CONCURRENCY})...`);
+    const { skippedDueToTimeBudget: fallbackSkipped } = await processWithConcurrency(
+      fallbackNeeded,
+      CONCURRENCY,
+      PACING_DELAY_MS,
+      isTimeUp,
+      async (pos) => {
+        try {
+          const price = await fetchFallbackPrice(pos.occSymbol, auth.crumb, auth.cookie);
+          if (price !== null) {
+            await writePrice(pos, price);
+          } else {
+            console.log(`[Price] ${pos.occSymbol}: FAILED - no price from chain or fallback`);
+            failed++;
+            errors.push(`${pos.occSymbol}: no price data (chain+fallback)`);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          failed++;
+          errors.push(`${pos.occSymbol}: ${errorMsg}`);
+        }
+      },
+    );
+
+    if (fallbackSkipped > 0) {
+      console.log(`Time budget reached: skipped ${fallbackSkipped}/${fallbackNeeded.length} fallback lookups, will retry next run`);
+    }
+
+    const timeBudgetExceeded = groupsSkipped > 0 || fallbackSkipped > 0;
     const durationMs = Date.now() - startTime;
     console.log(`=== Option Prices Cron Completed: ${updated} updated, ${failed} failed, ${skipped.length} skipped in ${durationMs}ms ===`);
 
@@ -474,6 +551,9 @@ serve(async (req) => {
         total: allDerivatives.length,
         groups: groupEntries.length,
         duration_ms: durationMs,
+        time_budget_exceeded: timeBudgetExceeded,
+        groups_skipped_time_budget: groupsSkipped,
+        fallback_skipped_time_budget: fallbackSkipped,
         errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
