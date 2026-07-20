@@ -21,6 +21,7 @@ import { getCanonicalTickerKey } from '@/lib/tickerIdentity';
 import { fetchDynamicAliases } from '@/lib/costBasisStore';
 import { Position } from '@/types/portfolio';
 import { StrategyConfiguration } from '@/hooks/useStrategyConfigurations';
+import { fetchHistoricalUnderlyingPrices, splitOptionPremium } from '@/lib/optionTradeAttribution';
 
 export interface CashIngestResult {
   depositsUpserted: number;
@@ -36,6 +37,41 @@ export async function ingestCashMovements(
   movements: FlussiCashMovement[],
 ): Promise<CashIngestResult> {
   const { internalPairs } = pairInternalTransfers(movements);
+
+  // I giroconti cash ↔ GP non sono apporti esterni, ma sono indispensabili
+  // per depurare il rendimento della GP e quello della liquidità dai travasi
+  // interni. Il ledger è idempotente e non espone questa informazione come
+  // versamento/prelievo nella UI.
+  const gpTransfers = internalPairs.flatMap(([debit, credit]) => {
+    if (debit.isGP === credit.isGP) return [];
+    const amount = Math.abs(debit.amount);
+    const transferKey = [
+      debit.operationId || '-',
+      credit.operationId || '-',
+      debit.accountId,
+      credit.accountId,
+      debit.movementDate,
+      credit.movementDate,
+      amount.toFixed(2),
+      debit.isGP ? 'GP_OUT' : 'GP_IN',
+    ].join('|');
+    return [{
+      portfolio_id: portfolioId,
+      transfer_key: transferKey,
+      debit_date: debit.movementDate,
+      credit_date: credit.movementDate,
+      amount_eur: amount,
+      from_gp: debit.isGP,
+      to_gp: credit.isGP,
+    }];
+  });
+  if (gpTransfers.length > 0) {
+    const { error: transferErr } = await supabase
+      .from('internal_transfer_ledger' as never)
+      .upsert(gpTransfers as never[], { onConflict: 'portfolio_id,transfer_key', ignoreDuplicates: true });
+    if (transferErr) console.warn('[flussiIngest] ledger giroconti GP non aggiornato:', transferErr.message);
+  }
+
   const candidates = buildDepositCandidates(movements);
   if (candidates.length === 0) {
     return { depositsUpserted: 0, totalAmount: 0, skippedManualDates: [], internalTransfersExcluded: internalPairs.length };
@@ -290,7 +326,7 @@ export async function ingestStockTradesCostBasis(
   portfolioId: string,
   stockTrades: FlussiTitoliStockTrade[],
   optionTrades: FlussiTitoliOptionTrade[],
-  newSnapshotPositions?: Pick<Position, 'asset_type' | 'option_type' | 'quantity' | 'strike_price' | 'expiry_date' | 'underlying' | 'description' | 'ticker'>[],
+  newSnapshotPositions?: Pick<Position, 'asset_type' | 'option_type' | 'quantity' | 'strike_price' | 'expiry_date' | 'underlying' | 'description' | 'ticker' | 'isin' | 'currency' | 'exchange_rate' | 'snapshot_price' | 'current_price'>[],
 ): Promise<CostBasisIngestResult> {
   if (stockTrades.length === 0 && optionTrades.length === 0) {
     return { tradesApplied: 0, assignmentsDetected: 0, warnings: [] };
@@ -304,10 +340,72 @@ export async function ingestStockTradesCostBasis(
   const dynamicAliases = await fetchDynamicAliases();
   const stockKey = (t: FlussiTitoliStockTrade): string =>
     t.isin ? t.isin.toUpperCase() : getCanonicalTickerKey({ description: t.description }, { dynamicAliases });
+  const stockUnderlyingKey = (t: FlussiTitoliStockTrade): string => {
+    const linked = newSnapshotPositions?.find(position =>
+      !!t.isin && position.isin?.toUpperCase() === t.isin.toUpperCase(),
+    );
+    return getCanonicalTickerKey({
+      rawTicker: linked?.ticker,
+      underlyingName: linked?.underlying,
+      description: linked?.description || t.description,
+    }, { dynamicAliases });
+  };
   const optionKey = (underlyingTicker: string): string =>
     getCanonicalTickerKey({ rawTicker: underlyingTicker }, { dynamicAliases });
   const optionTradeKey = (t: FlussiTitoliOptionTrade): string =>
     optionBasisKey(optionKey(t.underlyingTicker), t.optionType, t.strike, t.expiryDate);
+
+  const historicalPrices = await fetchHistoricalUnderlyingPrices(optionTrades, optionKey);
+  const attributionWarnings: string[] = [];
+  const optionMetadata = new Map<FlussiTitoliOptionTrade, Record<string, unknown>>();
+  for (const trade of optionTrades) {
+    const underlyingKey = optionKey(trade.underlyingTicker);
+    const historical = historicalPrices.get(`${underlyingKey}|${trade.tradeDate}`);
+    const underlyingPrice = Number(historical?.close_price || 0);
+    const split = underlyingPrice > 0
+      ? splitOptionPremium(trade.optionType, trade.strike, trade.pricePerShare, underlyingPrice)
+      : null;
+    if (!split) {
+      attributionWarnings.push(
+        `${underlyingKey} ${trade.tradeDate}: prezzo storico del sottostante non disponibile; premio temporale non attribuito`,
+      );
+    } else if (split.intrinsicCappedToPremium) {
+      attributionWarnings.push(
+        `${underlyingKey} ${trade.tradeDate}: premio inferiore all'intrinseco teorico; intrinseco limitato al premio osservato`,
+      );
+    }
+    optionMetadata.set(trade, {
+      asset_type: 'derivative',
+      underlying_key: underlyingKey,
+      option_type: trade.optionType,
+      strike: trade.strike,
+      expiry_date: trade.expiryDate,
+      currency: trade.currency,
+      exchange_rate: trade.exchangeRate || 1,
+      gross_eur: Math.abs(trade.grossEUR || (trade.pricePerShare * trade.contracts * 100) / (trade.exchangeRate || 1)),
+      commission_eur: Math.abs(trade.commission || 0),
+      underlying_price: underlyingPrice > 0 ? underlyingPrice : null,
+      intrinsic_per_share: split?.intrinsicPerShare ?? null,
+      time_value_per_share: split?.timeValuePerShare ?? null,
+      attribution_price_source: historical?.source ?? 'missing',
+    });
+  }
+
+  const stockMetadata = new Map<FlussiTitoliStockTrade, Record<string, unknown>>();
+  for (const trade of stockTrades) {
+    const matchingPosition = newSnapshotPositions?.find(position =>
+      !!trade.isin && position.isin?.toUpperCase() === trade.isin.toUpperCase(),
+    );
+    stockMetadata.set(trade, {
+      // Se il titolo non è nello snapshot finale (es. vendita totale), non
+      // indoviniamo "stock": il motore lo risolve dagli snapshot di inizio/fine.
+      asset_type: matchingPosition?.asset_type ?? null,
+      currency: trade.currency || matchingPosition?.currency || null,
+      exchange_rate: trade.exchangeRate || matchingPosition?.exchange_rate || 1,
+      gross_eur: Math.abs(trade.grossEUR || (trade.price * trade.quantity) / (trade.exchangeRate || 1)),
+      commission_eur: Math.abs(trade.commission || 0),
+    });
+  }
 
   // ---- Ledger di idempotenza: inserisce le chiavi naturali; i conflitti
   // (già applicati in un upload precedente) vengono esclusi. Titoli e
@@ -320,6 +418,7 @@ export async function ingestStockTradesCostBasis(
       side: t.side,
       quantity: t.quantity,
       price: t.price,
+      ...stockMetadata.get(t),
     })),
     ...optionTrades.map(t => ({
       portfolio_id: portfolioId,
@@ -328,6 +427,7 @@ export async function ingestStockTradesCostBasis(
       side: t.side,
       quantity: t.contracts,
       price: t.pricePerShare,
+      ...optionMetadata.get(t),
     })),
   ];
   const { data: inserted, error: ledgerErr } = await supabase
@@ -338,6 +438,35 @@ export async function ingestStockTradesCostBasis(
     })
     .select('basis_key, trade_date, side, quantity, price');
   if (ledgerErr) throw new Error(`Errore ledger PMC: ${ledgerErr.message}`);
+
+  // Un re-upload può incontrare righe ledger create prima dell'introduzione
+  // dell'attribuzione. Le arricchiamo comunque, senza riapplicare il PMC.
+  for (const trade of [...stockTrades, ...optionTrades]) {
+    const isOption = 'contracts' in trade;
+    const basisKey = isOption
+      ? optionTradeKey(trade as FlussiTitoliOptionTrade)
+      : stockKey(trade as FlussiTitoliStockTrade);
+    const quantity = isOption
+      ? (trade as FlussiTitoliOptionTrade).contracts
+      : (trade as FlussiTitoliStockTrade).quantity;
+    const price = isOption
+      ? (trade as FlussiTitoliOptionTrade).pricePerShare
+      : (trade as FlussiTitoliStockTrade).price;
+    const metadata = isOption
+      ? optionMetadata.get(trade as FlussiTitoliOptionTrade)
+      : stockMetadata.get(trade as FlussiTitoliStockTrade);
+    if (!metadata) continue;
+    const { error: enrichErr } = await supabase
+      .from('cost_basis_trades' as never)
+      .update(metadata as never)
+      .eq('portfolio_id', portfolioId)
+      .eq('basis_key', basisKey)
+      .eq('trade_date', trade.tradeDate)
+      .eq('side', trade.side)
+      .eq('quantity', quantity)
+      .eq('price', price);
+    if (enrichErr) console.warn('[CostBasis] arricchimento attribuzione fallito:', enrichErr.message);
+  }
 
   const newLedgerKeys = new Set(
     ((inserted || []) as unknown as { basis_key: string; trade_date: string; side: string; quantity: number; price: number }[])
@@ -350,7 +479,7 @@ export async function ingestStockTradesCostBasis(
     newLedgerKeys.has(`${optionTradeKey(t)}|${t.tradeDate}|${t.side}|${t.contracts}|${t.pricePerShare}`),
   );
   if (freshTrades.length === 0 && freshOptionTrades.length === 0) {
-    return { tradesApplied: 0, assignmentsDetected: 0, warnings: [] };
+    return { tradesApplied: 0, assignmentsDetected: 0, warnings: attributionWarnings };
   }
 
   // ---- Rilevamento assegnazioni anticipate (richiede il saldo aggiornato) ----
@@ -378,7 +507,7 @@ export async function ingestStockTradesCostBasis(
       toPutLite(newSnapshotPositions),
       freshTrades,
       optionTrades,
-      stockKey,
+      stockUnderlyingKey,
       optionKey,
     );
     if (assignments.length > 0) {
@@ -419,7 +548,17 @@ export async function ingestStockTradesCostBasis(
     preExistingQuantities.set(k, (preExistingQuantities.get(k) || 0) + Number(p.quantity || 0));
   }
 
-  const result = applyStockTradesToBasis(existing, freshTrades, assignments, stockKey, preExistingQuantities);
+  // Il PMC è indicizzato per ISIN, mentre il detector lavora per sottostante.
+  // Traduce la sola chiave delle assegnazioni prima di consumare le vendite.
+  const assignmentsForBasis = assignments.map(assignment => {
+    const matchingTrade = freshTrades.find(trade =>
+      stockUnderlyingKey(trade) === assignment.underlyingKey,
+    );
+    return matchingTrade
+      ? { ...assignment, underlyingKey: stockKey(matchingTrade) }
+      : assignment;
+  });
+  const result = applyStockTradesToBasis(existing, freshTrades, assignmentsForBasis, stockKey, preExistingQuantities);
   for (const w of result.warnings) console.warn('[CostBasis]', w);
 
   // I trade saltati per mancanza di PMC di partenza NON sono stati applicati:
@@ -443,6 +582,58 @@ export async function ingestStockTradesCostBasis(
     freshOptionTrades,
     optionKey,
   );
+
+  // Registra anche l'assegnazione anticipata come trasferimento informativo.
+  // Non tocca il PMC (già gestito sopra), ma consente all'attribuzione di
+  // neutralizzare strike pagato, azioni ricevute e intrinseco estinto.
+  for (const assignment of assignments) {
+    const closeTrade = result.assignmentCloses.find(trade =>
+      stockUnderlyingKey(trade) === assignment.underlyingKey,
+    );
+    if (!closeTrade) continue;
+    const exchangeRate = closeTrade.exchangeRate > 0 ? closeTrade.exchangeRate : 1;
+    const historical = historicalPrices.get(`${assignment.underlyingKey}|${closeTrade.tradeDate}`);
+    const underlyingPrice = Number(historical?.close_price || 0);
+    const assignedPosition = newSnapshotPositions?.find(position =>
+      position.asset_type !== 'derivative'
+      && getCanonicalTickerKey({
+        rawTicker: position.ticker,
+        underlyingName: position.underlying,
+        description: position.description,
+      }, { dynamicAliases }) === assignment.underlyingKey,
+    );
+    const fallbackSpot = Number(assignedPosition?.snapshot_price ?? assignedPosition?.current_price ?? 0);
+    const spot = underlyingPrice > 0 ? underlyingPrice : fallbackSpot;
+    const intrinsic = spot > 0 ? Math.max(0, assignment.strike - spot) : null;
+    const { error: assignmentLedgerError } = await supabase
+      .from('cost_basis_trades' as never)
+      .upsert([{
+        portfolio_id: portfolioId,
+        basis_key: stockKey(closeTrade),
+        trade_date: closeTrade.tradeDate,
+        side: 'ASG',
+        quantity: assignment.shares,
+        price: assignment.strike,
+        kind: 'early_assignment',
+        asset_type: assignedPosition?.asset_type ?? 'stock',
+        underlying_key: assignment.underlyingKey,
+        option_type: 'put',
+        strike: assignment.strike,
+        currency: closeTrade.currency,
+        exchange_rate: exchangeRate,
+        gross_eur: assignment.strike * assignment.shares / exchangeRate,
+        underlying_price: spot > 0 ? spot : null,
+        intrinsic_per_share: intrinsic,
+        time_value_per_share: 0,
+        attribution_price_source: historical?.source ?? (spot > 0 ? 'snapshot_proxy' : 'missing'),
+      }] as never[], {
+        onConflict: 'portfolio_id,basis_key,trade_date,side,quantity,price',
+        ignoreDuplicates: true,
+      });
+    if (assignmentLedgerError) {
+      attributionWarnings.push(`Ledger assegnazione ${assignment.underlyingKey} non aggiornato: ${assignmentLedgerError.message}`);
+    }
+  }
 
   // Marca nel ledger le vendite nettate come chiusure di assegnazione
   for (const t of result.assignmentCloses) {
@@ -486,6 +677,6 @@ export async function ingestStockTradesCostBasis(
   return {
     tradesApplied: result.normalTrades.length + result.assignmentCloses.length + optionResult.applied,
     assignmentsDetected: assignments.length,
-    warnings: result.warnings,
+    warnings: [...result.warnings, ...attributionWarnings],
   };
 }

@@ -22,10 +22,12 @@ import { NettingViewInfoTooltip } from '@/components/dashboard/NettingViewInfoTo
 import { PerformanceEvolutionChart } from './charts/PerformanceEvolutionChart';
 import { YearlyReturnChart } from './charts/YearlyReturnChart';
 import { PortfolioEvolutionChart } from './charts/PortfolioEvolutionChart';
-import { TrendingUp, BarChart3, LineChart } from 'lucide-react';
+import { PerformanceAttributionChart } from './charts/PerformanceAttributionChart';
+import { TrendingUp, BarChart3, LineChart, ChartNoAxesCombined } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface HistoricalChartsCarouselProps {
+  portfolioId: string | null;
   historicalData: HistoricalDataEntry[];
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
@@ -53,9 +55,16 @@ const slides = [
     icon: LineChart,
     description: 'Andamento valore patrimoniale',
   },
+  {
+    id: 'attribution',
+    title: 'Scomposizione Rendimento',
+    icon: ChartNoAxesCombined,
+    description: 'Contributo al rendimento per classe, con premio opzioni separato tra tempo e intrinseco',
+  },
 ];
 
 export function HistoricalChartsCarousel({
+  portfolioId,
   historicalData,
   viewMode,
   onViewModeChange,
@@ -66,7 +75,9 @@ export function HistoricalChartsCarousel({
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
 
-  const activeSlides = slides;
+  // Per i portafogli aggregati mancano ancora snapshot e movimenti consolidati
+  // con una chiave comune: l'attribuzione viene quindi mostrata solo sul singolo.
+  const activeSlides = portfolioId ? slides : slides.filter(slide => slide.id !== 'attribution');
   const activeSlide = activeSlides[current] ?? activeSlides[0];
 
   const onSelect = useCallback(() => {
@@ -128,19 +139,21 @@ export function HistoricalChartsCarousel({
               })()}
               {activeSlide.title}
             </CardTitle>
-            <div className="flex items-center gap-1.5">
-              <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
-                <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="netting_total">Netting Totale</SelectItem>
-                  <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
-                  <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
-                </SelectContent>
-              </Select>
-              <NettingViewInfoTooltip />
-            </div>
+            {activeSlide.id !== 'attribution' && (
+              <div className="flex items-center gap-1.5">
+                <Select value={viewMode} onValueChange={(v) => onViewModeChange(v as ViewMode)}>
+                  <SelectTrigger className="h-7 w-auto text-xs bg-muted border-0 px-2 gap-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="netting_total">Netting Totale</SelectItem>
+                    <SelectItem value="netting_intrinsic_a">Netting Intrinseco (A)</SelectItem>
+                    <SelectItem value="netting_intrinsic_b">Netting Intrinseco (B)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <NettingViewInfoTooltip />
+              </div>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">{activeSlide.description}</p>
         </CardHeader>
@@ -168,6 +181,17 @@ export function HistoricalChartsCarousel({
                   />
                 </div>
               </CarouselItem>
+              {portfolioId && (
+                <CarouselItem>
+                  <div className="h-[300px]">
+                    <PerformanceAttributionChart
+                      portfolioId={portfolioId}
+                      historicalData={historicalData}
+                      deposits={deposits}
+                    />
+                  </div>
+                </CarouselItem>
+              )}
             </CarouselContent>
             <div className="flex items-center justify-center gap-4 mt-4">
               <CarouselPrevious className="static translate-y-0" />

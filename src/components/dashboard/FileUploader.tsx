@@ -204,6 +204,7 @@ export function FileUploader() {
       if (movementSummary.length > 0) {
         await queryClient.invalidateQueries({ queryKey: ['deposits'] });
         await queryClient.invalidateQueries({ queryKey: ['call-buybacks'] });
+        await queryClient.invalidateQueries({ queryKey: ['performance-attribution'] });
         toast.success('Movimenti elaborati', { description: movementSummary.join(' • ') });
       }
 
@@ -429,6 +430,7 @@ export function FileUploader() {
             queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
             queryClient.invalidateQueries({ queryKey: ['gp-holdings'] }),
             queryClient.invalidateQueries({ queryKey: ['admin-view-portfolio'] }),
+            queryClient.invalidateQueries({ queryKey: ['performance-attribution'] }),
           ]);
         } catch (snapErr) {
           console.error('[FileUploader] Snapshot save failed:', snapErr);

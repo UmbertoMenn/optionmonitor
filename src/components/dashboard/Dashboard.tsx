@@ -481,6 +481,7 @@ export function Dashboard() {
         {/* Historical Charts Carousel */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <HistoricalChartsCarousel
+            portfolioId={isAggregatedView ? null : portfolio?.id ?? null}
             historicalData={historicalData}
             viewMode={viewMode}
             onViewModeChange={setViewMode}

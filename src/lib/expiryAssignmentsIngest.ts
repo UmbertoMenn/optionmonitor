@@ -127,6 +127,11 @@ export async function ingestExpiryAssignments(
     const stockBasisKey = sample.isin
       ? sample.isin.toUpperCase()
       : stockUKey(sample);
+    const exchangeRate = Number(sample.exchange_rate || 1) > 0 ? Number(sample.exchange_rate) : 1;
+    const underlyingPrice = Number(sample.snapshot_price ?? sample.current_price ?? 0);
+    const intrinsicPerShare = underlyingPrice > 0
+      ? Math.max(0, a.strike - underlyingPrice)
+      : null;
 
     // Ledger idempotente
     const { data: ledgerInserted, error: ledgerErr } = await supabase
@@ -140,6 +145,17 @@ export async function ingestExpiryAssignments(
           quantity: a.shares,
           price: a.strike,
           kind: 'expiry_assignment',
+          asset_type: sample.asset_type,
+          underlying_key: a.underlyingKey,
+          option_type: 'put',
+          strike: a.strike,
+          currency: sample.currency,
+          exchange_rate: exchangeRate,
+          gross_eur: a.strike * a.shares / exchangeRate,
+          underlying_price: underlyingPrice > 0 ? underlyingPrice : null,
+          intrinsic_per_share: intrinsicPerShare,
+          time_value_per_share: 0,
+          attribution_price_source: underlyingPrice > 0 ? 'snapshot_proxy' : 'missing',
         }] as never[],
         { onConflict: 'portfolio_id,basis_key,trade_date,side,quantity,price', ignoreDuplicates: true },
       )
@@ -148,6 +164,29 @@ export async function ingestExpiryAssignments(
       outWarnings.push(`Ledger assegnazione ${a.underlyingKey} fallito: ${ledgerErr.message}`);
       continue;
     }
+    // Un re-upload può incontrare il ledger creato prima delle colonne di
+    // attribuzione: lo arricchisce senza riapplicare il PMC.
+    await supabase
+      .from('cost_basis_trades' as never)
+      .update({
+        asset_type: sample.asset_type,
+        underlying_key: a.underlyingKey,
+        option_type: 'put',
+        strike: a.strike,
+        currency: sample.currency,
+        exchange_rate: exchangeRate,
+        gross_eur: a.strike * a.shares / exchangeRate,
+        underlying_price: underlyingPrice > 0 ? underlyingPrice : null,
+        intrinsic_per_share: intrinsicPerShare,
+        time_value_per_share: 0,
+        attribution_price_source: underlyingPrice > 0 ? 'snapshot_proxy' : 'missing',
+      } as never)
+      .eq('portfolio_id', portfolioId)
+      .eq('basis_key', stockBasisKey)
+      .eq('trade_date', snapshotDate)
+      .eq('side', 'ASG')
+      .eq('quantity', a.shares)
+      .eq('price', a.strike);
     if (!ledgerInserted || ledgerInserted.length === 0) {
       // già applicata da un upload precedente
       continue;
