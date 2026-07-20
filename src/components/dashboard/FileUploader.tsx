@@ -15,6 +15,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioContext } from '@/contexts/PortfolioContext';
 import { upsertUploadSnapshot } from '@/lib/uploadSnapshot';
+import { ingestExpiryAssignments } from '@/lib/expiryAssignmentsIngest';
 import { refreshStrategyCacheForPortfolio } from '@/lib/refreshStrategyCache';
 import {
   getEffectiveUploadUserId,
