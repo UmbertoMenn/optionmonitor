@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { detectExpiryAssignments, PutPositionLite } from '@/lib/costBasis';
+import {
+  detectExpiryAssignments,
+  applyExpiryAssignmentToStore,
+  PutPositionLite,
+} from '@/lib/costBasis';
 
 const fullKey = (u: string, s: number, e: string) => `${u}|${s}|${e}`;
 
