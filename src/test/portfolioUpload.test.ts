@@ -4,6 +4,7 @@ import {
   getPortfolioParseOptions,
   shouldRefreshGpSnapshot,
   shouldRefreshPositionsSnapshot,
+  filterSupportedUploadFiles,
 } from '@/lib/portfolioUpload';
 
 describe('portfolio upload GP refresh', () => {
@@ -48,5 +49,32 @@ describe('portfolio upload user options', () => {
     expect(otherOptions.excludedPositionIsins).toBeUndefined();
     expect(otherOptions.excludedPositionDescriptions).toBeUndefined();
     expect(otherOptions.includeGpCashInCash).toBeUndefined();
+  });
+});
+
+describe('filterSupportedUploadFiles (paste da appunti)', () => {
+  const file = (name: string) => new File(['contenuto'], name, { type: '' });
+
+  it('mantiene i file con estensione supportata (csv/xlsx/xls)', () => {
+    const files = [file('FlussoSaldiContiCash.csv'), file('estratto.xlsx'), file('vecchio.xls')];
+    expect(filterSupportedUploadFiles(files)).toEqual(files);
+  });
+
+  it('scarta le estensioni non supportate (es. allegato PDF/immagine copiato per errore)', () => {
+    const csv = file('FlussoMovContiCash.csv');
+    const result = filterSupportedUploadFiles([csv, file('nota.pdf'), file('logo.png')]);
+    expect(result).toEqual([csv]);
+  });
+
+  it('è case-insensitive sull’estensione', () => {
+    expect(filterSupportedUploadFiles([file('SALDI.CSV')])).toHaveLength(1);
+  });
+
+  it('ritorna vuoto se nessun file ha un’estensione riconosciuta', () => {
+    expect(filterSupportedUploadFiles([file('nota.txt'), file('foto.jpg')])).toEqual([]);
+  });
+
+  it('ritorna vuoto su lista vuota', () => {
+    expect(filterSupportedUploadFiles([])).toEqual([]);
   });
 });

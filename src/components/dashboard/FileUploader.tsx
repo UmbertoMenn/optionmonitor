@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,7 @@ import {
   getPortfolioParseOptions,
   shouldRefreshGpSnapshot,
   shouldRefreshPositionsSnapshot,
+  filterSupportedUploadFiles,
 } from '@/lib/portfolioUpload';
 
 /** Risolve le regole di esclusione per l'utente effettivo (UUID + username). */
@@ -468,11 +469,38 @@ export function FileUploader() {
     disabled: isProcessing,
   });
 
+  // ---- Incolla da appunti (Ctrl+V / Cmd+V) ----
+  // Alternativa al drag-and-drop: molti client email (in particolare la
+  // webmail in un'altra scheda del browser) non espongono l'allegato come
+  // "Files" durante il drag e il browser mostra il cursore di divieto anche
+  // prima che il nostro dropzone riceva l'evento. Copiare l'allegato (tasto
+  // destro → Copia) e incollarlo qui bypassa quel limite: il paste porta i
+  // byte reali sugli appunti del sistema operativo.
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      if (isProcessing) return;
+      const files = event.clipboardData?.files;
+      if (!files || files.length === 0) return; // paste di solo testo: non intercettare
+      const supported = filterSupportedUploadFiles(Array.from(files));
+      if (supported.length === 0) {
+        toast.error('Nessun file CSV/XLSX riconosciuto negli appunti');
+        return;
+      }
+      event.preventDefault();
+      onDropPortfolio(supported);
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [isProcessing, onDropPortfolio]);
+
   return (
     <Card className="border-dashed border-2 border-border hover:border-primary/50 transition-colors">
       <CardContent className="p-4">
         <p className="text-xs text-muted-foreground text-center mb-3 px-2">
           Carica fino a 4 CSV (saldi cash, saldi titoli, movimenti cash, movimenti titoli). Quando presenti nei flussi, holdings e liquidità GP vengono aggiornati nello stesso caricamento.
+        </p>
+        <p className="text-[11px] text-muted-foreground/80 text-center mb-3 px-2">
+          Se trascinare l'allegato dalla mail non funziona (cursore di divieto), copialo (tasto destro → Copia) e incollalo qui con Ctrl+V.
         </p>
         <div
           {...portfolioDropzone.getRootProps()}

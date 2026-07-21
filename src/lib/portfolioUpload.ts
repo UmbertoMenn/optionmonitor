@@ -67,3 +67,22 @@ export function shouldRefreshGpSnapshot(parsedFiles: GpSnapshotSource[]): boolea
 export function shouldRefreshPositionsSnapshot(parsedFiles: PositionsSnapshotSource[]): boolean {
   return parsedFiles.some(parsed => parsed.positionsSnapshotPresent);
 }
+
+/** Estensioni accettate dal caricatore portfolio (stesse del dropzone: .csv/.xlsx/.xls). */
+const SUPPORTED_UPLOAD_EXTENSIONS = /\.(csv|xlsx|xls)$/i;
+
+/**
+ * Filtra un elenco di File (es. da `clipboardData.files` su un evento paste)
+ * mantenendo solo quelli con estensione supportata dal caricatore portfolio.
+ *
+ * Usata per il paste da appunti: a differenza del drag-and-drop, che alcuni
+ * client email/browser bloccano con il cursore "divieto" perché il drag non
+ * espone "Files" in dataTransfer.types, Ctrl+V con un file copiato dal client
+ * email mette i byte reali sugli appunti del sistema operativo e bypassa quel
+ * limite. Il filtro evita di intercettare un normale paste di testo (che non
+ * ha mai file allegati) e scarta allegati di tipo non gestito.
+ */
+export function filterSupportedUploadFiles(files: File[]): File[] {
+  return files.filter(file => SUPPORTED_UPLOAD_EXTENSIONS.test(file.name));
+}
+
