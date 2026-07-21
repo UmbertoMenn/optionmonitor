@@ -112,6 +112,7 @@ export function PerformanceAttributionChart({
   deposits,
 }: PerformanceAttributionChartProps) {
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
+  const [selectedEnd, setSelectedEnd] = useState<string | null>(null);
   const [hideInactive, setHideInactive] = useState(true);
   const { data, isLoading, error } = usePerformanceAttribution(portfolioId);
 
@@ -145,11 +146,11 @@ export function PerformanceAttributionChart({
       };
     }
 
-    // T1 è sempre l'ultima data attribuibile; l'utente sceglie solo T0
-    // (funzione pura, testata).
-    const resolved = resolveAttributionPeriod(attributableDates, selectedStart);
+    // Sia T0 sia T1 sono selezionabili; in assenza di selezione si ripiega
+    // su prima/ultima data attribuibile (funzione pura, testata).
+    const resolved = resolveAttributionPeriod(attributableDates, selectedStart, selectedEnd);
     if (!resolved) {
-      return { result: null, attributableDates, period: null, reason: 'Periodo non valido.' };
+      return { result: null, attributableDates, period: null, reason: 'Periodo non valido: la data T0 deve precedere la data T1.' };
     }
     const { startDate, endDate } = resolved;
 
@@ -183,7 +184,7 @@ export function PerformanceAttributionChart({
         internalTransfers: data.internalTransfers,
       }),
     };
-  }, [data, deposits, historicalData, selectedStart]);
+  }, [data, deposits, historicalData, selectedStart, selectedEnd]);
 
   const result = calculation.result;
   const { attributableDates } = calculation;
@@ -195,6 +196,17 @@ export function PerformanceAttributionChart({
       item.category === 'reconciliation_gap' || item.status !== 'no_activity',
     );
   }, [result, hideInactive]);
+
+  // Selezionare un estremo "congela" l'altro al valore attualmente risolto,
+  // così non salta a prima/ultima data mentre si sta scegliendo il periodo.
+  const pickStart = (value: string) => {
+    setSelectedStart(value);
+    setSelectedEnd(prev => prev ?? calculation.period?.endDate ?? attributableDates.at(-1) ?? null);
+  };
+  const pickEnd = (value: string) => {
+    setSelectedEnd(value);
+    setSelectedStart(prev => prev ?? calculation.period?.startDate ?? null);
+  };
 
   if (!portfolioId) {
     return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Disponibile sul singolo portafoglio</div>;
@@ -211,21 +223,35 @@ export function PerformanceAttributionChart({
   }
 
   const activeStart = calculation.period?.startDate ?? null;
+  const activeEnd = calculation.period?.endDate ?? null;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
-      {/* Riga unica – selettore T0 (T1 è sempre l'ultima data disponibile) + totale periodo */}
+      {/* Riga unica – selettori T0/T1 + toggle classi inattive + totale periodo */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         {attributableDates.length >= 2 ? (
-          <div className="flex items-center gap-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
             <span className="text-muted-foreground">Da (T0)</span>
-            <Select value={activeStart ?? undefined} onValueChange={setSelectedStart}>
+            <Select value={activeStart ?? undefined} onValueChange={pickStart}>
               <SelectTrigger className="h-7 w-32 text-[11px]">
                 <SelectValue placeholder="T0" />
               </SelectTrigger>
               <SelectContent>
                 {attributableDates.slice(0, -1).map(date => (
-                  <SelectItem key={date} value={date} className="text-[11px]">
+                  <SelectItem key={date} value={date} disabled={activeEnd != null && date >= activeEnd} className="text-[11px]">
+                    {formatDate(date)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-muted-foreground">A (T1)</span>
+            <Select value={activeEnd ?? undefined} onValueChange={pickEnd}>
+              <SelectTrigger className="h-7 w-32 text-[11px]">
+                <SelectValue placeholder="T1" />
+              </SelectTrigger>
+              <SelectContent>
+                {attributableDates.slice(1).map(date => (
+                  <SelectItem key={date} value={date} disabled={activeStart != null && date <= activeStart} className="text-[11px]">
                     {formatDate(date)}
                   </SelectItem>
                 ))}
