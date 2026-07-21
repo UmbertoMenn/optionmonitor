@@ -279,6 +279,47 @@ describe('calculatePerformanceAttribution', () => {
     expect(itemAmount(result, 'cash')).toBeCloseTo(0, 6);
   });
 
+  it('tratta l’assegnazione CALL (covered call) come trasferimento azioni→cassa, senza falso rendimento', () => {
+    // Covered call ITM assegnata a scadenza: 100 azioni richiamate a strike 380
+    // con spot 390. Le azioni ESCONO (−spot) e la cassa ENTRA (+strike), specularmente
+    // alla put. Con il codice pre-fix (intrinseco put su una call: max(0, strike−spot)=0
+    // e fair value = strike con azioni in ENTRATA) il contributo azioni risultava
+    // ≈ −77.000 € e la cassa ≈ +76.000 €: falso rendimento enorme, pur con totalPL 0.
+    const startHistorical = historical('2026-07-17', 38_000, { MSFT: 390 });
+    const endHistorical = historical('2026-07-18', 38_000, { MSFT: 390 });
+    const heldShares = position({
+      asset_type: 'stock', isin: 'US5949181045', ticker: 'MSFT', quantity: 100,
+      snapshot_price: 390, snapshot_market_value: 39_000,
+    });
+    const shortCall = position({
+      asset_type: 'derivative', ticker: 'MSFT', underlying: 'MSFT',
+      option_type: 'call', strike_price: 380, expiry_date: '2026-07-17',
+      quantity: -1, snapshot_price: 10,
+    });
+    const result = calculatePerformanceAttribution({
+      startSnapshot: snapshot('2026-07-17', 0, [heldShares, shortCall]),
+      endSnapshot: snapshot('2026-07-18', 38_000, []),
+      startHistorical,
+      endHistorical,
+      allHistoricalData: [startHistorical, endHistorical],
+      deposits: [],
+      trades: [{
+        basis_key: 'US5949181045', trade_date: '2026-07-18', side: 'ASG',
+        kind: 'early_assignment', quantity: 100, price: 380,
+        asset_type: 'stock', underlying_key: 'MSFT', option_type: 'call', strike: 380,
+        exchange_rate: 1, underlying_price: 390, intrinsic_per_share: 10,
+        time_value_per_share: 0, attribution_price_source: 'snapshot_proxy',
+      }],
+      internalTransfers: [],
+    });
+
+    expect(result.totalPL).toBe(0);
+    expect(itemAmount(result, 'option_intrinsic')).toBeCloseTo(0, 6);
+    expect(itemAmount(result, 'stock')).toBeCloseTo(0, 6);
+    expect(itemAmount(result, 'cash')).toBeCloseTo(0, 6);
+    expect(itemAmount(result, 'reconciliation_gap')).toBeCloseTo(0, 6);
+  });
+
   it('espone il residuo quando Netting e dettaglio posizioni non riconciliano', () => {
     const startHistorical = historical('2026-07-01', 100);
     const endHistorical = historical('2026-07-02', 120);

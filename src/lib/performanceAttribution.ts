@@ -367,12 +367,20 @@ export function calculatePerformanceAttribution(input: {
     if (!(trade.trade_date > startDate && trade.trade_date <= endDate)) continue;
     coverage.tradesInPeriod += 1;
     if (trade.side === 'ASG') {
-      // L'assegnazione di una PUT è un trasferimento, non rendimento:
-      // la quota fair passa alle azioni e l'intrinseco estingue la passività.
+      // L'assegnazione è un trasferimento, non un rendimento: l'intrinseco
+      // estingue la passività dell'opzione corta e le azioni si muovono al
+      // valore di mercato (spot). La DIREZIONE dipende dal tipo di opzione:
+      //  - PUT assegnata → si COMPRANO azioni a strike: azioni entrano (+spot),
+      //    cassa esce (−strike), intrinseco put = max(0, strike − spot);
+      //  - CALL assegnata (covered call) → si VENDONO azioni a strike: azioni
+      //    escono (−spot), cassa entra (+strike), intrinseco call = max(0, spot − strike).
+      // In entrambi i casi l'intrinseco estinto vale +intrinseco*azioni.
       const assignedPosition = positionByBasis.get(trade.basis_key);
       const category = categoryForTrade(trade, basisCategory);
       tradeCategories.add(category);
       tradeCategories.add('option_intrinsic');
+      const optionType: 'call' | 'put' = trade.option_type === 'call' ? 'call' : 'put';
+      const shareSign = optionType === 'call' ? -1 : 1; // call: azioni escono; put: azioni entrano
       const quantity = Math.abs(Number(trade.quantity || 0)); // azioni, non contratti
       const strike = Math.abs(Number(trade.strike ?? trade.price ?? 0));
       const exchangeRate = Number(trade.exchange_rate || assignedPosition?.exchange_rate || 1) > 0
@@ -385,14 +393,17 @@ export function calculatePerformanceAttribution(input: {
         ? Number(trade.underlying_price)
         : proxySpot(underlyingKey, trade.trade_date, allHistoricalData) ?? positionSpot;
       if (spot > 0 && strike > 0) {
-        const intrinsic = Math.max(0, strike - spot);
-        const fairValue = Math.max(0, strike - intrinsic);
-        flows[category] += fairValue * quantity / exchangeRate;
+        const intrinsic = optionType === 'call'
+          ? Math.max(0, spot - strike)
+          : Math.max(0, strike - spot);
+        // Le azioni si muovono al valore di mercato (spot), con segno per tipo.
+        flows[category] += shareSign * spot * quantity / exchangeRate;
         flows.option_intrinsic += intrinsic * quantity / exchangeRate;
       } else {
         // Senza spot si conserva la riconciliazione, ma non si inventa la
-        // separazione fair/intrinseco: il trasferimento resta non attribuito.
-        flows.unclassified += strike * quantity / exchangeRate;
+        // separazione fair/intrinseco: il trasferimento resta non attribuito
+        // (con il segno corretto, così la cassa quadra comunque a ±strike).
+        flows.unclassified += shareSign * strike * quantity / exchangeRate;
         coverage.missingOptionTrades += 1;
       }
       continue;
