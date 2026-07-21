@@ -20,10 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { AttributionTimeRange, resolveAttributionPeriod } from '@/lib/attributionPeriod';
-
-type TimeRange = AttributionTimeRange;
-type RangeSelection = TimeRange | 'CUSTOM';
+import { resolveAttributionPeriod } from '@/lib/attributionPeriod';
 
 interface PerformanceAttributionChartProps {
   portfolioId: string | null;
@@ -114,9 +111,7 @@ export function PerformanceAttributionChart({
   historicalData,
   deposits,
 }: PerformanceAttributionChartProps) {
-  const [range, setRange] = useState<RangeSelection>('1Y');
-  const [customStart, setCustomStart] = useState<string | null>(null);
-  const [customEnd, setCustomEnd] = useState<string | null>(null);
+  const [selectedStart, setSelectedStart] = useState<string | null>(null);
   const [hideInactive, setHideInactive] = useState(true);
   const { data, isLoading, error } = usePerformanceAttribution(portfolioId);
 
@@ -150,16 +145,11 @@ export function PerformanceAttributionChart({
       };
     }
 
-    // Risoluzione del periodo (funzione pura, testata): override manuale
-    // T0/T1 espliciti oppure preset relativo.
-    const resolved = resolveAttributionPeriod({ attributableDates, range, customStart, customEnd });
+    // T1 è sempre l'ultima data attribuibile; l'utente sceglie solo T0
+    // (funzione pura, testata).
+    const resolved = resolveAttributionPeriod(attributableDates, selectedStart);
     if (!resolved) {
-      return {
-        result: null,
-        attributableDates,
-        period: null,
-        reason: 'Periodo non valido: la data T0 deve precedere la data T1.',
-      };
+      return { result: null, attributableDates, period: null, reason: 'Periodo non valido.' };
     }
     const { startDate, endDate } = resolved;
 
@@ -193,7 +183,7 @@ export function PerformanceAttributionChart({
         internalTransfers: data.internalTransfers,
       }),
     };
-  }, [data, deposits, historicalData, range, customStart, customEnd]);
+  }, [data, deposits, historicalData, selectedStart]);
 
   const result = calculation.result;
   const { attributableDates } = calculation;
@@ -205,24 +195,6 @@ export function PerformanceAttributionChart({
       item.category === 'reconciliation_gap' || item.status !== 'no_activity',
     );
   }, [result, hideInactive]);
-
-  const selectPreset = (preset: TimeRange) => {
-    setRange(preset);
-    setCustomStart(null);
-    setCustomEnd(null);
-  };
-
-  const pickStart = (value: string) => {
-    setRange('CUSTOM');
-    setCustomStart(value);
-    setCustomEnd(prev => prev ?? calculation.period?.endDate ?? attributableDates.at(-1) ?? null);
-  };
-
-  const pickEnd = (value: string) => {
-    setRange('CUSTOM');
-    setCustomEnd(value);
-    setCustomStart(prev => prev ?? calculation.period?.startDate ?? null);
-  };
 
   if (!portfolioId) {
     return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Disponibile sul singolo portafoglio</div>;
@@ -239,30 +211,32 @@ export function PerformanceAttributionChart({
   }
 
   const activeStart = calculation.period?.startDate ?? null;
-  const activeEnd = calculation.period?.endDate ?? null;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
-      {/* Riga 1 – preset rapidi + totale periodo */}
+      {/* Riga unica – selettore T0 (T1 è sempre l'ultima data disponibile) + totale periodo */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-1">
-          {(['1M', '3M', '6M', '1Y', '2Y', '3Y', 'YTD', 'MAX'] as const).map(preset => (
-            <button
-              key={preset}
-              type="button"
-              onClick={() => selectPreset(preset)}
-              className={cn(
-                'rounded px-2 py-1 text-[10px] font-medium transition-colors',
-                range === preset ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {preset === 'MAX' || preset === 'YTD' ? preset : preset.replace('Y', 'A')}
-            </button>
-          ))}
-          {range === 'CUSTOM' && (
-            <span className="rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground">Personalizzato</span>
-          )}
-        </div>
+        {attributableDates.length >= 2 ? (
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-muted-foreground">Da (T0)</span>
+            <Select value={activeStart ?? undefined} onValueChange={setSelectedStart}>
+              <SelectTrigger className="h-7 w-32 text-[11px]">
+                <SelectValue placeholder="T0" />
+              </SelectTrigger>
+              <SelectContent>
+                {attributableDates.slice(0, -1).map(date => (
+                  <SelectItem key={date} value={date} className="text-[11px]">
+                    {formatDate(date)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <label className="flex items-center gap-1.5 text-muted-foreground">
+              <Switch checked={hideInactive} onCheckedChange={setHideInactive} className="scale-75" />
+              Nascondi classi inattive
+            </label>
+          </div>
+        ) : <div />}
         {result && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Totale</span>
@@ -297,42 +271,6 @@ export function PerformanceAttributionChart({
           </div>
         )}
       </div>
-
-      {/* Riga 2 – selettori espliciti T0 / T1 + toggle classi inattive */}
-      {attributableDates.length >= 2 && (
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <span className="text-muted-foreground">Da (T0)</span>
-          <Select value={activeStart ?? undefined} onValueChange={pickStart}>
-            <SelectTrigger className="h-7 w-32 text-[11px]">
-              <SelectValue placeholder="T0" />
-            </SelectTrigger>
-            <SelectContent>
-              {attributableDates.slice(0, -1).map(date => (
-                <SelectItem key={date} value={date} disabled={activeEnd != null && date >= activeEnd} className="text-[11px]">
-                  {formatDate(date)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-muted-foreground">A (T1)</span>
-          <Select value={activeEnd ?? undefined} onValueChange={pickEnd}>
-            <SelectTrigger className="h-7 w-32 text-[11px]">
-              <SelectValue placeholder="T1" />
-            </SelectTrigger>
-            <SelectContent>
-              {attributableDates.slice(1).map(date => (
-                <SelectItem key={date} value={date} disabled={activeStart != null && date <= activeStart} className="text-[11px]">
-                  {formatDate(date)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <label className="ml-auto flex items-center gap-1.5 text-muted-foreground">
-            <Switch checked={hideInactive} onCheckedChange={setHideInactive} className="scale-75" />
-            Nascondi classi inattive
-          </label>
-        </div>
-      )}
 
       {!result ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">

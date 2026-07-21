@@ -183,7 +183,7 @@ export function HistoricalChartsCarousel({
               </CarouselItem>
               {portfolioId && (
                 <CarouselItem>
-                  <div className="h-[300px]">
+                  <div className="h-[360px]">
                     <PerformanceAttributionChart
                       portfolioId={portfolioId}
                       historicalData={historicalData}
