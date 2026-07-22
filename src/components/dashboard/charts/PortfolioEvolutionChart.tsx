@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AreaChart,
   Area,
@@ -13,6 +13,45 @@ import { it } from 'date-fns/locale';
 import { HistoricalDataEntry } from '@/types/historicalData';
 import { ViewMode } from '@/components/dashboard/ViewModeSelector';
 import { formatCurrency } from '@/lib/formatters';
+import { cn } from '@/lib/utils';
+
+type TimeRange = '1M' | '3M' | '6M' | '1Y' | '2Y' | '3Y';
+
+const TIME_RANGES: { value: TimeRange; label: string }[] = [
+  { value: '1M', label: '1M' },
+  { value: '3M', label: '3M' },
+  { value: '6M', label: '6M' },
+  { value: '1Y', label: '1A' },
+  { value: '2Y', label: '2A' },
+  { value: '3Y', label: '3A' },
+];
+
+function getCutoffDate(timeRange: TimeRange, endDate: Date): Date {
+  const cutoffDate = new Date(endDate);
+
+  switch (timeRange) {
+    case '1M':
+      cutoffDate.setMonth(cutoffDate.getMonth() - 1);
+      break;
+    case '3M':
+      cutoffDate.setMonth(cutoffDate.getMonth() - 3);
+      break;
+    case '6M':
+      cutoffDate.setMonth(cutoffDate.getMonth() - 6);
+      break;
+    case '1Y':
+      cutoffDate.setFullYear(cutoffDate.getFullYear() - 1);
+      break;
+    case '2Y':
+      cutoffDate.setFullYear(cutoffDate.getFullYear() - 2);
+      break;
+    case '3Y':
+      cutoffDate.setFullYear(cutoffDate.getFullYear() - 3);
+      break;
+  }
+
+  return cutoffDate;
+}
 
 /**
  * Format large numbers for Y-axis labels (e.g., 2.1M, 814k)
@@ -110,6 +149,8 @@ export function PortfolioEvolutionChart({
   currentValue,
   currentDate,
 }: PortfolioEvolutionChartProps) {
+  const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
+
   // Latest saved snapshot date (used only to decide whether to append a new point)
   const latestSnapshotDate = useMemo(() => {
     if (historicalData.length === 0) return null;
@@ -155,11 +196,17 @@ export function PortfolioEvolutionChart({
     // Ensure chronological order as a safety measure
     data.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Anchor the selected window to the newest point actually shown. This keeps
+    // historical portfolios usable even when their last snapshot is not today.
+    const endDate = new Date(data[data.length - 1].timestamp);
+    const cutoffTimestamp = getCutoffDate(timeRange, endDate).getTime();
+    const filteredData = data.filter((point) => point.timestamp >= cutoffTimestamp);
+
     // Downsample for smoother curve
-    const currentIdx = data.findIndex(d => d.isCurrent);
+    const currentIdx = filteredData.findIndex(d => d.isCurrent);
     const preserve = currentIdx >= 0 ? new Set([currentIdx]) : undefined;
-    return downsampleData(data, 30, preserve);
-  }, [historicalData, viewMode, currentValue, currentDate, latestSnapshotDate]);
+    return downsampleData(filteredData, 30, preserve);
+  }, [historicalData, viewMode, currentValue, currentDate, latestSnapshotDate, timeRange]);
 
   if (chartData.length === 0) {
     return (
@@ -175,8 +222,30 @@ export function PortfolioEvolutionChart({
   const padding = (maxValue - minValue) * 0.1 || maxValue * 0.1;
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-end mb-2">
+        <div className="flex items-center gap-0.5 border border-border rounded-md overflow-hidden">
+          {TIME_RANGES.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTimeRange(value)}
+              aria-pressed={timeRange === value}
+              className={cn(
+                'px-2 py-0.5 text-xs transition-colors',
+                timeRange === value
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted text-foreground'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="portfolioGradient" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
@@ -240,7 +309,9 @@ export function PortfolioEvolutionChart({
           }}
           activeDot={{ r: 5, fill: 'hsl(var(--primary))' }}
         />
-      </AreaChart>
-    </ResponsiveContainer>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
