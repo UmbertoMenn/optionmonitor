@@ -111,10 +111,30 @@ export function selectDownsideRoll(
 }
 
 /**
- * Roll al rialzo su prima scadenza: strike più alto possibile con
- * strike > strike corrente, distanza ≥ minDistancePct dallo spot e
- * premio netto ≥ minNetPremiumPct sul nuovo nozionale.
+ * Roll di sopravvivenza a scadenza (fase post roll 4): stesso strike sulla
+ * scadenza indicata. Se lo strike corrente non è listato, si sceglie il più
+ * vicino; a parità di distanza, il minor debito (maggior credito netto). Non
+ * filtra sul premio: il roll si esegue anche a debito per rimandare.
  */
+export function selectSurvivalRoll(
+  chain: PutQuote[],
+  expiration: string,
+  currentQuote: PutQuote,
+  fills: FillEngine,
+): PutQuote | null {
+  const candidates = chain.filter((q) => q.expiration === expiration && isTradeable(q));
+  if (candidates.length === 0) return null;
+  const exact = candidates.find((q) => Math.abs(q.strike - currentQuote.strike) < 1e-9);
+  if (exact) return exact;
+  const closeCost = fills.buyFill(currentQuote);
+  candidates.sort((a, b) => {
+    const da = Math.abs(a.strike - currentQuote.strike);
+    const db = Math.abs(b.strike - currentQuote.strike);
+    if (Math.abs(da - db) > 1e-9) return da - db;
+    return fills.sellFill(b) - closeCost - (fills.sellFill(a) - closeCost);
+  });
+  return candidates[0];
+}
 export function selectUpsideRollFront(
   chain: PutQuote[],
   expiration: string,

@@ -113,6 +113,7 @@ export type ShortPutEventType =
   | 'roll_up'
   | 'roll_to_front'
   | 'time_roll'
+  | 'survival_roll'
   | 'max_rolls_reached'
   | 'expired_otm'
   | 'assignment';
@@ -163,6 +164,7 @@ export interface ShortPutSymbolSummary {
   rollsUp: number;
   rollsToFront: number;
   timeRolls: number;
+  survivalRolls: number;
   assignments: number;
   expiredOtm: number;
 }

@@ -12,6 +12,7 @@ import {
   selectDownsideRoll,
   selectEntryStrike,
   selectRollToFront,
+  selectSurvivalRoll,
   selectUpsideRollFront,
 } from '@/lib/backtesting/shortPut/strikeSelection';
 import { runShortPutBacktest, validateShortPutConfig } from '@/lib/backtesting/shortPut/engine';
@@ -169,6 +170,55 @@ describe('motore end-to-end su dati sintetici', () => {
     ...over,
   });
 
+  it('dopo il roll 4, con sottostante piatto e ITM, esegue roll orizzontali ripetuti senza mai farsi assegnare', async () => {
+    const start = '2026-01-05';
+    const end = '2027-12-31';
+    const override = new Map<string, number>();
+    let price = 100;
+    let step = 0;
+    const provider0 = new SyntheticMarketDataProvider(new Map([['FLAT', params()]]), start, end);
+    const allDays = await provider0.getTradingDays('FLAT', start, '2028-12-31');
+    for (const day of allDays) {
+      override.set(day, price);
+      // Crollo veloce nei primi 30 giorni fino a ~55, poi piatto (resta ITM).
+      if (step < 30 && day <= end) price *= 0.985;
+      step += 1;
+    }
+
+    const config = baseConfig({
+      basket: [{ symbol: 'FLAT', contracts: 1 }],
+      startDate: start,
+      endDate: end,
+      downside: {
+        triggerDistancePct: 0,
+        rolls: [
+          { netPremiumTargetPct: 1.5, netPremiumTolerancePct: 3 },
+          { netPremiumTargetPct: 1.5, netPremiumTolerancePct: 3 },
+          { netPremiumTargetPct: 1.5, netPremiumTolerancePct: 3 },
+          { netPremiumTargetPct: 1, netPremiumTolerancePct: 3 },
+        ],
+        maxMonthsForward: 12,
+      },
+    });
+    const provider = new SyntheticMarketDataProvider(
+      new Map([['FLAT', params()]]),
+      start,
+      end,
+      new Map([['FLAT', override]]),
+    );
+    const result = await runShortPutBacktest(config, provider, 'synthetic');
+
+    const survival = result.events.filter((e) => e.type === 'survival_roll');
+    expect(survival.length).toBeGreaterThanOrEqual(1);
+    for (const e of survival) {
+      expect(e.to!.strike).toBe(e.from!.strike); // orizzontale puro
+      expect(e.to!.expiration > (e.from!.expiration as string)).toBe(true);
+      expect(e.rollCount).toBeGreaterThanOrEqual(config.downside.rolls.length); // resta in fase sopravvivenza
+    }
+    // Nessuna assegnazione per scelta: ci sono sempre scadenze successive nei dati.
+    expect(result.bySymbol[0].assignments).toBe(0);
+  });
+
   it('valida la configurazione e rifiuta paniere vuoto o regole incomplete', () => {
     const bad = baseConfig({ basket: [] });
     expect(validateShortPutConfig(bad)).not.toHaveLength(0);
@@ -194,7 +244,7 @@ describe('motore end-to-end su dati sintetici', () => {
     expect(s.realizedPL).toBeCloseTo(s.netPremiums + s.assignmentPL - s.commissions, 6);
   });
 
-  it('in crollo verticale esegue i roll in discesa in sequenza e dopo il roll 4 accetta assegnazione', async () => {
+  it('in crollo verticale esegue i roll in discesa in sequenza e dopo il roll 4 rolla nel tempo senza assegnazione', async () => {
     // Percorso forzato: -1.2% al giorno per 6 mesi → trigger discesa ripetuti.
     const start = '2026-01-05';
     const end = '2026-07-31';
@@ -241,11 +291,33 @@ describe('motore end-to-end su dati sintetici', () => {
       expect(e.to!.strike).toBeLessThan(e.from!.strike as number);
       expect(e.to!.expiration > (e.from!.expiration as string)).toBe(true);
     }
-    // Dopo il 4° roll: max_rolls_reached e nessun 5° roll nello stesso ciclo.
+    // Dopo il 4° roll: max_rolls_reached e nessun 5° roll_down nello stesso ciclo.
     expect(result.events.some((e) => e.type === 'max_rolls_reached')).toBe(true);
-    const perdita = result.events.find((e) => e.type === 'assignment');
-    // In un crollo del genere l'assegnazione finale è attesa (se la scadenza cade nel periodo).
-    if (perdita) expect(perdita.cashFlow).toBeLessThan(0);
+    // Con l'opzione ITM a scadenza, dopo i roll gestiti si esegue il roll
+    // orizzontale (stesso strike, mensile successiva) invece dell'assegnazione.
+    const survival = result.events.filter((e) => e.type === 'survival_roll');
+    if (survival.length > 0) {
+      for (const e of survival) {
+        // In crollo continuo lo strike originale può uscire dagli strike listati:
+        // il roll orizzontale prende il più vicino, mai più alto del precedente.
+        expect(e.to!.strike).toBeLessThanOrEqual(e.from!.strike as number);
+        expect(e.to!.expiration > (e.from!.expiration as string)).toBe(true);
+      }
+    }
+    // L'assegnazione può comparire solo come fallback tecnico (fine dati), mai per scelta.
+    for (const e of result.events.filter((ev) => ev.type === 'assignment')) {
+      expect(e.description).toContain('Nessuna scadenza successiva');
+    }
+  });
+
+  it('roll di sopravvivenza: stesso strike se listato, altrimenti il più vicino', () => {
+    const current = q('2026-08-21', 90, 12, 12); // pseudo-quote a intrinseco
+    const chainExact = [q('2026-09-18', 85, 11), q('2026-09-18', 90, 12.4), q('2026-09-18', 95, 15)];
+    expect(selectSurvivalRoll(chainExact, '2026-09-18', current, NATURAL_FILLS)?.strike).toBe(90);
+    // Stesso strike non listato → il più vicino (87.5 e 92.5 equidistanti: minor debito, cioè bid più alto).
+    const chainMissing = [q('2026-09-18', 87.5, 11.9), q('2026-09-18', 92.5, 13.2)];
+    const picked = selectSurvivalRoll(chainMissing, '2026-09-18', current, NATURAL_FILLS);
+    expect([87.5, 92.5]).toContain(picked?.strike);
   });
 
   it('in forte rialzo esegue roll al rialzo mantenendo distanza minima dallo spot', async () => {

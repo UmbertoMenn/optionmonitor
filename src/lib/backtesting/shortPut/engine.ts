@@ -23,6 +23,7 @@ import {
   selectDownsideRoll,
   selectEntryStrike,
   selectRollToFront,
+  selectSurvivalRoll,
   selectUpsideRollFront,
 } from './strikeSelection';
 import {
@@ -62,6 +63,7 @@ function emptySummary(symbol: string, contracts: number): ShortPutSymbolSummary 
     rollsUp: 0,
     rollsToFront: 0,
     timeRolls: 0,
+    survivalRolls: 0,
     assignments: 0,
     expiredOtm: 0,
   };
@@ -149,6 +151,49 @@ export async function runShortPutBacktest(
       const contracts = state.contracts;
       const multiplier = SHARES_PER_CONTRACT * contracts;
 
+      // Esecuzione roll condivisa (intraday e a scadenza).
+      // - roll_down incrementa il contatore; survival_roll lo lascia invariato;
+      //   roll_up / roll_to_front / time_roll azzerano (ciclo pulito).
+      // - commissionLegs: 2 per i roll intraday (chiudo+apro), 1 a scadenza
+      //   (la vecchia gamba si estingue per settlement, non con un trade).
+      const performRoll = (
+        posArg: ShortPutOpenPosition,
+        currentQuoteArg: PutQuote,
+        newQuote: PutQuote,
+        type: 'roll_down' | 'roll_up' | 'roll_to_front' | 'time_roll' | 'survival_roll',
+        commissionLegs: number,
+      ) => {
+        const closeCost = fills.buyFill(currentQuoteArg) * multiplier;
+        const openCredit = fills.sellFill(newQuote) * multiplier;
+        const commissions = tradeCommission(contracts, commissionLegs);
+        cash += openCredit - closeCost - commissions;
+        state.summary.grossPremiums += openCredit;
+        state.summary.closeCosts += closeCost;
+        state.summary.netPremiums += openCredit - closeCost;
+        state.summary.commissions += commissions;
+        const netPct = netPremiumPct(fills.sellFill(newQuote), fills.buyFill(currentQuoteArg), newQuote.strike);
+        const nextRollCount =
+          type === 'roll_down' ? posArg.rollCount + 1 : type === 'survival_roll' ? posArg.rollCount : 0;
+        state.position = { ...posArg, strike: newQuote.strike, expiration: newQuote.expiration, rollCount: nextRollCount };
+        state.rollFailedLogged = false;
+        if (nextRollCount === 0) state.maxRollsLogged = false;
+        const verb =
+          type === 'survival_roll' ? 'Roll orizzontale' : type === 'roll_down' ? 'Roll discesa' : 'Roll';
+        pushEvent({
+          date,
+          symbol: state.symbol,
+          type,
+          description: `${verb} ${contracts}× PUT ${posArg.strike} scad. ${posArg.expiration} → ${newQuote.strike} scad. ${newQuote.expiration} (netto ${netPct.toFixed(2)}%)`,
+          spot,
+          cashFlow: openCredit - closeCost,
+          commissions,
+          rollCount: nextRollCount,
+          from: { strike: posArg.strike, expiration: posArg.expiration },
+          to: { strike: newQuote.strike, expiration: newQuote.expiration },
+          premiumPct: netPct,
+        });
+      };
+
       // 1) Scadenza: settlement alla chiusura dell'ultimo giorno di negoziazione ≤ scadenza.
       if (state.position) {
         const pos = state.position;
@@ -156,22 +201,7 @@ export async function runShortPutBacktest(
         const isSettlementDay =
           dte <= 0 || !hasTradingDayBetween(tradingDaysBySymbol.get(state.symbol)!, date, pos.expiration);
         if (isSettlementDay) {
-          if (spot < pos.strike) {
-            const loss = (pos.strike - spot) * multiplier;
-            cash -= loss;
-            state.summary.assignmentPL -= loss;
-            state.summary.assignments += 1;
-            pushEvent({
-              date,
-              symbol: state.symbol,
-              type: 'assignment',
-              description: `Assegnazione PUT ${pos.strike} scad. ${pos.expiration}: perdita intrinseca ${(pos.strike - spot).toFixed(2)} × ${multiplier}`,
-              spot,
-              cashFlow: -loss,
-              commissions: 0,
-              from: { strike: pos.strike, expiration: pos.expiration },
-            });
-          } else {
+          if (spot >= pos.strike) {
             state.summary.expiredOtm += 1;
             pushEvent({
               date,
@@ -183,11 +213,60 @@ export async function runShortPutBacktest(
               commissions: 0,
               from: { strike: pos.strike, expiration: pos.expiration },
             });
+            state.position = null;
+            state.maxRollsLogged = false;
+            state.rollFailedLogged = false;
+            continue;
           }
-          state.position = null;
-          state.maxRollsLogged = false;
-          state.rollFailedLogged = false;
-          continue; // rientro dal prossimo giorno di negoziazione
+
+          // ITM a scadenza: si rolla per non essere assegnati. A scadenza la
+          // vecchia gamba vale l'intrinseco (bid = ask = strike − spot).
+          const intrinsic = pos.strike - spot;
+          const settlementQuote: PutQuote = { expiration: pos.expiration, strike: pos.strike, bid: intrinsic, ask: intrinsic };
+          const laterExpiries = monthlyExpiriesFrom(date, 0, config.downside.maxMonthsForward).filter(
+            (e) => e > pos.expiration,
+          );
+          const settlementChain =
+            laterExpiries.length > 0 ? await provider.getPutChain(state.symbol, date, laterExpiries) : [];
+
+          let rolled: PutQuote | null = null;
+          let rollType: 'roll_down' | 'survival_roll' = 'survival_roll';
+          if (pos.rollCount < config.downside.rolls.length && laterExpiries.length > 0) {
+            // Ancora in fase gestita: preferisco il roll giù+avanti con premio target.
+            const rule = config.downside.rolls[pos.rollCount];
+            rolled = selectDownsideRoll(settlementChain, laterExpiries, settlementQuote, rule, fills);
+            if (rolled) rollType = 'roll_down';
+          }
+          if (!rolled && laterExpiries.length > 0) {
+            // Fase sopravvivenza (post roll 4, o roll gestito non disponibile):
+            // roll orizzontale stesso strike sulla mensile successiva, anche a debito.
+            rolled = selectSurvivalRoll(settlementChain, laterExpiries[0], settlementQuote, fills);
+            if (rolled) rollType = 'survival_roll';
+          }
+
+          if (rolled) {
+            performRoll(pos, settlementQuote, rolled, rollType, 1);
+          } else {
+            // Fallback tecnico: nessuna scadenza successiva nei dati → assegnazione.
+            const loss = intrinsic * multiplier;
+            cash -= loss;
+            state.summary.assignmentPL -= loss;
+            state.summary.assignments += 1;
+            pushEvent({
+              date,
+              symbol: state.symbol,
+              type: 'assignment',
+              description: `Nessuna scadenza successiva disponibile: assegnazione PUT ${pos.strike} scad. ${pos.expiration} (perdita ${intrinsic.toFixed(2)} × ${multiplier})`,
+              spot,
+              cashFlow: -loss,
+              commissions: 0,
+              from: { strike: pos.strike, expiration: pos.expiration },
+            });
+            state.position = null;
+            state.maxRollsLogged = false;
+            state.rollFailedLogged = false;
+          }
+          continue;
         }
       }
 
@@ -245,43 +324,6 @@ export async function runShortPutBacktest(
       const currentQuote = findQuote(chain, pos.expiration, pos.strike);
       if (!currentQuote) continue; // quote mancante: nessuna decisione senza dati
 
-      const executeRoll = (
-        newQuote: PutQuote,
-        type: 'roll_down' | 'roll_up' | 'roll_to_front' | 'time_roll',
-        resetRollCount: boolean,
-      ) => {
-        const closeCost = fills.buyFill(currentQuote) * multiplier;
-        const openCredit = fills.sellFill(newQuote) * multiplier;
-        const commissions = tradeCommission(contracts, 2);
-        cash += openCredit - closeCost - commissions;
-        state.summary.grossPremiums += openCredit;
-        state.summary.closeCosts += closeCost;
-        state.summary.netPremiums += openCredit - closeCost;
-        state.summary.commissions += commissions;
-        const netPct = netPremiumPct(fills.sellFill(newQuote), fills.buyFill(currentQuote), newQuote.strike);
-        const nextRollCount = type === 'roll_down' ? pos.rollCount + 1 : resetRollCount ? 0 : pos.rollCount;
-        state.position = {
-          ...pos,
-          strike: newQuote.strike,
-          expiration: newQuote.expiration,
-          rollCount: nextRollCount,
-        };
-        state.rollFailedLogged = false;
-        pushEvent({
-          date,
-          symbol: state.symbol,
-          type,
-          description: `Roll ${contracts}× PUT ${pos.strike} scad. ${pos.expiration} → ${newQuote.strike} scad. ${newQuote.expiration} (netto ${netPct.toFixed(2)}%)`,
-          spot,
-          cashFlow: openCredit - closeCost,
-          commissions,
-          rollCount: nextRollCount,
-          from: { strike: pos.strike, expiration: pos.expiration },
-          to: { strike: newQuote.strike, expiration: newQuote.expiration },
-          premiumPct: netPct,
-        });
-      };
-
       // 3) Trigger discesa.
       const downsideTriggered = spot <= pos.strike * (1 + config.downside.triggerDistancePct / 100);
       if (downsideTriggered) {
@@ -292,14 +334,14 @@ export async function runShortPutBacktest(
               date,
               symbol: state.symbol,
               type: 'max_rolls_reached',
-              description: `Roll ${config.downside.rolls.length} già eseguiti: si tiene fino a scadenza (assegnazione accettata)`,
+              description: `Roll ${config.downside.rolls.length} gestiti esauriti: si mantiene fino a scadenza, poi roll orizzontale a ogni scadenza finché OTM`,
               spot,
               cashFlow: 0,
               commissions: 0,
               rollCount: pos.rollCount,
             });
           }
-          // niente altra gestione: si tiene fino a scadenza
+          // Nessun roll intraday: la gestione avviene a scadenza (roll orizzontale).
           continue;
         }
         const rule = config.downside.rolls[pos.rollCount];
@@ -308,7 +350,7 @@ export async function runShortPutBacktest(
         );
         const rolled = selectDownsideRoll(chain, laterExpiries, currentQuote, rule, fills);
         if (rolled) {
-          executeRoll(rolled, 'roll_down', false);
+          performRoll(pos, currentQuote, rolled, 'roll_down', 2);
         } else if (!state.rollFailedLogged) {
           state.rollFailedLogged = true;
           pushEvent({
@@ -334,14 +376,14 @@ export async function runShortPutBacktest(
           const targetExpiry = daysBetween(date, pos.expiration) >= config.entry.minDte ? pos.expiration : front;
           const rolled = selectUpsideRollFront(chain, targetExpiry, spot, currentQuote, config.upside, fills);
           if (rolled) {
-            executeRoll(rolled, 'roll_up', true);
+            performRoll(pos, currentQuote, rolled, 'roll_up', 2);
             continue;
           }
         } else {
           // Scadenza successiva alla prima: rientro sulla front.
           const rolled = selectRollToFront(chain, front, spot, currentQuote, config.upside, fills);
           if (rolled) {
-            executeRoll(rolled, 'roll_to_front', true);
+            performRoll(pos, currentQuote, rolled, 'roll_to_front', 2);
             continue;
           }
         }
@@ -356,7 +398,7 @@ export async function runShortPutBacktest(
           if (quote) {
             const netPct = netPremiumPct(fills.sellFill(quote), fills.buyFill(currentQuote), quote.strike);
             if (netPct >= 0) {
-              executeRoll(quote, 'time_roll', true);
+              performRoll(pos, currentQuote, quote, 'time_roll', 2);
               continue;
             }
           }
@@ -387,6 +429,7 @@ export async function runShortPutBacktest(
     if (event.type === 'roll_up') summary.rollsUp += 1;
     if (event.type === 'roll_to_front') summary.rollsToFront += 1;
     if (event.type === 'time_roll') summary.timeRolls += 1;
+    if (event.type === 'survival_roll') summary.survivalRolls += 1;
   }
   for (const state of states.values()) {
     state.summary.realizedPL =

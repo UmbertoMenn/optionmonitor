@@ -40,7 +40,8 @@ const EVENT_LABELS: Record<ShortPutEvent['type'], string> = {
   roll_up: 'Roll rialzo',
   roll_to_front: 'Rientro prima scadenza',
   time_roll: 'Roll di scadenza',
-  max_rolls_reached: 'Roll esauriti',
+  survival_roll: 'Roll orizzontale',
+  max_rolls_reached: 'Roll gestiti esauriti',
   expired_otm: 'Scaduta OTM',
   assignment: 'Assegnazione',
 };
@@ -51,8 +52,9 @@ const EVENT_VARIANTS: Partial<Record<ShortPutEvent['type'], 'default' | 'seconda
   roll_up: 'secondary',
   roll_to_front: 'secondary',
   time_roll: 'outline',
+  survival_roll: 'secondary',
   assignment: 'destructive',
-  max_rolls_reached: 'destructive',
+  max_rolls_reached: 'outline',
   roll_down_failed: 'outline',
   entry_skipped: 'outline',
   expired_otm: 'outline',
@@ -395,6 +397,7 @@ export function ShortPutBacktestPanel() {
                     <th className="py-2 pr-3">Roll ↑</th>
                     <th className="py-2 pr-3">Rientri</th>
                     <th className="py-2 pr-3">Roll scad.</th>
+                    <th className="py-2 pr-3">Roll orizz.</th>
                     <th className="py-2 pr-3">Assegn.</th>
                     <th className="py-2 pr-3 text-right">Premi netti</th>
                     <th className="py-2 pr-3 text-right">P&L realizzato</th>
@@ -410,6 +413,7 @@ export function ShortPutBacktestPanel() {
                       <td className="py-2 pr-3">{s.rollsUp}</td>
                       <td className="py-2 pr-3">{s.rollsToFront}</td>
                       <td className="py-2 pr-3">{s.timeRolls}</td>
+                      <td className="py-2 pr-3">{s.survivalRolls}</td>
                       <td className="py-2 pr-3">{s.assignments}</td>
                       <td className="py-2 pr-3 text-right">{fmtEur(s.netPremiums)}</td>
                       <td className={`py-2 pr-3 text-right ${s.realizedPL >= 0 ? 'text-emerald-500' : 'text-destructive'}`}>{fmtEur(s.realizedPL)}</td>
