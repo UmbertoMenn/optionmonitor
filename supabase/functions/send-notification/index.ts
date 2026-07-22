@@ -36,6 +36,17 @@ interface Profile {
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 
+// HTML-escape user-controlled fields before interpolating into email HTML
+function esc(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Determine alert type label in Italian
 function getAlertTypeLabel(alertType: string): string {
   if (alertType.startsWith('distance_')) return 'Avviso di Distanza';
