@@ -149,7 +149,7 @@ export function PortfolioEvolutionChart({
   currentValue,
   currentDate,
 }: PortfolioEvolutionChartProps) {
-  const [timeRange, setTimeRange] = useState<TimeRange>('1Y');
+  const [timeRange, setTimeRange] = useState<TimeRange>('3M');
 
   // Latest saved snapshot date (used only to decide whether to append a new point)
   const latestSnapshotDate = useMemo(() => {
