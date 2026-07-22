@@ -17,7 +17,7 @@ import {
   getCanonicalKey 
 } from './derivativeStrategies';
 import { StrategyConfiguration, PositionSignature } from '@/hooks/useStrategyConfigurations';
-import { canonicalKeyForPosition, canonicalKeyForText, DynamicAliases } from '@/lib/tickerIdentity';
+import { canonicalKeyForPosition, canonicalKeyForText, getDisplayTickerForKey, DynamicAliases } from '@/lib/tickerIdentity';
 
 // ============ Types ============
 
@@ -193,7 +193,7 @@ export function computeMonitoring(
   dynamicAliases?: DynamicAliases,
 ): MonitoringResult {
   return {
-    uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, underlyingPrices, categories),
+    uncoveredCalls: computeUncoveredCalls(allPositions, stockPositions, categories, dynamicAliases),
     coveredCallsITM: computeCoveredCallsITM(categories, underlyingPrices),
     doubleDiagonalOOR: computeDDOOR(categories, underlyingPrices),
     ironCondorOOR: computeICOOR(categories, underlyingPrices),
@@ -212,8 +212,8 @@ export function computeMonitoring(
 function computeUncoveredCalls(
   allPositions: Position[],
   stockPositions: Position[],
-  underlyingPrices: Record<string, UnderlyingPrice>,
   categories: DerivativeCategories,
+  dynamicAliases?: DynamicAliases,
 ): MonitoringUncoveredCall[] {
   const balance = new Map<string, { owned: number; netSoldCalls: number; syntheticCovered: number; displayTicker: string }>();
 
@@ -223,10 +223,12 @@ function computeUncoveredCalls(
     }
   };
 
-  // Count shares
+  // Count shares — chiave canonica (stessa risoluzione della classificazione),
+  // così azione e call sullo stesso sottostante finiscono sulla stessa chiave
+  // anche per i titoli europei (es. Ferrari: azione RACE, call codice RAC).
   for (const stock of stockPositions) {
-    const { key, display } = resolveStockKey(stock, underlyingPrices);
-    ensure(key, display);
+    const key = canonicalKeyForPosition(stock, dynamicAliases);
+    ensure(key, getDisplayTickerForKey(key) || key);
     balance.get(key)!.owned += stock.quantity;
   }
 
@@ -243,9 +245,8 @@ function computeUncoveredCalls(
   // Count ALL sold and bought calls from raw derivative positions
   const derivatives = allPositions.filter(p => p.asset_type === 'derivative' && p.option_type === 'call');
   for (const d of derivatives) {
-    const underlyingText = d.underlying || d.description || '';
-    const key = resolveKey(underlyingText, underlyingPrices);
-    ensure(key);
+    const key = canonicalKeyForPosition(d, dynamicAliases);
+    ensure(key, getDisplayTickerForKey(key) || undefined);
     if (d.quantity < 0) {
       balance.get(key)!.netSoldCalls += Math.abs(d.quantity);
     } else if (!syntheticCallIds.has(d.id)) {
@@ -256,16 +257,14 @@ function computeUncoveredCalls(
   // Count synthetic covered contracts (deep ITM sold puts or bought calls acting as stock)
   for (const cc of categories.coveredCalls) {
     if (cc.isSynthetic) {
-      const underlyingKey = cc.option.underlying || '';
-      const key = resolveKey(underlyingKey, underlyingPrices);
+      const key = canonicalKeyForPosition(cc.option, dynamicAliases);
       ensure(key);
       balance.get(key)!.syntheticCovered += cc.contractsCovered;
     }
   }
   for (const dr of categories.deRiskingCoveredCalls) {
     if (dr.isSynthetic) {
-      const underlyingKey = dr.coveredCall.option.underlying || '';
-      const key = resolveKey(underlyingKey, underlyingPrices);
+      const key = canonicalKeyForPosition(dr.coveredCall.option, dynamicAliases);
       ensure(key);
       balance.get(key)!.syntheticCovered += dr.coveredCall.contractsCovered;
     }
