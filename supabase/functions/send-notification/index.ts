@@ -5,8 +5,46 @@ import { Resend } from "npm:resend@2.0.0";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-cron-secret",
 };
+
+// --- Autenticazione cron -------------------------------------------------
+// Il segreto condiviso vive nel Vault del database (vault.decrypted_secrets,
+// name = 'cron_secret'): e' la stessa sorgente usata dai job pg_cron e dal
+// trigger notify_on_new_alert. Validarlo tramite la RPC `verify_cron_secret`
+// mantiene una singola fonte di verita'. Affidarsi alla sola env var
+// CRON_SECRET faceva rispondere 401 a ogni chiamata cron quando la env var
+// non era configurata (incidente del 2026-07-22: prezzi fermi).
+async function isAuthorizedCronRequest(req: Request): Promise<boolean> {
+  const provided = req.headers.get("x-cron-secret");
+  if (!provided) return false;
+
+  const envSecret = Deno.env.get("CRON_SECRET");
+  if (envSecret && provided === envSecret) return true;
+
+  try {
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+    const { data, error } = await admin.rpc("verify_cron_secret", { p_secret: provided });
+    if (error) {
+      console.error("verify_cron_secret RPC failed:", error.message);
+      return false;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("verify_cron_secret RPC threw:", e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
+function unauthorizedCronResponse(): Response {
+  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    status: 401,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
 
 interface AlertPayload {
   alert_id: string;
@@ -291,12 +329,8 @@ serve(async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const cronSecret = Deno.env.get("CRON_SECRET");
-  if (!cronSecret || req.headers.get("x-cron-secret") !== cronSecret) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+  if (!(await isAuthorizedCronRequest(req))) {
+    return unauthorizedCronResponse();
   }
 
   try {
