@@ -48,6 +48,12 @@ interface SymbolState {
   entrySkippedLogged: boolean;
   /** Ultimo mid per azione della put in posizione (carry-forward per il MTM). */
   lastMarkPerShare: number | null;
+  /**
+   * Scadenza generata da un roll orizzontale anticipato (time value < spread):
+   * su quella scadenza non si anticipa una seconda volta, altrimenti con put
+   * deep ITM (time value stabilmente < spread) si rollerebbe ogni giorno.
+   */
+  anticipatedRollExpiration: string | null;
   summary: ShortPutSymbolSummary;
 }
 
@@ -98,6 +104,7 @@ export function validateShortPutConfig(config: ShortPutConfig): string[] {
   if (config.downside.maxMonthsForward < 1 || config.downside.maxMonthsForward > 24) errors.push('Cap mesi roll non valido (1-24).');
   if (config.upside.triggerDistancePct <= 0) errors.push('Soglia trigger salita non valida.');
   if (config.upside.minDistancePct < 0 || config.upside.minDistancePct >= 100) errors.push('Distanza minima salita non valida.');
+  if (config.upside.minRecoveryAbovePct < 0) errors.push('Soglia recupero minimo non valida.');
   if (config.execution.commissionPerContract < 0) errors.push('Commissione non valida.');
   return errors;
 }
@@ -124,6 +131,7 @@ export async function runShortPutBacktest(
       rollFailedLogged: false,
       entrySkippedLogged: false,
       lastMarkPerShare: null,
+      anticipatedRollExpiration: null,
       summary: emptySummary(symbol, item.contracts),
     });
   }
@@ -179,7 +187,18 @@ export async function runShortPutBacktest(
         const netPct = netPremiumPct(fills.sellFill(newQuote), fills.buyFill(currentQuoteArg), newQuote.strike);
         const nextRollCount =
           type === 'roll_down' ? posArg.rollCount + 1 : type === 'survival_roll' ? posArg.rollCount : 0;
-        state.position = { ...posArg, strike: newQuote.strike, expiration: newQuote.expiration, rollCount: nextRollCount };
+        // Riferimento di recupero per il gate al rialzo: fissato allo spot del
+        // roll in discesa, mantenuto nei roll di sopravvivenza, azzerato quando
+        // il ciclo riparte pulito (roll_up / roll_to_front / time_roll).
+        const spotAtLastRollDown =
+          type === 'roll_down' ? spot : type === 'survival_roll' ? posArg.spotAtLastRollDown : undefined;
+        state.position = {
+          ...posArg,
+          strike: newQuote.strike,
+          expiration: newQuote.expiration,
+          rollCount: nextRollCount,
+          spotAtLastRollDown,
+        };
         state.rollFailedLogged = false;
         if (nextRollCount === 0) state.maxRollsLogged = false;
         const verb =
@@ -226,6 +245,7 @@ export async function runShortPutBacktest(
             });
             state.position = null;
             state.lastMarkPerShare = null;
+            state.anticipatedRollExpiration = null;
             state.maxRollsLogged = false;
             state.rollFailedLogged = false;
             continue;
@@ -246,7 +266,7 @@ export async function runShortPutBacktest(
           if (pos.rollCount < config.downside.rolls.length && laterExpiries.length > 0) {
             // Ancora in fase gestita: preferisco il roll giù+avanti con premio target.
             const rule = config.downside.rolls[pos.rollCount];
-            rolled = selectDownsideRoll(settlementChain, laterExpiries, settlementQuote, rule, fills);
+            rolled = selectDownsideRoll(settlementChain, laterExpiries, settlementQuote, spot, rule, fills);
             if (rolled) rollType = 'roll_down';
           }
           if (!rolled && laterExpiries.length > 0) {
@@ -258,6 +278,7 @@ export async function runShortPutBacktest(
 
           if (rolled) {
             performRoll(pos, settlementQuote, rolled, rollType, 1);
+            state.anticipatedRollExpiration = null;
           } else {
             // Fallback tecnico: nessuna scadenza successiva nei dati → assegnazione.
             const loss = intrinsic * multiplier;
@@ -276,6 +297,7 @@ export async function runShortPutBacktest(
             });
             state.position = null;
             state.lastMarkPerShare = null;
+            state.anticipatedRollExpiration = null;
             state.maxRollsLogged = false;
             state.rollFailedLogged = false;
           }
@@ -344,37 +366,61 @@ export async function runShortPutBacktest(
       // 3) Trigger discesa.
       const downsideTriggered = spot <= pos.strike * (1 + config.downside.triggerDistancePct / 100);
       if (downsideTriggered) {
-        if (pos.rollCount >= config.downside.rolls.length) {
-          if (!state.maxRollsLogged) {
-            state.maxRollsLogged = true;
-            pushEvent({
-              date,
-              symbol: state.symbol,
-              type: 'max_rolls_reached',
-              description: `Roll ${config.downside.rolls.length} gestiti esauriti: si mantiene fino a scadenza, poi roll orizzontale a ogni scadenza finché OTM`,
-              spot,
-              cashFlow: 0,
-              commissions: 0,
-              rollCount: pos.rollCount,
-            });
-          }
-          // Nessun roll intraday: la gestione avviene a scadenza (roll orizzontale).
-          continue;
-        }
-        const rule = config.downside.rolls[pos.rollCount];
         const laterExpiries = monthlyExpiriesFrom(date, 0, config.downside.maxMonthsForward).filter(
           (e) => e > pos.expiration,
         );
-        const rolled = selectDownsideRoll(chain, laterExpiries, currentQuote, rule, fills);
-        if (rolled) {
-          performRoll(pos, currentQuote, rolled, 'roll_down', 2);
-        } else if (!state.rollFailedLogged) {
+
+        // 3a) Roll gestito (1..4): strike più basso, OTM, premio netto in tolleranza.
+        if (pos.rollCount < config.downside.rolls.length) {
+          const rule = config.downside.rolls[pos.rollCount];
+          const rolled = selectDownsideRoll(chain, laterExpiries, currentQuote, spot, rule, fills);
+          if (rolled) {
+            performRoll(pos, currentQuote, rolled, 'roll_down', 2);
+            state.anticipatedRollExpiration = null;
+            continue;
+          }
+        } else if (!state.maxRollsLogged) {
+          state.maxRollsLogged = true;
+          pushEvent({
+            date,
+            symbol: state.symbol,
+            type: 'max_rolls_reached',
+            description: `Roll ${config.downside.rolls.length} gestiti esauriti: roll orizzontale a ogni scadenza (o anticipato se time value < spread) finché OTM`,
+            spot,
+            cashFlow: 0,
+            commissions: 0,
+            rollCount: pos.rollCount,
+          });
+        }
+
+        // 3b) Rischio assegnazione anticipata (opzioni americane): se ITM e il
+        // time value è sceso sotto lo spread, si anticipa il roll orizzontale
+        // sulla mensile successiva senza aspettare la scadenza. Al massimo un
+        // anticipo per scadenza: con put deep ITM la condizione resta vera anche
+        // dopo il roll e si rollerebbe ogni giorno.
+        if (spot < pos.strike && laterExpiries.length > 0 && pos.expiration !== state.anticipatedRollExpiration) {
+          const mid = (currentQuote.bid + currentQuote.ask) / 2;
+          const timeValue = mid - (pos.strike - spot);
+          const spread = currentQuote.ask - currentQuote.bid;
+          if (timeValue < spread) {
+            const rolled = selectSurvivalRoll(chain, laterExpiries[0], currentQuote, fills);
+            if (rolled) {
+              performRoll(pos, currentQuote, rolled, 'survival_roll', 2);
+              state.anticipatedRollExpiration = rolled.expiration;
+              continue;
+            }
+          }
+        }
+
+        // 3c) Trigger attivo ma nessun roll eseguibile: log una volta, riprovo ai prossimi close.
+        if (pos.rollCount < config.downside.rolls.length && !state.rollFailedLogged) {
+          const rule = config.downside.rolls[pos.rollCount];
           state.rollFailedLogged = true;
           pushEvent({
             date,
             symbol: state.symbol,
             type: 'roll_down_failed',
-            description: `Trigger discesa attivo ma nessuno strike con premio netto ${rule.netPremiumTargetPct}±${rule.netPremiumTolerancePct}% entro ${config.downside.maxMonthsForward} mesi: riprovo ai prossimi close`,
+            description: `Trigger discesa attivo ma nessuno strike OTM con premio netto ${rule.netPremiumTargetPct}±${rule.netPremiumTolerancePct}% entro ${config.downside.maxMonthsForward} mesi: riprovo ai prossimi close`,
             spot,
             cashFlow: 0,
             commissions: 0,
@@ -384,9 +430,15 @@ export async function runShortPutBacktest(
         continue;
       }
 
-      // 4) Trigger salita.
+      // 4) Trigger salita — attivo solo su vero recupero: se nel ciclo c'è
+      // stato un roll in discesa, lo spot deve superare il livello che aveva
+      // in quel momento (gate anti ping-pong: il roll giù sceglie strike
+      // lontani e la sola distanza spot-strike scatterebbe subito).
       const upsideDistance = ((spot - pos.strike) / spot) * 100;
-      if (upsideDistance >= config.upside.triggerDistancePct) {
+      const recoveryRef = pos.spotAtLastRollDown;
+      const recoveryOk =
+        recoveryRef == null || spot > recoveryRef * (1 + config.upside.minRecoveryAbovePct / 100);
+      if (upsideDistance >= config.upside.triggerDistancePct && recoveryOk) {
         const front = frontMonthlyExpiry(date, config.entry.minDte);
         if (pos.expiration <= front) {
           // Prima scadenza: roll al rialzo (stessa scadenza se ha ancora DTE sufficienti, altrimenti la front).

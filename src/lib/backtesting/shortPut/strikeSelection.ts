@@ -85,21 +85,23 @@ export function selectEntryStrike(
 
 /**
  * Roll in discesa: scadenze mensili successive a quella corrente (ordine dato,
- * dalla più vicina), strike più basso del corrente, premio netto in
- * target ± tolleranza sul nuovo nozionale. Sulla prima scadenza che offre
- * candidati validi si sceglie lo strike più basso (più difensivo).
+ * dalla più vicina), strike più basso del corrente e OTM (strike < spot),
+ * premio netto in target ± tolleranza sul nuovo nozionale. Sulla prima
+ * scadenza che offre candidati validi si sceglie lo strike più basso.
  */
 export function selectDownsideRoll(
   chain: PutQuote[],
   orderedExpirations: string[],
   currentQuote: PutQuote,
+  spot: number,
   rule: { netPremiumTargetPct: number; netPremiumTolerancePct: number },
   fills: FillEngine,
 ): PutQuote | null {
   const closeCost = fills.buyFill(currentQuote);
+  const maxStrike = Math.min(currentQuote.strike, spot);
   for (const expiration of orderedExpirations) {
     const eligible = chain
-      .filter((q) => q.expiration === expiration && q.strike < currentQuote.strike && isTradeable(q))
+      .filter((q) => q.expiration === expiration && q.strike < maxStrike && isTradeable(q))
       .map((q) => ({ q, pct: netPremiumPct(fills.sellFill(q), closeCost, q.strike) }))
       .filter(({ pct }) => Math.abs(pct - rule.netPremiumTargetPct) <= rule.netPremiumTolerancePct);
     if (eligible.length > 0) {

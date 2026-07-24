@@ -72,6 +72,11 @@ export interface ShortPutConfig {
   upside: {
     /** Trigger: (spot − strike) / spot × 100 ≥ triggerDistancePct. */
     triggerDistancePct: number;
+    /**
+     * Gate anti ping-pong: dopo un roll in discesa, la gestione al rialzo si
+     * attiva solo se spot > spot_all'ultimo_roll × (1 + minRecoveryAbovePct/100).
+     */
+    minRecoveryAbovePct: number;
     /** Distanza minima del nuovo strike: strike ≤ spot × (1 − minDistancePct/100). */
     minDistancePct: number;
     /** Roll al rialzo su prima scadenza: premio netto ≥ questa % del nuovo nozionale. */
@@ -142,6 +147,11 @@ export interface ShortPutOpenPosition {
   /** Numero di roll in discesa già eseguiti nel ciclo corrente. */
   rollCount: number;
   openDate: string;
+  /**
+   * Spot al momento dell'ultimo roll in discesa del ciclo: la gestione al
+   * rialzo si attiva solo se lo spot supera questo livello (vero recupero).
+   */
+  spotAtLastRollDown?: number;
 }
 
 export interface ShortPutEquityPoint {
@@ -211,6 +221,7 @@ export const DEFAULT_SHORT_PUT_CONFIG: ShortPutConfig = {
   },
   upside: {
     triggerDistancePct: 8,
+    minRecoveryAbovePct: 0,
     minDistancePct: 5,
     minNetPremiumPct: 0.5,
     recoveryNetPremiumTargetPct: 2,

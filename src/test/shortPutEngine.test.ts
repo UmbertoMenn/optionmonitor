@@ -99,7 +99,7 @@ describe('roll in discesa', () => {
       q('2026-09-18', 90, 6.2), // 1.33% → fuori tolleranza
       q('2026-10-16', 80, 6.7), // in tolleranza ma scadenza più lontana → non considerata
     ];
-    const rolled = selectDownsideRoll(chain, ['2026-09-18', '2026-10-16'], current, rule, NATURAL_FILLS);
+    const rolled = selectDownsideRoll(chain, ['2026-09-18', '2026-10-16'], current, 94, rule, NATURAL_FILLS);
     // 85 e 87.5 entrambi in tolleranza su settembre → sceglie 85 (più difensivo)
     expect(rolled?.strike).toBe(85);
     expect(rolled?.expiration).toBe('2026-09-18');
@@ -111,20 +111,31 @@ describe('roll in discesa', () => {
       q('2026-09-18', 90, 5.3), // 0.33% → no
       q('2026-10-16', 85, 6.8), // (6.8−5)/85 = 2.12% → sì
     ];
-    const rolled = selectDownsideRoll(chain, ['2026-09-18', '2026-10-16'], current, rule, NATURAL_FILLS);
+    const rolled = selectDownsideRoll(chain, ['2026-09-18', '2026-10-16'], current, 94, rule, NATURAL_FILLS);
     expect(rolled?.expiration).toBe('2026-10-16');
     expect(rolled?.strike).toBe(85);
   });
 
   it('esclude strike non inferiori al corrente e ritorna null se nulla è in tolleranza', () => {
     const chain = [current, q('2026-09-18', 95, 7.0), q('2026-09-18', 100, 9.0)];
-    expect(selectDownsideRoll(chain, ['2026-09-18'], current, rule, NATURAL_FILLS)).toBeNull();
+    expect(selectDownsideRoll(chain, ['2026-09-18'], current, 94, rule, NATURAL_FILLS)).toBeNull();
+  });
+
+  it('il nuovo strike deve essere OTM: uno strike ITM in tolleranza viene escluso (proof-of-rule)', () => {
+    // Spot 88: lo strike 90 centra il premio netto (2.11%) ma è ITM → escluso.
+    // Lo strike 85 è OTM ma fuori tolleranza (0.47%) → nessun roll.
+    const chain = [current, q('2026-09-18', 90, 6.9), q('2026-09-18', 85, 5.4)];
+    expect(selectDownsideRoll(chain, ['2026-09-18'], current, 88, rule, NATURAL_FILLS)).toBeNull();
+    // Con lo stesso spot, uno strike OTM in tolleranza viene invece scelto.
+    const chain2 = [current, q('2026-09-18', 90, 6.9), q('2026-09-18', 85, 6.7)];
+    expect(selectDownsideRoll(chain2, ['2026-09-18'], current, 88, rule, NATURAL_FILLS)?.strike).toBe(85);
   });
 });
 
 describe('roll al rialzo', () => {
   const upside = {
     triggerDistancePct: 8,
+    minRecoveryAbovePct: 0,
     minDistancePct: 5,
     minNetPremiumPct: 0.5,
     recoveryNetPremiumTargetPct: 2,
@@ -213,8 +224,15 @@ describe('motore end-to-end su dati sintetici', () => {
     for (const e of survival) {
       expect(e.to!.strike).toBe(e.from!.strike); // orizzontale puro
       expect(e.to!.expiration > (e.from!.expiration as string)).toBe(true);
-      expect(e.rollCount).toBeGreaterThanOrEqual(config.downside.rolls.length); // resta in fase sopravvivenza
     }
+    // Rischio assegnazione anticipata: almeno un roll orizzontale avviene PRIMA
+    // della scadenza (time value < spread), non solo al giorno di settlement.
+    expect(survival.some((e) => e.date < (e.from!.expiration as string))).toBe(true);
+    // La guardia limita l'anticipo a una volta per scadenza: mai due survival
+    // roll anticipati consecutivi sulla stessa scadenza di partenza.
+    const anticipated = survival.filter((e) => e.date < (e.from!.expiration as string));
+    const fromExps = anticipated.map((e) => e.from!.expiration as string);
+    expect(new Set(fromExps).size).toBe(fromExps.length);
     // Nessuna assegnazione per scelta: ci sono sempre scadenze successive nei dati.
     expect(result.bySymbol[0].assignments).toBe(0);
   });
@@ -331,6 +349,9 @@ describe('motore end-to-end su dati sintetici', () => {
     for (const e of result.events.filter((ev) => ev.type === 'assignment')) {
       expect(e.description).toContain('Nessuna scadenza successiva');
     }
+    // Gate anti ping-pong: in un declino monotono lo spot non supera mai il
+    // livello dell'ultimo roll in discesa → nessuna gestione al rialzo.
+    expect(result.events.some((e) => e.type === 'roll_up' || e.type === 'roll_to_front')).toBe(false);
   });
 
   it('roll di sopravvivenza: stesso strike se listato, altrimenti il più vicino', () => {
@@ -361,6 +382,7 @@ describe('motore end-to-end su dati sintetici', () => {
       endDate: end,
       upside: {
         triggerDistancePct: 8,
+        minRecoveryAbovePct: 0,
         minDistancePct: 5,
         minNetPremiumPct: 0.1,
         recoveryNetPremiumTargetPct: 2,
@@ -387,6 +409,65 @@ describe('motore end-to-end su dati sintetici', () => {
     // In rialzo costante il P&L deve essere positivo (si incassano premi senza assegnazioni).
     expect(result.totalPL).toBeGreaterThan(0);
     expect(result.bySymbol[0].assignments).toBe(0);
+  });
+
+  it('gate di recupero: la gestione al rialzo scatta solo quando lo spot supera il livello dell\'ultimo roll in discesa', async () => {
+    const start = '2026-01-05';
+    const end = '2026-12-31';
+    const override = new Map<string, number>();
+    let price = 100;
+    let step = 0;
+    const provider0 = new SyntheticMarketDataProvider(new Map([['VSHAPE', params()]]), start, end);
+    const allDays = await provider0.getTradingDays('VSHAPE', start, '2027-12-31');
+    for (const day of allDays) {
+      override.set(day, price);
+      if (day <= end) {
+        // 40 giorni di crollo (-1%/g fino a ~67), poi rally (+0.8%/g).
+        price = step < 40 ? price * 0.99 : price * 1.008;
+      }
+      step += 1;
+    }
+
+    const config = baseConfig({
+      basket: [{ symbol: 'VSHAPE', contracts: 1 }],
+      startDate: start,
+      endDate: end,
+      downside: {
+        triggerDistancePct: 0,
+        rolls: [
+          { netPremiumTargetPct: 1.5, netPremiumTolerancePct: 2.5 },
+          { netPremiumTargetPct: 1.5, netPremiumTolerancePct: 2.5 },
+          { netPremiumTargetPct: 1.5, netPremiumTolerancePct: 2.5 },
+          { netPremiumTargetPct: 1, netPremiumTolerancePct: 2.5 },
+        ],
+        maxMonthsForward: 12,
+      },
+    });
+    const provider = new SyntheticMarketDataProvider(
+      new Map([['VSHAPE', params()]]),
+      start,
+      end,
+      new Map([['VSHAPE', override]]),
+    );
+    const result = await runShortPutBacktest(config, provider, 'synthetic');
+
+    // Il crollo produce roll in discesa; il rally produce gestione al rialzo.
+    const downs = result.events.filter((e) => e.type === 'roll_down');
+    expect(downs.length).toBeGreaterThan(0);
+
+    // Regola: ogni evento di rialzo deve avvenire con spot SOPRA il livello
+    // dell'ultimo roll in discesa che lo precede (vero recupero, no ping-pong).
+    let lastRollDownSpot: number | null = null;
+    for (const e of result.events) {
+      if (e.type === 'roll_down') lastRollDownSpot = e.spot;
+      if (e.type === 'roll_up' || e.type === 'roll_to_front' || e.type === 'time_roll') {
+        if ((e.type === 'roll_up' || e.type === 'roll_to_front') && lastRollDownSpot != null) {
+          expect(e.spot).toBeGreaterThan(lastRollDownSpot);
+        }
+        lastRollDownSpot = null; // ciclo azzerato
+      }
+      if (e.type === 'expired_otm' || e.type === 'assignment') lastRollDownSpot = null;
+    }
   });
 
   it('gestisce un paniere multi-titolo con cassa unica e posizioni indipendenti', async () => {

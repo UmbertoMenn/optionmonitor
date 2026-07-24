@@ -226,9 +226,10 @@ export function ShortPutBacktestPanel() {
             <CardTitle className="text-base">Gestione discesa — roll 1/2/3/4</CardTitle>
           </div>
           <CardDescription>
-            Trigger: spot ≤ strike × (1 + soglia%). Nuovo strike più basso, scadenza mensile successiva più vicina che centra il
-            premio netto target ± tolleranza sul nuovo nozionale; tra i candidati si sceglie lo strike più basso. Dopo il roll 4 si
-            tiene fino a scadenza (assegnazione accettata).
+            Trigger: spot ≤ strike × (1 + soglia%). Nuovo strike più basso e OTM, scadenza mensile successiva più vicina che centra
+            il premio netto target ± tolleranza sul nuovo nozionale; tra i candidati si sceglie lo strike più basso. Se ITM con time
+            value &lt; spread: roll orizzontale anticipato (max uno per scadenza). Esauriti i 4 roll: roll orizzontale a ogni
+            scadenza finché OTM.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -275,6 +276,10 @@ export function ShortPutBacktestPanel() {
           <div className="space-y-1.5">
             <Label>Soglia trigger %</Label>
             <Input type="number" min={0.5} step={0.5} value={config.upside.triggerDistancePct} onChange={(e) => setUpside('triggerDistancePct', num(e.target.value))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Recupero min. oltre spot ultimo roll ↓ %</Label>
+            <Input type="number" min={0} step={0.5} value={config.upside.minRecoveryAbovePct} onChange={(e) => setUpside('minRecoveryAbovePct', num(e.target.value))} />
           </div>
           <div className="space-y-1.5">
             <Label>Distanza minima strike %</Label>
