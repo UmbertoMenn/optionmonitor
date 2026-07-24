@@ -1851,6 +1851,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      stopgap_refresh_underlying_prices: { Args: never; Returns: undefined }
+      verify_cron_secret: { Args: { p_secret: string }; Returns: boolean }
     }
     Enums: {
       alert_severity: "info" | "warning" | "critical"
